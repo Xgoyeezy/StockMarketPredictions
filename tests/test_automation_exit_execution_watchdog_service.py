@@ -167,8 +167,14 @@ class AutomationExitExecutionWatchdogServiceTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "blocked")
         self.assertTrue(report["entries_blocked"])
+        self.assertTrue(report["manual_action_required"])
+        self.assertTrue(report["reconciliation_required"])
+        self.assertEqual(report["state_control_signal"], "de_risk")
         self.assertEqual(report["stuck_exit_count"], 1)
         self.assertIn("stuck", {item["key"] for item in report["blockers"]})
+        required_items = {item["key"] for item in report["manual_rescue_checklist"] if item["status"] == "required"}
+        self.assertIn("verify_broker_terminal_state", required_items)
+        self.assertIn("run_broker_local_reconciliation", required_items)
 
     def test_failed_exit_event_produces_halt_evidence(self) -> None:
         _, tenant = self._db()
@@ -182,6 +188,8 @@ class AutomationExitExecutionWatchdogServiceTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "halt")
         self.assertTrue(report["entries_blocked"])
+        self.assertTrue(report["manual_action_required"])
+        self.assertEqual(report["state_control_signal"], "halt")
         self.assertEqual(report["failed_exit_count"], 1)
         self.assertIn("exit_failed", {item["key"] for item in report["blockers"]})
 
@@ -244,6 +252,46 @@ class AutomationExitExecutionWatchdogServiceTests(unittest.TestCase):
         self.assertIn("loss-containment", notes[0]["tags"])
         self.assertIn("Exit evaluations", notes[0]["body"])
         self.assertEqual(audit_count, 1)
+
+    def test_manual_blocked_review_runs_read_only_reconciliation_and_writes_rescue_note(self) -> None:
+        db, tenant = self._db()
+        state = self._state(requested_at=FIXED_NOW - timedelta(seconds=75))
+        notes_patch, notes_path = self._patch_notes()
+
+        reconciliation_report = {
+            "status": "clean",
+            "checked_at": FIXED_NOW.isoformat(),
+            "broker_available": True,
+            "ledger_consistency": "consistent",
+            "related_note_id": "paper-recon-note",
+            "blockers": [],
+            "warnings": [],
+        }
+        with (
+            notes_patch,
+            patch.object(automation_exit_execution_watchdog_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+            patch.object(
+                automation_exit_execution_watchdog_service.automation_paper_broker_reconciliation_service,
+                "run_paper_broker_reconciliation",
+                return_value=reconciliation_report,
+            ) as reconciliation_mock,
+        ):
+            report = automation_exit_execution_watchdog_service.run_exit_watchdog_review(
+                db,
+                tenant=tenant,
+                state=state,
+                profile_key="personal_paper",
+                now=FIXED_NOW,
+            )
+            db.commit()
+            notes = json.loads(notes_path.read_text(encoding="utf-8"))
+
+        reconciliation_mock.assert_called_once()
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["escalation_reconciliation"]["status"], "clean")
+        self.assertTrue(report["manual_action_required"])
+        self.assertIn("Manual rescue checklist", notes[0]["body"])
+        self.assertIn("Escalation reconciliation", notes[0]["body"])
 
     def test_action_path_persists_snapshot_note_and_does_not_place_orders(self) -> None:
         db, tenant = self._db()

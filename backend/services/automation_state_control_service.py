@@ -821,7 +821,12 @@ def _score_components(evidence: dict[str, Any]) -> tuple[dict[str, float], list[
     return component_scores, signals[:STATE_CONTROL_SIGNAL_LIMIT], hard_faults, max(0.0, min(100.0, score))
 
 
-def _candidate_state(score: float, settings_state: dict[str, Any], hard_faults: list[dict[str, Any]]) -> str:
+def _candidate_state(
+    score: float,
+    settings_state: dict[str, Any],
+    hard_faults: list[dict[str, Any]],
+    signals: list[dict[str, Any]] | None = None,
+) -> str:
     control_settings = normalize_state_control_settings(settings_state)
     if hard_faults:
         return "halt"
@@ -829,12 +834,21 @@ def _candidate_state(score: float, settings_state: dict[str, Any], hard_faults: 
     derisk_score = float(control_settings["state_control_derisk_score"])
     watch_score = float(control_settings["state_control_watch_score"])
     if score < halt_score:
-        return "halt"
-    if score < derisk_score:
-        return "de_risk"
-    if score < watch_score:
-        return "watch"
-    return "healthy"
+        score_state = "halt"
+    elif score < derisk_score:
+        score_state = "de_risk"
+    elif score < watch_score:
+        score_state = "watch"
+    else:
+        score_state = "healthy"
+    signal_state = "healthy"
+    for item in list(signals or []):
+        severity = _normalize_state(str(item.get("severity") or "healthy"))
+        if STATE_SEVERITY.get(severity, 0) > STATE_SEVERITY.get(signal_state, 0):
+            signal_state = severity
+    if STATE_SEVERITY.get(signal_state, 0) > STATE_SEVERITY.get(score_state, 0):
+        return signal_state
+    return score_state
 
 
 def _transition_state(
@@ -1248,7 +1262,7 @@ def evaluate_trade_automation_state_control(
         now=now,
     )
     component_scores, triggered_signals, hard_faults, score = _score_components(evidence)
-    candidate = _candidate_state(score, settings_state, hard_faults)
+    candidate = _candidate_state(score, settings_state, hard_faults, triggered_signals)
     active_state, clean_cycles, transition = _transition_state(
         runtime=runtime,
         candidate=candidate,

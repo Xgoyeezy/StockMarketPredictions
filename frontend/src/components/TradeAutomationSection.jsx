@@ -644,6 +644,7 @@ export default function TradeAutomationSection({
     { label: 'Stuck exits', value: String(exitWatchdog.stuck_exit_count ?? 0), tone: Number(exitWatchdog.stuck_exit_count || 0) ? 'negative' : 'positive' },
     { label: 'Failed exits', value: String(exitWatchdog.failed_exit_count ?? 0), tone: Number(exitWatchdog.failed_exit_count || 0) ? 'negative' : 'positive' },
     { label: 'Worst delay', value: exitWatchdog.worst_delay_seconds == null ? '--' : `${Number(exitWatchdog.worst_delay_seconds).toFixed(0)}s`, tone: Number(exitWatchdog.worst_delay_seconds || 0) > Number(exitWatchdog.max_confirmation_seconds || form.exitWatchdogMaxConfirmationSeconds || 60) ? 'negative' : 'neutral' },
+    { label: 'Escalation', value: humanizeValue(exitWatchdog.escalation_status, 'Clear'), tone: exitWatchdog.manual_action_required ? 'negative' : exitWatchdog.escalation_status === 'watch' ? 'warning' : 'positive' },
     { label: 'Watchdog note', value: exitWatchdog.related_note_id ? 'Linked' : '--', tone: exitWatchdog.related_note_id ? 'positive' : 'neutral' },
   ]
   const exitWatchdogIssues = [
@@ -655,6 +656,8 @@ export default function TradeAutomationSection({
       : []),
   ]
   const exitWatchdogEvaluations = Array.isArray(exitWatchdog.exit_evaluations) ? exitWatchdog.exit_evaluations : []
+  const exitWatchdogRescueItems = Array.isArray(exitWatchdog.manual_rescue_checklist) ? exitWatchdog.manual_rescue_checklist : []
+  const exitWatchdogReconciliation = exitWatchdog.escalation_reconciliation || {}
   const lastCandidate = runtimeTelemetry.candidate
   const lastRejection = runtimeTelemetry.rejection
   const pathEvaluations = runtimeTelemetry.pathEvaluations
@@ -2649,7 +2652,7 @@ export default function TradeAutomationSection({
         </div>
       ) : null}
 
-      {(exitWatchdogEvaluations.length || exitWatchdogIssues.length) ? (
+      {(exitWatchdogEvaluations.length || exitWatchdogIssues.length || exitWatchdogRescueItems.length || exitWatchdogReconciliation.status) ? (
         <div className="table-shell">
           <table className="list-table">
             <caption>Exit execution watchdog</caption>
@@ -2689,6 +2692,30 @@ export default function TradeAutomationSection({
                   <td>{item.detail || 'Exit watchdog recorded this condition.'}</td>
                 </tr>
               ))}
+              {exitWatchdogRescueItems.slice(0, 8).map((item, index) => (
+                <tr key={`exit-watchdog-rescue:${item.key || index}`}>
+                  <td>Rescue</td>
+                  <td>--</td>
+                  <td>{humanizeValue(item.status, '--')}</td>
+                  <td>--</td>
+                  <td>{item.label ? `${item.label}: ${item.detail || ''}` : item.detail || 'Manual rescue item.'}</td>
+                </tr>
+              ))}
+              {exitWatchdogReconciliation.status ? (
+                <tr>
+                  <td>Reconcile</td>
+                  <td>--</td>
+                  <td>{humanizeValue(exitWatchdogReconciliation.status, '--')}</td>
+                  <td>--</td>
+                  <td>
+                    {[
+                      exitWatchdogReconciliation.broker_available === false ? 'Broker unavailable' : null,
+                      exitWatchdogReconciliation.ledger_consistency ? `Ledger ${humanizeValue(exitWatchdogReconciliation.ledger_consistency, '')}` : null,
+                      exitWatchdogReconciliation.related_note_id ? 'Reconciliation note linked' : null,
+                    ].filter(Boolean).join(' | ') || 'Broker/local reconciliation evidence attached.'}
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>

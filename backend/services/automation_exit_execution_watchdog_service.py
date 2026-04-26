@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend import stock_direction_model as sdm
 from backend.models.saas import DomainEventLog, OrderEventRecord, Tenant
-from backend.services import notes_service
+from backend.services import automation_paper_broker_reconciliation_service, notes_service
 from backend.services.audit_service import record_audit_event
 from backend.services.serialization import serialize_value
 
@@ -528,6 +528,31 @@ def build_exit_watchdog_report(
         label = "No defensive exits pending"
 
     worst_delay = max([float(item.get("elapsed_seconds") or 0.0) for item in evaluations] or [0.0])
+    if failed:
+        escalation_status = "manual_review_required"
+        state_control_signal = "halt"
+        escalation_reason = "One or more defensive exits has failed or blocked evidence."
+    elif stuck:
+        escalation_status = "manual_review_required"
+        state_control_signal = "de_risk"
+        escalation_reason = "One or more defensive exits lacks terminal proof after the confirmation window."
+    elif pending or partial:
+        escalation_status = "watch"
+        state_control_signal = "watch"
+        escalation_reason = "Defensive exits are still inside the confirmation window."
+    else:
+        escalation_status = "clear"
+        state_control_signal = "none"
+        escalation_reason = "No exit escalation is active."
+    manual_rescue_checklist = _build_manual_rescue_checklist(
+        status=status,
+        entries_blocked=bool(entries_blocked),
+        stuck=stuck,
+        failed=failed,
+        pending=pending,
+        partial=partial,
+        profile_key=normalized_profile_key,
+    )
     return serialize_value(
         {
             "status": status,
@@ -545,6 +570,15 @@ def build_exit_watchdog_report(
             "failed_exit_count": len(failed),
             "defensive_exit_count": len(defensive_actions),
             "worst_delay_seconds": round(float(worst_delay), 4),
+            "manual_action_required": escalation_status == "manual_review_required",
+            "reconciliation_required": bool(stuck or failed),
+            "escalation_status": escalation_status,
+            "escalation_reason": escalation_reason,
+            "state_control_signal": state_control_signal,
+            "manual_rescue_checklist": manual_rescue_checklist,
+            "required_operator_actions": [
+                item for item in manual_rescue_checklist if item.get("status") in {"required", "active"}
+            ],
             "max_confirmation_seconds": int(settings["exit_watchdog_max_confirmation_seconds"]),
             "max_partial_minutes": int(settings["exit_watchdog_max_partial_minutes"]),
             "exit_evaluations": evaluations[:20],
@@ -564,6 +598,10 @@ def build_exit_watchdog_report(
                 {
                     "field": "broker_close_path",
                     "reason": "Exit watchdog is evidence-only and does not create a new broker close path.",
+                },
+                {
+                    "field": "live_order_path",
+                    "reason": "Live exits remain advisory unless an existing approved live pilot or rollout path owns the position.",
                 }
             ],
         }
@@ -607,6 +645,51 @@ def _format_note_rows(items: list[dict[str, Any]], *, empty: str) -> list[str]:
     return rows
 
 
+def _build_manual_rescue_checklist(
+    *,
+    status: str,
+    entries_blocked: bool,
+    stuck: list[dict[str, Any]],
+    failed: list[dict[str, Any]],
+    pending: list[dict[str, Any]],
+    partial: list[dict[str, Any]],
+    profile_key: str,
+) -> list[dict[str, Any]]:
+    checklist = [
+        {
+            "key": "verify_broker_terminal_state",
+            "label": "Verify broker terminal state",
+            "status": "required" if stuck or failed else "not_required",
+            "detail": "Confirm the defensive exit is fully closed, canceled, rejected, or otherwise terminal at the broker.",
+        },
+        {
+            "key": "run_broker_local_reconciliation",
+            "label": "Run broker/local reconciliation",
+            "status": "required" if stuck or failed else "watch" if pending or partial else "not_required",
+            "detail": "Compare broker orders/fills/positions with local pending/open/closed trade evidence before allowing new risk.",
+        },
+        {
+            "key": "inspect_local_ledger",
+            "label": "Inspect local ledger",
+            "status": "required" if stuck or failed else "watch" if pending or partial else "not_required",
+            "detail": "Check pending orders, open trades, closed trades, and order events for missing terminal proof.",
+        },
+        {
+            "key": "keep_entries_blocked",
+            "label": "Keep new entries blocked",
+            "status": "active" if entries_blocked else "not_required",
+            "detail": "Do not add new risk until exit confirmation is clean.",
+        },
+        {
+            "key": "manual_live_review",
+            "label": "Manual live review",
+            "status": "required" if profile_key == EXIT_WATCHDOG_PERSONAL_LIVE_PROFILE and (stuck or failed) else "not_required",
+            "detail": "Live scope remains advisory unless an already-approved live pilot or rollout owns the position.",
+        },
+    ]
+    return checklist
+
+
 def _build_note_body(*, tenant: Tenant, profile_key: str, report: dict[str, Any]) -> str:
     lines = [
         f"Exit execution watchdog review for {getattr(tenant, 'name', None) or getattr(tenant, 'slug', '') or 'tenant'}",
@@ -621,6 +704,8 @@ def _build_note_body(*, tenant: Tenant, profile_key: str, report: dict[str, Any]
         f"- Failed exits: {int(report.get('failed_exit_count') or 0)}",
         f"- Worst delay: {float(report.get('worst_delay_seconds') or 0.0):.0f}s",
         f"- New entries blocked: {'yes' if report.get('entries_blocked') else 'no'}",
+        f"- Escalation: {report.get('escalation_status')}",
+        f"- State-control signal: {report.get('state_control_signal')}",
         "",
         "Exit evaluations",
     ]
@@ -631,6 +716,20 @@ def _build_note_body(*, tenant: Tenant, profile_key: str, report: dict[str, Any]
     if report.get("warnings"):
         lines.extend(["", "Warnings"])
         lines.extend(_format_note_rows(list(report.get("warnings") or []), empty="No warnings."))
+    if report.get("manual_rescue_checklist"):
+        lines.extend(["", "Manual rescue checklist"])
+        lines.extend(_format_note_rows(list(report.get("manual_rescue_checklist") or []), empty="No manual rescue items."))
+    if report.get("escalation_reconciliation"):
+        reconciliation = dict(report.get("escalation_reconciliation") or {})
+        lines.extend(
+            [
+                "",
+                "Escalation reconciliation",
+                f"- Status: {reconciliation.get('status')}",
+                f"- Broker available: {'yes' if reconciliation.get('broker_available') else 'no'}",
+                f"- Related note: {reconciliation.get('related_note_id') or 'none'}",
+            ]
+        )
     lines.extend(["", "Skipped changes"])
     lines.extend(_format_note_rows(list(report.get("skipped_changes") or []), empty="No skipped changes."))
     return "\n".join(lines).strip()
@@ -731,6 +830,58 @@ def _persist_report(
     return serialize_value(report)
 
 
+def _summarize_escalation_reconciliation(report: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(report, dict):
+        return {}
+    return serialize_value(
+        {
+            "status": report.get("status"),
+            "checked_at": report.get("checked_at"),
+            "broker_available": report.get("broker_available"),
+            "orphan_broker_order_count": report.get("orphan_broker_order_count"),
+            "orphan_local_order_count": report.get("orphan_local_order_count"),
+            "position_mismatch_count": report.get("position_mismatch_count"),
+            "fill_mismatch_count": report.get("fill_mismatch_count"),
+            "ledger_consistency": report.get("ledger_consistency"),
+            "related_note_id": report.get("related_note_id") or report.get("note_id"),
+            "blockers": list(report.get("blockers") or [])[:5],
+            "warnings": list(report.get("warnings") or [])[:5],
+        }
+    )
+
+
+def _run_escalation_reconciliation(
+    db: Session | None,
+    *,
+    tenant: Tenant,
+    state: dict[str, Any],
+    profile_key: str,
+    actor: Any = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    if profile_key != EXIT_WATCHDOG_PERSONAL_PAPER_PROFILE:
+        return {
+            "status": "skipped",
+            "reason": "Exit escalation reconciliation is paper-first in V1.",
+        }
+    try:
+        report = automation_paper_broker_reconciliation_service.run_paper_broker_reconciliation(
+            db,
+            tenant=tenant,
+            state=state,
+            profile_key=profile_key,
+            actor=actor,
+            now=now,
+            run_source="exit_watchdog_escalation",
+        )
+        return _summarize_escalation_reconciliation(report)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "reason": str(exc),
+        }
+
+
 def evaluate_exit_watchdog_entry_gate(
     db: Session | None,
     *,
@@ -793,6 +944,26 @@ def run_exit_watchdog_review(
         now=now,
         run_source=run_source,
     )
+    if report.get("reconciliation_required"):
+        reconciliation_summary = _run_escalation_reconciliation(
+            db,
+            tenant=tenant,
+            state=state,
+            profile_key=normalized_profile_key,
+            actor=actor,
+            now=now,
+        )
+        report["escalation_reconciliation"] = reconciliation_summary
+        if reconciliation_summary.get("status") in {"blocked", "error"}:
+            report.setdefault("blockers", [])
+            report["blockers"] = [
+                *list(report.get("blockers") or []),
+                {
+                    "key": "escalation_reconciliation",
+                    "detail": "Exit escalation reconciliation did not clear cleanly.",
+                    "status": reconciliation_summary.get("status"),
+                },
+            ][:20]
     return _persist_report(
         db,
         tenant=tenant,

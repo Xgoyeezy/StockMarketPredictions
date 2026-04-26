@@ -234,6 +234,48 @@ class AutomationStateControlServiceTests(unittest.TestCase):
         audit_types = [row.event_type for row in db.query(AuditEvent).all()]
         self.assertIn("trade_automation.state_halted", audit_types)
 
+    def test_exit_watchdog_block_feeds_derisk_signal_without_live_gate_mutation(self) -> None:
+        db, tenant = self._db()
+        state = self._state()
+        state["runtime"]["exit_watchdog_last_report"] = {
+            "status": "blocked",
+            "entries_blocked": True,
+            "pending_exit_count": 0,
+            "stuck_exit_count": 1,
+            "failed_exit_count": 0,
+            "manual_action_required": True,
+        }
+        before_settings = json.loads(json.dumps(state["settings"], sort_keys=True))
+        fixed_now = datetime(2026, 4, 24, 18, 30, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notes_path = Path(tmpdir) / "notes.json"
+            notes_path.write_text("[]", encoding="utf-8")
+            with (
+                patch.object(notes_service, "NOTES_PATH", notes_path),
+                patch.object(automation_state_control_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_open_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_pending_orders", return_value=pd.DataFrame()),
+                patch.object(
+                    automation_state_control_service.sdm,
+                    "journal_probability_calibration_summary",
+                    return_value={"resolved_count": 0, "average_error": None},
+                ),
+            ):
+                review = automation_state_control_service.evaluate_trade_automation_state_control(
+                    db,
+                    tenant=tenant,
+                    state=state,
+                    profile_key="personal_paper",
+                    now=fixed_now,
+                )
+
+        signals = {item.get("signal") for item in review.get("triggered_signals") or []}
+        self.assertIn("exit_watchdog_unconfirmed_exit", signals)
+        self.assertIn(review["state"], {"de_risk", "halt"})
+        self.assertEqual(state["settings"].get("broker_live_gate_open"), before_settings.get("broker_live_gate_open"))
+        self.assertEqual(state["settings"].get("enabled"), before_settings.get("enabled"))
+
 
 if __name__ == "__main__":
     unittest.main()
