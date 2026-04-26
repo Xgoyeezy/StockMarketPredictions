@@ -1,0 +1,16 @@
+.env
+.git
+.github
+.idea
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+backend/storage/*.csv
+backend/storage/*.json
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.vite-temp/
+node_modules/
+dist/
+*.zip

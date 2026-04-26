@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "institutional-trading-core"
+version = "0.1.0"
+description = "Paper-safe institutional multi-account U.S. equities trading control plane"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+[project.scripts]
+institutional-trading = "institutional_trading.cli:main"
+
+[tool.setuptools]
+packages = [
+    "institutional_trading",
+    "institutional_trading.accounts",
+    "institutional_trading.audit",
+    "institutional_trading.backtest",
+    "institutional_trading.config",
+    "institutional_trading.data",
+    "institutional_trading.execution",
+    "institutional_trading.risk",
+    "institutional_trading.security",
+    "institutional_trading.service",
+    "institutional_trading.strategies",
+]
+
+[tool.setuptools.package-dir]
+institutional_trading = "."

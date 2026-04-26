@@ -1,0 +1,97 @@
+service:
+  runtime_dir: runtime/institutional_trading
+  paper_safe_default: true
+  watchdog: {enabled: true, max_failed_checks: 3, heartbeat_interval_seconds: 1.0}
+broker:
+  primary: ibkr
+  live_trading_enabled: false
+  ibkr: {host: 127.0.0.1, port: 7497, client_id: 11}
+  paper: {enabled: true}
+market_data:
+  include_extended_hours: true
+  stale_after_seconds: 5
+  providers:
+    - {name: ibkr, enabled: false}
+    - {name: local_replay, enabled: true}
+    - {name: static_fallback, enabled: true}
+symbols:
+  allowlist: [AAPL, MSFT, SPY]
+  restricted: []
+  sessions:
+    pre_market: "04:00-09:30 America/New_York"
+    regular: "09:30-16:00 America/New_York"
+    after_hours: "16:00-20:00 America/New_York"
+allocation: {mode: proportional, residual_policy: largest_fraction_then_account_id}
+accounts:
+  - {account_id: CLIENT-A, display_name: Client A, allocation_weight: 0.60, fixed_quantity: 50, max_position_size: 500, max_daily_loss: 1000.0, restricted_symbols: []}
+  - {account_id: CLIENT-B, display_name: Client B, allocation_weight: 0.40, fixed_quantity: 50, max_position_size: 500, max_daily_loss: 1000.0, restricted_symbols: [SPY]}
+risk:
+  max_order_quantity: 1000
+  max_position_size: 2000
+  max_symbol_exposure: 5000
+  max_gross_exposure: 500000.0
+  max_daily_loss: 2500.0
+  max_drawdown: 5000.0
+  global_kill_switch_default: false
+session_profiles:
+  pre_market:
+    enabled: true
+    instruments: [equity]
+    order_type: limit
+    time_in_force: day_ext
+    risk_multiplier: 0.50
+    size_cap_ratio: 0.35
+    min_edge_to_cost_ratio: 4.0
+    max_spread_bps: 12.5
+    min_cooldown_minutes: 45
+    max_daily_entries: 2
+    allow_aggressive_averaging: false
+  regular:
+    enabled: true
+    instruments: [equity, listed_option]
+    order_type: limit
+    time_in_force: day
+    risk_multiplier: 1.0
+    size_cap_ratio: 1.0
+    min_edge_to_cost_ratio: 2.5
+    max_spread_bps: 25.0
+    min_cooldown_minutes: 20
+    max_daily_entries: null
+    allow_aggressive_averaging: false
+  after_hours:
+    enabled: true
+    instruments: [equity]
+    order_type: limit
+    time_in_force: day_ext
+    risk_multiplier: 0.35
+    size_cap_ratio: 0.25
+    min_edge_to_cost_ratio: 5.0
+    max_spread_bps: 10.0
+    min_cooldown_minutes: 60
+    max_daily_entries: 1
+    allow_aggressive_averaging: false
+  closed:
+    enabled: true
+    instruments: []
+    order_type: limit
+    time_in_force: day_ext
+    risk_multiplier: 0.0
+    size_cap_ratio: 0.0
+    min_edge_to_cost_ratio: 5.0
+    max_spread_bps: 10.0
+    min_cooldown_minutes: 60
+    max_daily_entries: 0
+    keep_monitoring: true
+    keep_reconciliation: true
+    allow_new_entries: false
+audit:
+  jsonl_path: runtime/institutional_trading/audit/events.jsonl
+  sqlite_index_path: runtime/institutional_trading/audit/events.sqlite3
+  hash_chain: true
+  per_account_logical_segmentation: true
+rbac:
+  roles:
+    viewer: [view, health, status]
+    operator: [view, health, status, start, stop, reconcile]
+    risk_manager: [view, health, status, kill, reconcile]
+    admin: [view, health, status, start, stop, kill, submit_order, reconcile]

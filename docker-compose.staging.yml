@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: stock-signals-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stocksignals_staging
+      POSTGRES_USER: stocksignals
+      POSTGRES_PASSWORD: stocksignals_staging
+    ports:
+      - "54329:5432"
+    volumes:
+      - staging-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocksignals -d stocksignals_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+volumes:
+  staging-postgres-data:

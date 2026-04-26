@@ -1,0 +1,21 @@
+symbols:
+  - symbol: AAPL
+    asset_class: equity
+    venue: XNAS
+    enabled: true
+    tick_size: 0.01
+  - symbol: MSFT
+    asset_class: equity
+    venue: XNAS
+    enabled: true
+    tick_size: 0.01
+  - symbol: SPY
+    asset_class: etf
+    venue: ARCA
+    enabled: true
+    tick_size: 0.01
+  - symbol: QQQ
+    asset_class: etf
+    venue: XNAS
+    enabled: true
+    tick_size: 0.01

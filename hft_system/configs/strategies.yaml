@@ -1,0 +1,17 @@
+market_making:
+  enabled: true
+  fair_value_sensitivity: 0.40
+  volatility_spread_multiplier: 0.80
+  inventory_skew_multiplier: 0.60
+  base_order_size: 100
+  stale_quote_ns: 1000000000
+  unstable_spread_bps: 40.0
+
+mean_reversion:
+  enabled: false
+  zscore_threshold: 1.5
+  max_holding_ns: 3000000000
+
+cross_venue_arbitrage:
+  enabled: false
+  edge_threshold_bps: 3.0

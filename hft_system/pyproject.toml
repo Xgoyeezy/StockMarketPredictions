@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hft-research-sim"
+version = "0.1.0"
+description = "Standalone high-frequency trading research and simulation system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2,<3",
+  "numpy>=1.26,<3",
+  "PyYAML>=6,<7",
+  "plotly>=5.24,<7",
+  "duckdb>=1.2,<2",
+  "pyarrow>=18,<20",
+]
+
+[project.scripts]
+hft-run-session = "hft.runtime.cli:run_session_main"
+hft-stop-session = "hft.runtime.cli:stop_session_main"
+hft-check-feed = "hft.runtime.cli:check_feed_main"
+hft-flatten-paper = "hft.runtime.cli:flatten_paper_main"
+hft-session-report = "hft.runtime.cli:session_report_main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hft*"]

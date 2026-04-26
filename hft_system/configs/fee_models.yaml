@@ -1,0 +1,4 @@
+default:
+  maker_rebate_per_share: 0.0015
+  taker_fee_per_share: 0.0030
+  cancel_cost_per_order: 0.0001

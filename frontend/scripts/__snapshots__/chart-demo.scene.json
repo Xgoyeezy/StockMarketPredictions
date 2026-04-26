@@ -1,0 +1,19 @@
+{
+  "sceneHash": "eb3d2e577e62763e426a4e98de2c127d4f075439ccce9a237ef8d4d9b42b8688",
+  "rootBox": {
+    "width": 1480,
+    "height": 1444.98
+  },
+  "svgBox": {
+    "width": 1444,
+    "height": 938.59
+  },
+  "nodeCounts": {
+    "paths": 7,
+    "rects": 411,
+    "lines": 162,
+    "texts": 38,
+    "circles": 9
+  },
+  "title": "Chart engine render proof"
+}

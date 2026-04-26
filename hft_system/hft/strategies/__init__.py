@@ -1,0 +1,2 @@
+"""HFT strategy plugins."""
+

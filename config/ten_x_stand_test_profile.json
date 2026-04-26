@@ -1,0 +1,23 @@
+{
+  "profile": "ten-x-stand-test-paper-only",
+  "purpose": "Validate whether the current strategy result can stand as a 10x account-value result from a 100000 starting account.",
+  "active_trading_profile": false,
+  "paper_only": true,
+  "starting_capital": 100000.0,
+  "target_multiple": 10.0,
+  "target_equity": 1000000.0,
+  "reference_path": {
+    "current_equity": 1900000.0,
+    "known_peak_equity": 1900000.0,
+    "known_drawdown_peak": 1800000.0,
+    "known_drawdown_trough": 1300000.0,
+    "known_max_drawdown_pct": 27.8
+  },
+  "required_tests": [
+    "current local records reach 10x",
+    "2x slippage still reaches 10x",
+    "next-bar 10 bps penalty still reaches 10x",
+    "max drawdown stays under 30% for aggressive paper profile",
+    "1x, 2x, and 3x cap scenarios show whether the edge is leverage-dependent"
+  ]
+}

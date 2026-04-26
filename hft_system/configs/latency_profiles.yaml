@@ -1,0 +1,30 @@
+profiles:
+  fixed_paper:
+    type: fixed
+    market_data_ns: 200000
+    strategy_compute_ns: 80000
+    order_submit_ns: 150000
+    exchange_ack_ns: 90000
+    cancel_ns: 120000
+    fill_ns: 50000
+  noisy_paper:
+    type: lognormal
+    seed: 7
+    market_data_ns:
+      mean_ns: 220000
+      sigma: 0.15
+    strategy_compute_ns:
+      mean_ns: 90000
+      sigma: 0.10
+    order_submit_ns:
+      mean_ns: 170000
+      sigma: 0.20
+    exchange_ack_ns:
+      mean_ns: 100000
+      sigma: 0.10
+    cancel_ns:
+      mean_ns: 140000
+      sigma: 0.20
+    fill_ns:
+      mean_ns: 60000
+      sigma: 0.10

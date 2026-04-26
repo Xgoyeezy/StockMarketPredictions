@@ -1,0 +1,21 @@
+global:
+  enabled: true
+  max_notional_exposure: 250000.0
+  max_outstanding_orders: 20
+  max_message_rate_per_second: 120
+  max_cancel_rate_per_second: 80
+  loss_threshold: 5000.0
+  stale_feed_ns: 2000000000
+  max_rejected_cancel_count: 5
+  max_fill_anomaly_score: 1.0
+  max_inventory_abs: 2000.0
+
+symbols:
+  default:
+    max_order_size: 500
+    max_inventory: 2000
+    max_quote_width: 0.25
+    min_quote_width: 0.01
+    market_state_enabled: true
+    max_runtime_spread: 0.50
+    max_short_term_volatility: 0.02
