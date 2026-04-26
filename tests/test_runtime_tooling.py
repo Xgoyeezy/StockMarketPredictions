@@ -13,6 +13,7 @@ from scripts.manage_api_runtime import (
     normalize_runtime_probe_host,
     runtime_name_for_env_file,
 )
+from scripts.backend_test_groups import unittest_names_for_group
 from scripts.print_staging_boot_command import main as print_staging_boot_command_main
 from scripts.validate_staging_env import validate_env
 
@@ -40,6 +41,12 @@ class RuntimeToolingTests(unittest.TestCase):
 """
         self.assertEqual(_parse_windows_netstat_pids(raw, 8000), [14248])
         self.assertEqual(_parse_windows_netstat_pids(raw, 5173), [9920])
+
+    def test_backend_group_runner_uses_discoverable_test_module_names(self) -> None:
+        names = unittest_names_for_group("ops-readiness")
+
+        self.assertTrue(names)
+        self.assertTrue(all(name.startswith("test_backend_behaviors.BackendBehaviorTests.") for name in names))
 
     def test_classify_readiness_surfaces_opra_entitlement_gap(self) -> None:
         result = classify_readiness(

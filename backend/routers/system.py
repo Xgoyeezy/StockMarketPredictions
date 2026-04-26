@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
+from threading import Lock, Thread
+from time import monotonic
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -34,6 +37,70 @@ from backend.services.ticker_hub_service import clear_recent_tickers, get_ticker
 from backend.services.workspace_service import delete_workspace, duplicate_workspace, export_workspaces, import_workspaces, list_workspaces, save_workspace, update_workspace
 
 router = APIRouter(tags=["system"])
+_READINESS_PROBE_CACHE_TTL_SECONDS = 10.0
+_readiness_probe_cache: dict[str, object] = {
+    "expires_at": 0.0,
+    "provider_id": None,
+    "snapshot": None,
+    "refreshing": False,
+}
+_readiness_probe_cache_lock = Lock()
+
+
+def _clear_readiness_probe_cache() -> None:
+    with _readiness_probe_cache_lock:
+        _readiness_probe_cache.update({"expires_at": 0.0, "provider_id": None, "snapshot": None, "refreshing": False})
+
+
+def _store_readiness_probe_snapshot(snapshot: dict, provider_id: int) -> None:
+    _readiness_probe_cache.update(
+        {
+            "expires_at": monotonic() + _READINESS_PROBE_CACHE_TTL_SECONDS,
+            "provider_id": provider_id,
+            "snapshot": deepcopy(snapshot),
+            "refreshing": False,
+        }
+    )
+
+
+def _refresh_readiness_probe_cache(provider_id: int) -> None:
+    try:
+        snapshot = get_production_readiness_snapshot()
+    except Exception:
+        with _readiness_probe_cache_lock:
+            _readiness_probe_cache["refreshing"] = False
+        return
+    with _readiness_probe_cache_lock:
+        if id(get_production_readiness_snapshot) == provider_id:
+            _store_readiness_probe_snapshot(snapshot, provider_id)
+        else:
+            _readiness_probe_cache["refreshing"] = False
+
+
+def _get_cached_readiness_snapshot() -> dict:
+    now = monotonic()
+    provider_id = id(get_production_readiness_snapshot)
+    start_refresh = False
+    with _readiness_probe_cache_lock:
+        cached_snapshot = _readiness_probe_cache.get("snapshot")
+        provider_matches = _readiness_probe_cache.get("provider_id") == provider_id
+        if isinstance(cached_snapshot, dict) and provider_matches:
+            if float(_readiness_probe_cache.get("expires_at") or 0.0) > now:
+                return deepcopy(cached_snapshot)
+            if not bool(_readiness_probe_cache.get("refreshing")):
+                _readiness_probe_cache["refreshing"] = True
+                start_refresh = True
+            stale_snapshot = deepcopy(cached_snapshot)
+        else:
+            stale_snapshot = None
+    if stale_snapshot is not None:
+        if start_refresh:
+            Thread(target=_refresh_readiness_probe_cache, args=(provider_id,), name="readiness-probe-refresh", daemon=True).start()
+        return stale_snapshot
+    snapshot = get_production_readiness_snapshot()
+    with _readiness_probe_cache_lock:
+        _store_readiness_probe_snapshot(snapshot, provider_id)
+    return snapshot
 
 
 def _probe_response(payload: dict[str, object], *, status_code: int = 200) -> JSONResponse:
@@ -110,7 +177,7 @@ def _emit_workspace_saved_event(
 @router.get("", response_model=ApiEnvelope)
 def api_root() -> ApiEnvelope:
     health_snapshot = get_health()
-    readiness_snapshot = get_production_readiness_snapshot()
+    readiness_snapshot = _get_cached_readiness_snapshot()
     readiness_summary = dict(readiness_snapshot.get("summary") or {})
     return envelope(
         {
@@ -136,7 +203,7 @@ def api_root() -> ApiEnvelope:
 @router.get("/health", response_model=ApiEnvelope)
 def health() -> ApiEnvelope:
     health_snapshot = get_health()
-    readiness_snapshot = get_production_readiness_snapshot()
+    readiness_snapshot = _get_cached_readiness_snapshot()
     return envelope(
         {
             **health_snapshot,
@@ -176,7 +243,7 @@ def healthz() -> JSONResponse:
 @router.get("/readyz", include_in_schema=False)
 def readyz() -> JSONResponse:
     try:
-        readiness_snapshot = get_production_readiness_snapshot()
+        readiness_snapshot = _get_cached_readiness_snapshot()
     except Exception as exc:  # pragma: no cover - defensive guard for deployment probes
         return _probe_response(
             {

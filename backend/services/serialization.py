@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pydantic import BaseModel
+
+_MAX_SERIALIZE_DEPTH = 80
 
 
 def serialize_dataframe(df: pd.DataFrame, limit: int | None = None) -> list[dict[str, Any]]:
@@ -22,14 +29,16 @@ def serialize_series(series: pd.Series) -> dict[str, Any]:
 
 
 def serialize_value(value: Any) -> Any:
+    return _serialize_value(value, set(), 0)
+
+
+def _serialize_value(value: Any, active_ids: set[int], depth: int) -> Any:
+    if depth > _MAX_SERIALIZE_DEPTH:
+        return None
     if value is None:
         return None
-    if isinstance(value, dict):
-        return {str(key): serialize_value(inner) for key, inner in value.items()}
-    if isinstance(value, list):
-        return [serialize_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [serialize_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
     if isinstance(value, pd.DataFrame):
         return serialize_dataframe(value)
     if isinstance(value, pd.Series):
@@ -38,6 +47,34 @@ def serialize_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, Enum):
+        return _serialize_value(value.value, active_ids, depth + 1)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, BaseModel):
+        return _serialize_value(value.model_dump(mode="json"), active_ids, depth + 1)
+    if isinstance(value, Mapping):
+        value_id = id(value)
+        if value_id in active_ids:
+            return None
+        active_ids.add(value_id)
+        try:
+            return {str(key): _serialize_value(inner, active_ids, depth + 1) for key, inner in value.items()}
+        finally:
+            active_ids.remove(value_id)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        value_id = id(value)
+        if value_id in active_ids:
+            return None
+        active_ids.add(value_id)
+        try:
+            return [_serialize_value(item, active_ids, depth + 1) for item in value]
+        finally:
+            active_ids.remove(value_id)
     try:
         if pd.isna(value):
             return None
@@ -45,7 +82,7 @@ def serialize_value(value: Any) -> Any:
         pass
     if hasattr(value, "item"):
         try:
-            return serialize_value(value.item())
+            return _serialize_value(value.item(), active_ids, depth + 1)
         except Exception:
             pass
-    return value
+    return str(value)

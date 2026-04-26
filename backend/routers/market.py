@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, WebSocket
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from backend.core.auth import CurrentUser, build_demo_user, get_current_user
@@ -40,6 +42,12 @@ from backend.services.tenant_service import _dispatch_partner_webhook_event, _re
 
 router = APIRouter(prefix="/market", tags=["market"])
 logger = logging.getLogger(__name__)
+_MARKET_SIGNAL_SQLITE_LOCK_RETRY_ATTEMPTS = 3
+_MARKET_SIGNAL_SQLITE_LOCK_RETRY_DELAY_SECONDS = 0.2
+
+
+def _is_sqlite_lock_error(exc: OperationalError) -> bool:
+    return "database is locked" in str(exc).lower()
 
 
 def _broker_execution_enabled(db: Session, current_user: CurrentUser) -> bool:
@@ -128,11 +136,24 @@ def _dispatch_market_signal_ready_event_with_db(db: Session, current_user: Curre
 
 
 def _dispatch_market_signal_ready_event(current_user: CurrentUser, event_payload: dict) -> None:
-    try:
-        with SessionLocal() as db:
-            _dispatch_market_signal_ready_event_with_db(db, current_user, event_payload)
-    except Exception:  # pragma: no cover - defensive logging for background delivery
-        logger.exception("Failed to dispatch market.signal_ready event in background.")
+    for attempt in range(1, _MARKET_SIGNAL_SQLITE_LOCK_RETRY_ATTEMPTS + 1):
+        try:
+            with SessionLocal() as db:
+                _dispatch_market_signal_ready_event_with_db(db, current_user, event_payload)
+            return
+        except OperationalError as exc:
+            if not _is_sqlite_lock_error(exc) or attempt >= _MARKET_SIGNAL_SQLITE_LOCK_RETRY_ATTEMPTS:
+                logger.exception("Failed to dispatch market.signal_ready event in background.")
+                return
+            logger.warning(
+                "Retrying market.signal_ready dispatch after SQLite lock (attempt %s/%s).",
+                attempt,
+                _MARKET_SIGNAL_SQLITE_LOCK_RETRY_ATTEMPTS,
+            )
+            time.sleep(_MARKET_SIGNAL_SQLITE_LOCK_RETRY_DELAY_SECONDS * attempt)
+        except Exception:  # pragma: no cover - defensive logging for background delivery
+            logger.exception("Failed to dispatch market.signal_ready event in background.")
+            return
 
 
 def _queue_market_signal_ready_event(

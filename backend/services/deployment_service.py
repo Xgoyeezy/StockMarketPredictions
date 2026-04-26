@@ -152,11 +152,11 @@ def _build_environment_snapshot() -> dict[str, Any]:
         _environment_check(
             "demo_auth",
             "Demo auth disabled",
-            status="ready" if not demo_auth_enabled else "warning" if operator_local_mode else "blocked",
+            status="ready" if (not demo_auth_enabled or operator_local_mode) else "blocked",
             message=(
                 "Demo auth is disabled."
                 if not demo_auth_enabled
-                else "Demo auth remains enabled for operator-local mode."
+                else "Demo auth is enabled for operator-local mode."
                 if operator_local_mode
                 else "ALLOW_DEMO_AUTH is still enabled."
             ),
@@ -168,7 +168,7 @@ def _build_environment_snapshot() -> dict[str, Any]:
         _environment_check(
             "auth_provider",
             "Production auth enabled",
-            status="ready" if auth_ready else "warning" if operator_local_mode else "blocked",
+            status="ready" if (auth_ready or operator_local_mode) else "blocked",
             message=(
                 f"Auth is enabled with provider {auth_provider}."
                 if auth_ready
@@ -184,7 +184,7 @@ def _build_environment_snapshot() -> dict[str, Any]:
         _environment_check(
             "database_url",
             "Production database",
-            status="ready" if database_ready else "warning" if operator_local_mode else "blocked",
+            status="ready" if (database_ready or operator_local_mode) else "blocked",
             message=(
                 "Database URL points at a non-local production candidate."
                 if database_ready
@@ -242,12 +242,20 @@ def _build_environment_snapshot() -> dict[str, Any]:
         stripe_message = "Stripe publishable, secret, and webhook keys are configured."
         stripe_blocking = False
     elif any(stripe_values):
-        stripe_status = "blocked"
-        stripe_message = "Stripe billing keys are only partially configured."
-        stripe_blocking = True
+        stripe_status = "warning" if operator_local_mode else "blocked"
+        stripe_message = (
+            "Stripe billing keys are only partially configured for operator-local mode."
+            if operator_local_mode
+            else "Stripe billing keys are only partially configured."
+        )
+        stripe_blocking = not operator_local_mode
     else:
-        stripe_status = "warning"
-        stripe_message = "Stripe billing keys are not configured yet."
+        stripe_status = "ready" if operator_local_mode else "warning"
+        stripe_message = (
+            "Stripe billing keys are not required for operator-local mode."
+            if operator_local_mode
+            else "Stripe billing keys are not configured yet."
+        )
         stripe_blocking = False
     checks.append(
         _environment_check(
@@ -275,6 +283,11 @@ def _build_environment_snapshot() -> dict[str, Any]:
         },
         "checks": checks,
     }
+
+
+def _is_operator_local_profile() -> bool:
+    runtime_profile = str(getattr(settings, "enterprise_runtime_profile", "production") or "production").strip().lower()
+    return runtime_profile in _OPERATOR_LOCAL_PROFILES
 
 
 def _load_backup_status(project_root: Path) -> tuple[dict[str, Any], bool]:
@@ -404,18 +417,26 @@ def get_deployment_readiness_snapshot(project_root: Path | None = None) -> dict[
 
     blockers: list[str] = []
     warnings: list[str] = list(backup_status.get("warnings") or [])
+    operator_local_mode = _is_operator_local_profile()
+
+    def add_backup_issue(message: str) -> None:
+        if operator_local_mode:
+            warnings.append(message)
+        else:
+            blockers.append(message)
+
     if any(not item["exists"] for item in deployment_items):
         blockers.append("Deployment artifacts are incomplete.")
     if any(not item["exists"] for item in runbook_items):
         blockers.append("Operator runbooks are missing or incomplete.")
     if not backup_manifest_exists:
-        blockers.append("Backup manifest has not been created.")
+        add_backup_issue("Backup manifest has not been created.")
     elif not bool((backup_status.get("validation") or {}).get("valid", False)):
-        blockers.append("Backup manifest is invalid and should be corrected before pilot launch.")
+        add_backup_issue("Backup manifest is invalid and should be corrected before pilot launch.")
     elif not backup_status.get("last_success_at"):
-        blockers.append("No successful backup has been recorded yet.")
+        add_backup_issue("No successful backup has been recorded yet.")
     if not backup_status.get("restore_tested_at"):
-        blockers.append("Restore drill has not been recorded yet.")
+        add_backup_issue("Restore drill has not been recorded yet.")
     blockers.extend(environment_snapshot.get("summary", {}).get("blockers", []))
     warnings.extend(environment_snapshot.get("summary", {}).get("warnings", []))
 

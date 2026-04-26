@@ -1176,7 +1176,10 @@ class BackendBehaviorTests(unittest.TestCase):
             ],
         )
 
-        with patch("backend.stock_direction_model.get_market_data_provider", return_value=provider):
+        with (
+            patch("backend.stock_direction_model.get_market_data_provider", return_value=provider),
+            patch("backend.stock_direction_model.utc_now", return_value=pd.Timestamp("2026-04-22T15:00:00")),
+        ):
             info = get_news_sentiment_info("SPY", lookback_days=5, max_items=5)
 
         self.assertEqual(info["source"], "composite-news")
@@ -8494,11 +8497,68 @@ class BackendBehaviorTests(unittest.TestCase):
         with patch.object(deployment_service, "settings", fake_settings):
             snapshot = deployment_service.get_deployment_readiness_snapshot(project_root=Path.cwd())
 
-        self.assertEqual(snapshot["environment"]["summary"]["status"], "warning")
-        self.assertIn("Demo auth remains enabled for operator-local mode.", snapshot["environment"]["summary"]["warnings"])
-        self.assertIn("Local SQLite is active for operator-local mode; keep backup and restore drills current.", snapshot["environment"]["summary"]["warnings"])
-        self.assertTrue(any(item["key"] == "auth_provider" and item["status"] == "warning" for item in snapshot["environment"]["checks"]))
-        self.assertTrue(any(item["key"] == "database_url" and item["status"] == "warning" for item in snapshot["environment"]["checks"]))
+        self.assertEqual(snapshot["environment"]["summary"]["status"], "ready")
+        self.assertEqual(snapshot["environment"]["summary"]["warnings"], [])
+        self.assertTrue(any(item["key"] == "demo_auth" and item["status"] == "ready" for item in snapshot["environment"]["checks"]))
+        self.assertTrue(any(item["key"] == "auth_provider" and item["status"] == "ready" for item in snapshot["environment"]["checks"]))
+        self.assertTrue(any(item["key"] == "database_url" and item["status"] == "ready" for item in snapshot["environment"]["checks"]))
+        self.assertTrue(any(item["key"] == "stripe" and item["status"] == "ready" for item in snapshot["environment"]["checks"]))
+
+    def test_deployment_readiness_snapshot_operator_local_downgrades_backup_gaps(self) -> None:
+        from backend.services import deployment_service
+
+        fake_settings = SimpleNamespace(
+            backup_restore_warning_days=30,
+            environment="staging",
+            enterprise_runtime_profile="operator-local",
+            reload=False,
+            allow_demo_auth=False,
+            auth_enabled=True,
+            auth_provider="auth0",
+            database_url="postgresql://pilot-db.example.com/stocksignals",
+            auth_session_secret="pilot-session-secret",
+            auth_state_secret="pilot-state-secret",
+            api_token_salt="pilot-token-salt",
+            market_data_provider="alpaca",
+            alpaca_api_key_id="alpaca-key",
+            alpaca_api_secret_key="alpaca-secret",
+            stripe_publishable_key="pk_live_123",
+            stripe_secret_key="sk_live_123",
+            stripe_webhook_secret="whsec_123",
+        )
+        with _workspace_tempdir() as temp_dir:
+            root = Path(temp_dir)
+            (root / "backend").mkdir(parents=True, exist_ok=True)
+            (root / "frontend").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "runbooks").mkdir(parents=True, exist_ok=True)
+            (root / "runtime-logs").mkdir(parents=True, exist_ok=True)
+
+            for relative_path in [
+                "docker-compose.yml",
+                "backend/Dockerfile",
+                "frontend/Dockerfile",
+                ".env.example",
+                "Makefile",
+                "docs/runbooks/deployment.md",
+                "docs/runbooks/backup_restore.md",
+                "docs/runbooks/incident_response.md",
+                "docs/runbooks/rollback.md",
+                "docs/runbooks/slow_app.md",
+                "docs/runbooks/stale_feed.md",
+                "docs/runbooks/backlog_recovery.md",
+                "docs/runbooks/own_account_intraday_implementation_checklist.md",
+            ]:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("ready", encoding="utf-8")
+
+            with patch.object(deployment_service, "settings", fake_settings):
+                snapshot = deployment_service.get_deployment_readiness_snapshot(project_root=root)
+
+        self.assertEqual(snapshot["summary"]["status"], "warning")
+        self.assertEqual(snapshot["summary"]["blockers"], [])
+        self.assertIn("Backup manifest has not been created.", snapshot["summary"]["warnings"])
+        self.assertIn("Restore drill has not been recorded yet.", snapshot["summary"]["warnings"])
 
     def test_job_metrics_snapshot_flags_stuck_running_jobs(self) -> None:
         from datetime import timedelta
@@ -12646,6 +12706,8 @@ class BackendBehaviorTests(unittest.TestCase):
     def test_deployment_probe_routes_return_expected_status_codes(self) -> None:
         from backend.routers import system
 
+        system._clear_readiness_probe_cache()
+        self.addCleanup(system._clear_readiness_probe_cache)
         with (
             patch.object(
                 system,
@@ -12683,6 +12745,99 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(readiness_payload["probe"], "readiness")
         self.assertFalse(readiness_payload["ready"])
         self.assertEqual(readiness_payload["blocked_checks"], 2)
+
+    def test_probe_routes_reuse_cached_readiness_snapshot(self) -> None:
+        from backend.routers import system
+
+        system._clear_readiness_probe_cache()
+        self.addCleanup(system._clear_readiness_probe_cache)
+        readiness_snapshot = {
+            "summary": {
+                "status": "warning",
+                "ready": False,
+                "checked_at": "2026-04-17T12:01:00+00:00",
+                "blocked_checks": 0,
+                "warning_checks": 1,
+                "blockers": [],
+                "warnings": ["Backup manifest has not been created."],
+                "next_action": "Backup manifest has not been created.",
+            }
+        }
+        provider = MagicMock(return_value=readiness_snapshot)
+        with (
+            patch.object(
+                system,
+                "get_health",
+                return_value={
+                    "status": "ok",
+                    "service": "Stock Options Signal Dashboard",
+                    "version": "test",
+                    "timestamp": "2026-04-17T12:00:00+00:00",
+                },
+            ),
+            patch.object(system, "get_production_readiness_snapshot", provider),
+        ):
+            self.assertTrue(system.api_root().data["ready"] is False)
+            self.assertEqual(system.health().data["readiness"]["summary"]["warning_checks"], 1)
+            self.assertEqual(system.readyz().status_code, 200)
+
+        self.assertEqual(provider.call_count, 1)
+
+    def test_readyz_serves_expired_cached_readiness_while_refreshing(self) -> None:
+        from backend.routers import system
+
+        system._clear_readiness_probe_cache()
+        self.addCleanup(system._clear_readiness_probe_cache)
+        stale_snapshot = {
+            "summary": {
+                "status": "warning",
+                "checked_at": "2026-04-17T12:01:00+00:00",
+                "blocked_checks": 0,
+                "warning_checks": 1,
+                "blockers": [],
+                "warnings": ["Backup manifest has not been created."],
+                "next_action": "Backup manifest has not been created.",
+            }
+        }
+        with system._readiness_probe_cache_lock:
+            system._readiness_probe_cache.update(
+                {
+                    "expires_at": 0.0,
+                    "provider_id": id(system.get_production_readiness_snapshot),
+                    "snapshot": stale_snapshot,
+                    "refreshing": True,
+                }
+            )
+
+        response = system.readyz()
+        payload = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["warning_checks"], 1)
+        self.assertEqual(payload["warnings"], ["Backup manifest has not been created."])
+
+    def test_api_envelope_normalizes_circular_payloads(self) -> None:
+        from backend.core.responses import envelope
+
+        payload: dict[str, object] = {"name": "root"}
+        payload["self"] = payload
+        nested: list[object] = []
+        nested.append(nested)
+        payload["nested"] = nested
+        deep: dict[str, object] = {}
+        cursor = deep
+        for _ in range(90):
+            child: dict[str, object] = {}
+            cursor["next"] = child
+            cursor = child
+        payload["deep"] = deep
+
+        response = envelope(payload)
+        rendered = json.loads(response.model_dump_json())
+
+        self.assertEqual(rendered["data"]["name"], "root")
+        self.assertIsNone(rendered["data"]["self"])
+        self.assertEqual(rendered["data"]["nested"], [None])
 
     def test_support_diagnostics_export_returns_attachment_bundle(self) -> None:
         from backend.routers import system

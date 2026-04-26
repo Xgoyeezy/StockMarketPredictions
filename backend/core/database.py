@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from contextlib import suppress
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.core.config import settings
@@ -15,7 +16,7 @@ class Base(DeclarativeBase):
 
 def _build_connect_args(database_url: str) -> dict[str, object]:
     if database_url.startswith("sqlite"):
-        return {"check_same_thread": False}
+        return {"check_same_thread": False, "timeout": 30}
     if database_url.startswith("postgresql"):
         return {"connect_timeout": 5}
     return {}
@@ -32,6 +33,20 @@ engine = create_engine(
     pool_timeout=10,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+
+
+if settings.database_url.startswith("sqlite"):
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+        with suppress(Exception):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+            finally:
+                cursor.close()
 
 
 def init_database() -> None:

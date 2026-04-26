@@ -9,7 +9,7 @@ from typing import Iterable
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_FILE = PROJECT_ROOT / "tests" / "test_backend_behaviors.py"
 TEST_CLASS = "BackendBehaviorTests"
-TEST_IMPORT_PATH = "tests.test_backend_behaviors.BackendBehaviorTests"
+TEST_IMPORT_PATH = "test_backend_behaviors.BackendBehaviorTests"
 
 
 @dataclass(frozen=True)
