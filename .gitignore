@@ -28,6 +28,7 @@ frontend/runtime-exports/
 *.egg-info/
 backend/storage/*.csv
 backend/storage/*.json
+!backend/storage/saved_workspaces.json
 backend/storage/*.db
 backend/storage/*.db-*
 backend/storage/quant/
