@@ -2501,6 +2501,212 @@ class StrategyValidationServiceTests(unittest.TestCase):
         self.assertEqual(report["legacy_orphan_order_event_count"], 1)
         self.assertEqual(report["current_route_reconciliation_status"], "orphaned")
 
+    def test_current_route_order_events_match_local_client_order_id_without_false_orphan(self) -> None:
+        ledger = pd.DataFrame(
+            [
+                {
+                    "event_type": "fill",
+                    "trade_id": "trade-client-id",
+                    "symbol": "SPY",
+                    "quantity": 4.0,
+                    "fill_price": 501.25,
+                    "route_family": "current",
+                    "route_version": "ranked_entry_v1",
+                    "validation_sample_bucket": "current_route",
+                }
+            ]
+        )
+        open_trades = pd.DataFrame(
+            [
+                {
+                    "trade_id": "trade-client-id",
+                    "order_id": "local-client-order-1",
+                    "ticker": "SPY",
+                    "broker_name": "alpaca_paper",
+                    "broker_order_id": "",
+                    "broker_client_order_id": "local-client-order-1",
+                    "broker_filled_qty": 4.0,
+                    "actual_fill_price": 501.25,
+                    "suggested_contracts": 4.0,
+                    "remaining_contracts": 0.0,
+                    "route_family": "current",
+                    "route_version": "ranked_entry_v1",
+                    "validation_sample_bucket": "current_route",
+                }
+            ]
+        )
+        order_events = pd.DataFrame(
+            [
+                {
+                    "trade_id": "",
+                    "event_key": "order.submitted",
+                    "status": "submitted",
+                    "created_at": "2026-04-20T14:00:00+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "validation_sample_bucket": "current_route",
+                        "client_order_id": "local-client-order-1",
+                    },
+                },
+                {
+                    "trade_id": "",
+                    "event_key": "order.filled",
+                    "status": "filled",
+                    "created_at": "2026-04-20T14:01:00+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "validation_sample_bucket": "current_route",
+                        "client_order_id": "local-client-order-1",
+                    },
+                },
+            ]
+        )
+
+        report = svs.build_broker_reconciliation_report(
+            ledger,
+            open_trades=open_trades,
+            closed_trades=pd.DataFrame(),
+            pending_orders=pd.DataFrame(),
+            order_events=order_events,
+        )
+
+        item = next(row for row in report["items"] if row["trade_id"] == "trade-client-id")
+        self.assertIn("client_order_id", item["match_modes"])
+        self.assertEqual(item["client_order_ids"], ["local-client-order-1"])
+        self.assertEqual(report["current_route_orphan_order_event_count"], 0)
+        self.assertEqual(report["current_route_reconciliation_status"], "clean")
+
+    def test_current_route_fill_ledger_can_reconcile_without_filled_event_when_quantities_match(self) -> None:
+        ledger = pd.DataFrame(
+            [
+                {
+                    "event_type": "fill",
+                    "trade_id": "trade-ledger-fill",
+                    "symbol": "SPY",
+                    "quantity": 4.0,
+                    "fill_price": 501.25,
+                    "route_family": "current",
+                    "route_version": "ranked_entry_v1",
+                    "route_correlation_id": "corr-ledger-fill",
+                    "validation_sample_bucket": "current_route",
+                }
+            ]
+        )
+        open_trades = pd.DataFrame(
+            [
+                {
+                    "trade_id": "trade-ledger-fill",
+                    "ticker": "SPY",
+                    "broker_name": "alpaca_paper",
+                    "broker_order_id": "broker-ledger-fill",
+                    "broker_filled_qty": 4.0,
+                    "actual_fill_price": 501.25,
+                    "suggested_contracts": 4.0,
+                    "route_family": "current",
+                    "route_version": "ranked_entry_v1",
+                    "route_correlation_id": "corr-ledger-fill",
+                    "validation_sample_bucket": "current_route",
+                }
+            ]
+        )
+        order_events = pd.DataFrame(
+            [
+                {
+                    "trade_id": "",
+                    "event_key": "order.submitted",
+                    "status": "submitted",
+                    "created_at": "2026-04-20T14:00:00+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "route_correlation_id": "corr-ledger-fill",
+                        "validation_sample_bucket": "current_route",
+                    },
+                },
+                {
+                    "trade_id": "",
+                    "event_key": "order.accepted",
+                    "status": "accepted",
+                    "created_at": "2026-04-20T14:00:05+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "route_correlation_id": "corr-ledger-fill",
+                        "validation_sample_bucket": "current_route",
+                    },
+                },
+            ]
+        )
+
+        report = svs.build_broker_reconciliation_report(
+            ledger,
+            open_trades=open_trades,
+            closed_trades=pd.DataFrame(),
+            pending_orders=pd.DataFrame(),
+            order_events=order_events,
+        )
+
+        item = next(row for row in report["items"] if row["trade_id"] == "trade-ledger-fill")
+        self.assertNotIn("missing_order_filled_event", item["issues"])
+        self.assertTrue(item["fill_reconciled"])
+        self.assertEqual(report["current_route_orphan_order_event_count"], 0)
+        self.assertEqual(report["current_route_reconciliation_status"], "clean")
+
+    def test_current_route_terminal_only_orphan_events_do_not_block_reconciliation(self) -> None:
+        order_events = pd.DataFrame(
+            [
+                {
+                    "trade_id": "",
+                    "event_key": "order.submitted",
+                    "status": "submitted",
+                    "created_at": "2026-04-20T14:00:00+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "route_correlation_id": "corr-canceled",
+                        "validation_sample_bucket": "current_route",
+                    },
+                },
+                {
+                    "trade_id": "",
+                    "event_key": "order.accepted",
+                    "status": "accepted",
+                    "created_at": "2026-04-20T14:00:05+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "route_correlation_id": "corr-canceled",
+                        "validation_sample_bucket": "current_route",
+                    },
+                },
+                {
+                    "trade_id": "",
+                    "event_key": "order.canceled",
+                    "status": "canceled",
+                    "created_at": "2026-04-20T14:01:00+00:00",
+                    "payload_json": {
+                        "route_family": "current",
+                        "route_version": "ranked_entry_v1",
+                        "route_correlation_id": "corr-canceled",
+                        "validation_sample_bucket": "current_route",
+                    },
+                },
+            ]
+        )
+
+        report = svs.build_broker_reconciliation_report(
+            pd.DataFrame(),
+            open_trades=pd.DataFrame(),
+            closed_trades=pd.DataFrame(),
+            pending_orders=pd.DataFrame(),
+            order_events=order_events,
+        )
+
+        self.assertEqual(report["current_route_orphan_order_event_count"], 0)
+        self.assertNotIn("current_route_orphan_order_events", report["issue_counts"])
+
     def test_current_route_execution_realism_uses_reconciled_current_route_subset(self) -> None:
         ledger_rows = []
         base_timestamp = pd.Timestamp("2026-04-20T17:00:00+00:00")

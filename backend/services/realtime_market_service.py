@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
@@ -60,9 +61,15 @@ def get_realtime_capabilities(*, realtime_entitled: bool = True) -> dict[str, An
         and configured
         and realtime_entitled
     )
+    internal_polling_supported = _internal_owned_polling_supported(realtime_entitled=realtime_entitled)
     provider_label = settings.market_data_provider
+    feed = settings.alpaca_stock_feed
     if provider_label == "alpaca" and not configured:
         provider_label = "alpaca-unconfigured"
+    if internal_polling_supported and not true_tick_supported:
+        provider_label = "internal_owned_api"
+        configured = True
+        feed = "free_delayed"
     if not realtime_entitled:
         provider_label = "plan-blocked"
 
@@ -71,13 +78,47 @@ def get_realtime_capabilities(*, realtime_entitled: bool = True) -> dict[str, An
         "provider": provider_label,
         "configured": configured,
         "true_tick_supported": true_tick_supported,
-        "feed": settings.alpaca_stock_feed,
+        "feed": feed,
         "sandbox": settings.alpaca_use_sandbox,
         "supported_channels": list(SUPPORTED_CHANNELS),
         "max_tickers": settings.realtime_max_tickers,
-        "connection_mode": "provider_websocket" if true_tick_supported else "plan_blocked" if not realtime_entitled else "unavailable",
+        "connection_mode": (
+            "provider_websocket"
+            if true_tick_supported
+            else "internal_polling"
+            if internal_polling_supported
+            else "plan_blocked"
+            if not realtime_entitled
+            else "unavailable"
+        ),
         "entitlement_blocked": not realtime_entitled,
+        "data_quality": "tick" if true_tick_supported else "delayed_or_research" if internal_polling_supported else "unavailable",
+        "real_time_quotes": true_tick_supported,
     }
+
+
+def _internal_owned_polling_supported(*, realtime_entitled: bool) -> bool:
+    if not (settings.realtime_stream_enabled and realtime_entitled):
+        return False
+    if not bool(getattr(settings, "internal_owned_api_enabled", False)):
+        return False
+
+    internal_modes = {
+        "internal",
+        "internal_paper",
+        "internal_simulator",
+        "legitimate",
+        "legitimate_brokerage",
+        "legitimate_brokerage_paper",
+    }
+    broker_mode = str(getattr(settings, "broker_mode", "") or "").strip().lower()
+    paper_provider = str(getattr(settings, "paper_broker_provider", "") or "").strip().lower()
+    execution_adapter = str(getattr(settings, "execution_adapter", "") or "").strip().lower()
+    if not any(value in internal_modes for value in (broker_mode, paper_provider, execution_adapter)):
+        return False
+
+    provider = str(settings.market_data_provider or "").strip().lower()
+    return provider in {"free_delayed", "internal", "internal_owned_api", "yfinance"}
 
 
 def _alpaca_stream_url() -> str:
@@ -477,6 +518,156 @@ async def _wait_for_disconnect(websocket: WebSocket) -> None:
             raise WebSocketDisconnect(code=message.get("code", 1000))
 
 
+def _is_closed_websocket_send_error(exc: RuntimeError) -> bool:
+    message = str(exc).lower()
+    return "websocket.send" in message and (
+        "after sending" in message or "already completed" in message
+    )
+
+
+async def _safe_send_websocket_text(websocket: WebSocket, payload: str) -> bool:
+    try:
+        await websocket.send_text(payload)
+        return True
+    except WebSocketDisconnect:
+        return False
+    except RuntimeError as exc:
+        if _is_closed_websocket_send_error(exc):
+            logger.info("Realtime websocket closed before an internal polling message could be sent.")
+            return False
+        raise
+
+
+async def _drain_disconnect_task(disconnect_task: asyncio.Task[None]) -> None:
+    with suppress(WebSocketDisconnect, asyncio.CancelledError, Exception):
+        await disconnect_task
+
+
+async def _run_internal_polling_stream(websocket: WebSocket, *, tickers: list[str], channels: list[str]) -> None:
+    disconnect_task = asyncio.create_task(_wait_for_disconnect(websocket))
+    if not await _safe_send_websocket_text(
+        websocket,
+        _serialize_message(
+            "stream_status",
+            status="internal_polling",
+            provider="internal_owned_api",
+            feed="free_delayed",
+            data_quality="delayed_or_research",
+            real_time_quotes=False,
+            tickers=tickers,
+            channels=channels,
+            reason="Internal API polling is active. Quotes are delayed or research-grade, not licensed tick data.",
+        )
+    ):
+        disconnect_task.cancel()
+        await _drain_disconnect_task(disconnect_task)
+        return
+
+    poll_seconds = max(3, int(getattr(settings, "internal_stream_poll_seconds", 15) or 15))
+    try:
+        while True:
+            if disconnect_task.done():
+                await _drain_disconnect_task(disconnect_task)
+                return
+            try:
+                from backend import stock_direction_model as sdm
+
+                price_task = asyncio.create_task(asyncio.to_thread(sdm.batch_get_live_prices, tickers))
+                done, _pending = await asyncio.wait(
+                    {price_task, disconnect_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if disconnect_task in done:
+                    price_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await price_task
+                    await _drain_disconnect_task(disconnect_task)
+                    return
+                prices = await price_task
+            except Exception as exc:  # pragma: no cover - defensive stream resilience
+                logger.exception("Internal polling stream price refresh failed.")
+                if not await _safe_send_websocket_text(
+                    websocket,
+                    _serialize_message(
+                        "stream_error",
+                        provider="internal_owned_api",
+                        feed="free_delayed",
+                        message="Internal API polling refresh failed.",
+                        details={"error": str(exc)},
+                    )
+                ):
+                    return
+                prices = {}
+
+            timestamp = datetime.now(timezone.utc).isoformat()
+            for symbol in tickers:
+                if disconnect_task.done():
+                    await _drain_disconnect_task(disconnect_task)
+                    return
+                price = prices.get(symbol)
+                if price is None:
+                    continue
+                if "trades" in channels:
+                    if not await _safe_send_websocket_text(
+                        websocket,
+                        _serialize_message(
+                            "market_event",
+                            provider="internal_owned_api",
+                            feed="free_delayed",
+                            event={
+                                "type": "trade",
+                                "provider": "internal_owned_api",
+                                "feed": "free_delayed",
+                                "symbol": symbol,
+                                "price": float(price),
+                                "size": None,
+                                "timestamp": timestamp,
+                                "source": "internal_polling",
+                                "realtime": False,
+                                "delayed": True,
+                            },
+                        )
+                    ):
+                        return
+                if "quotes" in channels:
+                    if disconnect_task.done():
+                        await _drain_disconnect_task(disconnect_task)
+                        return
+                    if not await _safe_send_websocket_text(
+                        websocket,
+                        _serialize_message(
+                            "market_event",
+                            provider="internal_owned_api",
+                            feed="free_delayed",
+                            event={
+                                "type": "quote",
+                                "provider": "internal_owned_api",
+                                "feed": "free_delayed",
+                                "symbol": symbol,
+                                "bid_price": None,
+                                "ask_price": None,
+                                "spread": None,
+                                "last_price": float(price),
+                                "timestamp": timestamp,
+                                "source": "internal_polling",
+                                "realtime": False,
+                                "delayed": True,
+                            },
+                        )
+                    ):
+                        return
+
+            done, _pending = await asyncio.wait({disconnect_task}, timeout=poll_seconds)
+            if done:
+                await _drain_disconnect_task(disconnect_task)
+                return
+    except WebSocketDisconnect:
+        logger.info("Client disconnected from internal polling stream.")
+    finally:
+        disconnect_task.cancel()
+        await _drain_disconnect_task(disconnect_task)
+
+
 async def stream_market_data(
     websocket: WebSocket,
     *,
@@ -488,49 +679,64 @@ async def stream_market_data(
     capabilities = get_realtime_capabilities(realtime_entitled=realtime_entitled)
 
     await websocket.accept()
-    await websocket.send_text(_serialize_message("stream_capabilities", **capabilities))
+    if not await _safe_send_websocket_text(
+        websocket,
+        _serialize_message("stream_capabilities", **capabilities),
+    ):
+        return
 
     if not capabilities["enabled"]:
         message = entitlement_reason or "Realtime streaming is disabled for this API."
         if capabilities.get("entitlement_blocked"):
             message = entitlement_reason or "Realtime streaming is not enabled for the active tenant plan."
-        await websocket.send_text(
+        await _safe_send_websocket_text(
+            websocket,
             _serialize_message(
                 "stream_error",
                 message=message,
             )
         )
-        await websocket.close(code=4403)
+        with suppress(Exception):
+            await websocket.close(code=4403)
         return
 
     if not tickers:
-        await websocket.send_text(
+        await _safe_send_websocket_text(
+            websocket,
             _serialize_message(
                 "stream_error",
                 message="At least one ticker is required for realtime streaming.",
             )
         )
-        await websocket.close(code=4400)
+        with suppress(Exception):
+            await websocket.close(code=4400)
         return
 
     if settings.market_data_provider != "alpaca":
-        await websocket.send_text(
+        if capabilities.get("connection_mode") == "internal_polling":
+            await _run_internal_polling_stream(websocket, tickers=tickers, channels=channels)
+            return
+        await _safe_send_websocket_text(
+            websocket,
             _serialize_message(
                 "stream_error",
                 message="True tick streaming is only configured for the Alpaca provider in this build.",
             )
         )
-        await websocket.close(code=4400)
+        with suppress(Exception):
+            await websocket.close(code=4400)
         return
 
     if not (settings.alpaca_api_key_id and settings.alpaca_api_secret_key):
-        await websocket.send_text(
+        await _safe_send_websocket_text(
+            websocket,
             _serialize_message(
                 "stream_error",
                 message="Set APCA_API_KEY_ID and APCA_API_SECRET_KEY to enable tick-by-tick market streaming.",
             )
         )
-        await websocket.close(code=4401)
+        with suppress(Exception):
+            await websocket.close(code=4401)
         return
 
     subscriber = await _shared_alpaca_stream_manager.register(

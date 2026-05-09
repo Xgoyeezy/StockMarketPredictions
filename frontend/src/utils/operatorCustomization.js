@@ -14,7 +14,7 @@ export const TRADING_STYLE_PROFILES = {
   swing: {
     label: 'Swing',
     shellLabel: 'Swing mode',
-    startupSurface: '/',
+    startupSurface: '/app',
     reviewSurface: '/journal',
     tone: 'neutral',
     description: 'Broader setup review, slower follow-up cadence, and multi-session context.',
@@ -22,7 +22,7 @@ export const TRADING_STYLE_PROFILES = {
   intraday: {
     label: 'Intraday',
     shellLabel: 'Intraday mode',
-    startupSurface: '/',
+    startupSurface: '/app',
     reviewSurface: '/trades',
     tone: 'warning',
     description: 'Session-first scanning, tighter execution review, and same-day risk management.',
@@ -31,7 +31,7 @@ export const TRADING_STYLE_PROFILES = {
 
 export const STARTUP_SURFACE_OPTIONS = [
   { value: STYLE_DEFAULT_SURFACE_VALUE, label: 'Use trading-style default' },
-  { value: '/', label: 'Desk' },
+  { value: '/app', label: 'Desk' },
   { value: '/watchlist', label: 'Watchlist' },
   { value: '/compare', label: 'Compare' },
   { value: '/trades', label: 'Trades' },
@@ -53,7 +53,7 @@ const TRADING_STYLE_SET = new Set(TRADING_STYLE_OPTIONS.map((item) => item.value
 const STARTUP_SURFACE_SET = new Set(STARTUP_SURFACE_OPTIONS.map((item) => item.value))
 const REVIEW_SURFACE_SET = new Set(REVIEW_SURFACE_OPTIONS.map((item) => item.value))
 const WORKFLOW_SURFACE_SET = new Set([
-  '/',
+  '/app',
   '/watchlist',
   '/compare',
   '/trades',

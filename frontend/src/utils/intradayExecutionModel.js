@@ -13,8 +13,8 @@ function normalizePhase(value = '') {
 
 function formatExecutionIntentLabel(value = 'desk') {
   const normalized = String(value || 'desk').trim().toLowerCase()
-  if (normalized === 'broker_live') return 'Broker live'
-  if (normalized === 'broker_paper') return 'Broker paper'
+  if (normalized === 'broker_live') return 'Alpaca live'
+  if (normalized === 'broker_paper') return 'Alpaca paper'
   return 'Desk only'
 }
 
@@ -60,11 +60,11 @@ export function buildIntradayExecutionPlan({
       routeLabel,
       routeDetail:
         normalizedRoute === 'broker_live' && !rolloutAllowsLive
-          ? 'Broker-live routing is still locked behind paper stability.'
+          ? 'Alpaca live routing is still locked behind paper stability.'
           : normalizedRoute === 'broker_live'
-            ? 'Broker-live routing is clear.'
+            ? 'Alpaca live routing is clear.'
             : normalizedRoute === 'broker_paper'
-              ? 'Broker paper keeps lifecycle review visible before live capital.'
+              ? 'Alpaca paper keeps lifecycle review visible before live capital.'
               : 'Desk-only routing keeps the setup local until you want broker execution.',
       riskTone: riskBudget > 1 ? 'warning' : 'positive',
       riskDetail: `Current risk budget is ${riskBudget.toFixed(2)}% per ticket.`,
@@ -154,11 +154,11 @@ export function buildIntradayExecutionPlan({
           : 'info'
   let routeDetail =
     normalizedRoute === 'broker_live' && !rolloutAllowsLive
-      ? 'Broker-live routing is still locked behind paper stability.'
+      ? 'Alpaca live routing is still locked behind paper stability.'
       : normalizedRoute === 'broker_live'
-        ? 'Broker-live routing is clear, but intraday mode still expects same-session cleanup discipline.'
+        ? 'Alpaca live routing is clear, but intraday mode still expects same-session cleanup discipline.'
         : normalizedRoute === 'broker_paper'
-          ? 'Broker paper keeps same-session lifecycle review visible before live capital.'
+          ? 'Alpaca paper keeps same-session lifecycle review visible before live capital.'
           : 'Desk-only routing keeps the setup local while you validate the intraday idea.'
 
   if (!allowsNewEntries) {

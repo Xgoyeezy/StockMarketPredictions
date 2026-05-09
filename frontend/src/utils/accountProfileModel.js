@@ -1,11 +1,11 @@
 const ACCOUNT_PROFILE_DEFINITIONS = {
   brokerage: {
     key: 'brokerage',
-    label: 'Brokerage',
-    badgeLabel: 'Brokerage',
-    settingsTitle: 'Brokerage account',
+    label: 'Linked Accounts',
+    badgeLabel: 'Linked Accounts',
+    settingsTitle: 'Linked account setup',
     settingsDescription:
-      'Manage brokerage-linked account surfaces and account-management controls separately from the personal trading systems.',
+      'Manage connected account setup separately from the personal paper and live trading systems.',
     executionIntentOverride: null,
   },
   personal_paper: {
@@ -23,7 +23,7 @@ const ACCOUNT_PROFILE_DEFINITIONS = {
     badgeLabel: 'Personal / Live',
     settingsTitle: 'Personal live trading system',
     settingsDescription:
-      'Tune the personal live trading system, rollout-sensitive route posture, and live-capital defaults without mixing it with brokerage account management.',
+      'Tune the personal live trading system, live-control posture, and live-capital defaults without mixing it with linked account setup.',
     executionIntentOverride: 'broker_live',
   },
 }
@@ -101,21 +101,21 @@ export function resolveAccountProfileTradingContext({
         effectiveLinkedAccountId: '',
         accountTargetLocked: true,
         accountTargetValue: 'unbound',
-        accountTargetLabel: 'No primary brokerage account bound',
+        accountTargetLabel: 'No primary linked account bound',
         accountTargetHint:
-          'Orders route only to the bound brokerage account while Brokerage is active. Bind a primary brokerage account in Brokerage settings first.',
+          'Orders route only to the bound linked account while Linked Accounts is active. Bind a primary linked account in Settings first.',
         profileTradingLockedReason:
-          'Bind a primary brokerage account in Brokerage settings before submitting trades from the Brokerage profile.',
+          'Bind a primary linked account in Settings before submitting trades from the Linked Accounts profile.',
         executionRouteOverride: {
           tone: 'negative',
-          label: 'Brokerage account required',
+          label: 'Linked account required',
           detail:
-            'Brokerage trading is locked because no primary broker account is bound to the Brokerage profile yet.',
+            'Connected-account trading is locked because no primary linked account is bound to the Linked Accounts profile yet.',
           locked: true,
-          lockedLabel: 'Brokerage account required',
-          sendLabel: 'brokerage approval request',
+          lockedLabel: 'Linked account required',
+          sendLabel: 'linked-account approval request',
           badgeLabel: 'Locked',
-          pathLabel: 'Bind broker account',
+          pathLabel: 'Bind linked account',
         },
       }
     }
@@ -129,21 +129,21 @@ export function resolveAccountProfileTradingContext({
         accountTargetLocked: true,
         accountTargetValue: normalizedPrimaryLinkedAccountId || 'unavailable',
         accountTargetLabel:
-          boundBrokerageAccount?.label || 'Primary broker account unavailable',
+          boundBrokerageAccount?.label || 'Primary linked account unavailable',
         accountTargetHint:
-          'Orders route only to the bound brokerage account while Brokerage is active. Reconnect or rebind the primary brokerage account before trading.',
+          'Orders route only to the bound linked account while Linked Accounts is active. Reconnect or rebind the primary linked account before trading.',
         profileTradingLockedReason:
-          'The primary brokerage account is unavailable. Reconnect it or choose another linked brokerage account in Brokerage settings before trading.',
+          'The primary linked account is unavailable. Reconnect it or choose another linked account in Settings before trading.',
         executionRouteOverride: {
           tone: 'negative',
-          label: 'Brokerage account unavailable',
+          label: 'Linked account unavailable',
           detail:
-            'Brokerage trading is locked because the bound broker account is disconnected or needs to be relinked.',
+            'Connected-account trading is locked because the bound linked account is disconnected or needs to be relinked.',
           locked: true,
-          lockedLabel: 'Brokerage account unavailable',
-          sendLabel: 'brokerage approval request',
+          lockedLabel: 'Linked account unavailable',
+          sendLabel: 'linked-account approval request',
           badgeLabel: 'Locked',
-          pathLabel: 'Reconnect broker account',
+          pathLabel: 'Reconnect linked account',
         },
       }
     }
@@ -151,7 +151,7 @@ export function resolveAccountProfileTradingContext({
     const boundLabel = String(
       boundBrokerageAccount.label ||
         boundBrokerageAccount.linked_identity_label ||
-        'Bound broker account',
+        'Bound linked account',
     ).trim()
 
     return {
@@ -162,16 +162,16 @@ export function resolveAccountProfileTradingContext({
       accountTargetLocked: true,
       accountTargetValue: boundBrokerageAccount.id,
       accountTargetLabel: boundLabel,
-      accountTargetHint: `Orders route only to ${boundLabel} while Brokerage is active. Switch the global profile to Personal / Paper or Personal / Live to use your own-account funds.`,
+      accountTargetHint: `Orders route only to ${boundLabel} while Linked Accounts is active. Switch the global profile to Personal / Paper or Personal / Live to use your own-account funds.`,
       profileTradingLockedReason: '',
       executionRouteOverride: {
         tone: 'positive',
-        label: 'Brokerage account',
-        detail: `Orders route only to ${boundLabel} while the Brokerage profile is active.`,
+        label: 'Linked account',
+        detail: `Orders route only to ${boundLabel} while the Linked Accounts profile is active.`,
         locked: false,
         lockedLabel: '',
-        sendLabel: 'brokerage approval request',
-        badgeLabel: 'Brokerage',
+        sendLabel: 'linked-account approval request',
+        badgeLabel: 'Linked',
         pathLabel: boundLabel,
       },
       boundBrokerageAccount,

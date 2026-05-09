@@ -93,15 +93,31 @@ def _probe_options_feed(
 def classify_readiness(
     *,
     feed: str,
+    options_data_provider: str = "alpaca",
+    options_broker_provider: str = "alpaca",
     use_sandbox: bool,
     paper_keys_present: bool,
+    tradier_live_keys_present: bool = False,
+    tradier_paper_keys_present: bool = False,
     opra_probe: dict[str, Any],
     indicative_probe: dict[str, Any],
     backend_running: bool,
     env_file_name: str = ".env",
 ) -> dict[str, Any]:
     normalized_feed = str(feed or "").strip().lower()
-    if not paper_keys_present:
+    normalized_data_provider = str(options_data_provider or "alpaca").strip().lower()
+    normalized_broker_provider = str(options_broker_provider or "alpaca").strip().lower()
+    if normalized_data_provider == "tradier":
+        if not tradier_live_keys_present:
+            broker_code = "tradier_live_credentials_missing"
+            broker_message = "Tradier live market-data credentials are required for real-time options quotes."
+        elif normalized_broker_provider == "tradier" and not tradier_paper_keys_present:
+            broker_code = "tradier_paper_credentials_missing"
+            broker_message = "Tradier sandbox credentials are required for paper options lifecycle evidence."
+        else:
+            broker_code = "ready"
+            broker_message = "Tradier real-time options data and sandbox paper routing are configured for option-native validation."
+    elif not paper_keys_present:
         broker_code = "credentials_missing"
         broker_message = "Paper Alpaca market-data credentials are not configured."
     elif normalized_feed != "opra":
@@ -137,6 +153,10 @@ def classify_readiness(
             if broker_code == "sandbox_mismatch"
             else "Set ALPACA_OPTIONS_FEED=opra."
             if broker_code == "wrong_feed"
+            else "Configure TRADIER_LIVE_TOKEN and TRADIER_LIVE_ACCOUNT_ID."
+            if broker_code == "tradier_live_credentials_missing"
+            else "Configure TRADIER_PAPER_TOKEN and TRADIER_PAPER_ACCOUNT_ID."
+            if broker_code == "tradier_paper_credentials_missing"
             else "Configure valid Alpaca paper market-data credentials."
             if broker_code in {"credentials_missing", "credentials_rejected"}
             else "Restore the Alpaca options market-data path."
@@ -165,14 +185,18 @@ def main(argv: list[str] | None = None) -> int:
     config = build_runtime_config(args.env_file)
     env = config["env_values"]
     feed = str(env.get("ALPACA_OPTIONS_FEED", "opra") or "opra").strip().lower() or "opra"
+    options_data_provider = str(env.get("OPTIONS_DATA_PROVIDER", "alpaca") or "alpaca").strip().lower() or "alpaca"
+    options_broker_provider = str(env.get("OPTIONS_BROKER_PROVIDER", "alpaca") or "alpaca").strip().lower() or "alpaca"
     use_sandbox = bool_from_env(env.get("ALPACA_USE_SANDBOX"), False)
     api_key_id = str(env.get("APCA_API_KEY_ID", env.get("ALPACA_API_KEY_ID", "")) or "").strip()
     api_secret_key = str(env.get("APCA_API_SECRET_KEY", env.get("ALPACA_API_SECRET_KEY", "")) or "").strip()
     paper_keys_present = bool(api_key_id and api_secret_key)
+    tradier_live_keys_present = bool(str(env.get("TRADIER_LIVE_TOKEN", "") or "").strip() and str(env.get("TRADIER_LIVE_ACCOUNT_ID", "") or "").strip())
+    tradier_paper_keys_present = bool(str(env.get("TRADIER_PAPER_TOKEN", "") or "").strip() and str(env.get("TRADIER_PAPER_ACCOUNT_ID", "") or "").strip())
 
     base_url = _alpaca_base_url(use_sandbox=use_sandbox)
     timeout_seconds = int(env.get("ALPACA_MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "10") or 10)
-    if paper_keys_present:
+    if paper_keys_present and options_data_provider != "tradier":
         opra_probe = _probe_options_feed(
             base_url=base_url,
             api_key_id=api_key_id,
@@ -203,8 +227,12 @@ def main(argv: list[str] | None = None) -> int:
         options_snapshot = (options_snapshot_probe.get("payload") or {}).get("data") if options_snapshot_probe.get("reachable") else None
     summary = classify_readiness(
         feed=feed,
+        options_data_provider=options_data_provider,
+        options_broker_provider=options_broker_provider,
         use_sandbox=use_sandbox,
         paper_keys_present=paper_keys_present,
+        tradier_live_keys_present=tradier_live_keys_present,
+        tradier_paper_keys_present=tradier_paper_keys_present,
         opra_probe=opra_probe,
         indicative_probe=indicative_probe,
         backend_running=backend_running,
@@ -216,6 +244,10 @@ def main(argv: list[str] | None = None) -> int:
         "env_file": str(config["env_path"]),
         "api_base_url": config["api_base_url"],
         "paper_keys_present": paper_keys_present,
+        "tradier_live_keys_present": tradier_live_keys_present,
+        "tradier_paper_keys_present": tradier_paper_keys_present,
+        "options_data_provider": options_data_provider,
+        "options_broker_provider": options_broker_provider,
         "feed": feed,
         "use_sandbox": use_sandbox,
         "ticker": str(args.ticker or "SPY").strip().upper(),

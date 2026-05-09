@@ -171,6 +171,7 @@ def ensure_strategy_desks(db: Session, *, current_user: Any) -> list[StrategyDes
         ).scalars().all()
     }
     items: list[StrategyDesk] = []
+    created_any = False
     for definition in list_strategy_desk_definitions():
         desk = existing.get(definition.key)
         if desk is None:
@@ -190,8 +191,10 @@ def ensure_strategy_desks(db: Session, *, current_user: Any) -> list[StrategyDes
             )
             db.add(desk)
             db.flush()
+            created_any = True
         items.append(desk)
-    db.commit()
+    if created_any:
+        db.commit()
     return items
 
 

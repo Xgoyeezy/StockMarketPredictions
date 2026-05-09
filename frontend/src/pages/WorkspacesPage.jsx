@@ -258,7 +258,7 @@ export default function WorkspacesPage() {
       <PageIntro
         kicker="Saved presets"
         title="Reuse operations, desk, and board layouts"
-        description="Apply, pin, export, and import reusable preset states without leaving platform operations."
+        description="Apply, pin, export, and import reusable preset states without leaving desk setup."
         badge={`${payload?.count ?? 0} saved presets`}
         actions={(
           <Button type="button" variant="subtle" onClick={load}>

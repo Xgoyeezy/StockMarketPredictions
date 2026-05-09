@@ -1662,14 +1662,30 @@ def build_broker_reconciliation_report(
                 broker_ids.add(normalized)
         return broker_ids
 
+    def _collect_client_order_ids(container: dict[str, Any]) -> set[str]:
+        client_ids: set[str] = set()
+        for key in (
+            "broker_client_order_id",
+            "broker_close_client_order_id",
+            "client_order_id",
+            "order_id",
+            "local_order_id",
+        ):
+            normalized = str(container.get(key) or "").strip()
+            if normalized:
+                client_ids.add(normalized)
+        return client_ids
+
     def _build_event_metadata(row: pd.Series) -> dict[str, Any]:
         payload_json = row.get("payload_json")
         payload = payload_json if isinstance(payload_json, dict) else {}
         route_payload: dict[str, Any] = {}
         broker_order_ids: set[str] = set()
+        client_order_ids: set[str] = set()
         for container in _container_list(payload):
             route_payload = _merge_route_payload(route_payload, _extract_route_payload_from_container(container))
             broker_order_ids.update(_collect_broker_order_ids(container))
+            client_order_ids.update(_collect_client_order_ids(container))
         route_family = str(route_payload.get("route_family") or "").strip().lower()
         route_version = str(route_payload.get("route_version") or "").strip()
         validation_sample_bucket = _normalize_validation_sample_bucket(route_payload.get("validation_sample_bucket"))
@@ -1688,11 +1704,13 @@ def build_broker_reconciliation_report(
             "validation_sample_bucket": validation_sample_bucket,
             "current_route": current_route,
             "broker_order_ids": broker_order_ids,
+            "client_order_ids": client_order_ids,
         }
 
     local_groups: dict[str, dict[str, Any]] = {}
     correlation_index: dict[str, set[str]] = {}
     broker_order_index: dict[str, set[str]] = {}
+    client_order_index: dict[str, set[str]] = {}
 
     def _ingest_local(frame: pd.DataFrame, source: str) -> None:
         if frame.empty:
@@ -1715,6 +1733,7 @@ def build_broker_reconciliation_report(
                     "sources": [],
                     "broker_name": None,
                     "broker_order_ids": set(),
+                    "client_order_ids": set(),
                     "local_entry_qty": 0.0,
                     "local_closed_qty": 0.0,
                     "local_remaining_qty": 0.0,
@@ -1738,6 +1757,11 @@ def build_broker_reconciliation_report(
                 if broker_order_id:
                     item["broker_order_ids"].add(broker_order_id)
                     broker_order_index.setdefault(broker_order_id, set()).add(trade_id)
+            for client_key in ("broker_client_order_id", "broker_close_client_order_id", "client_order_id", "order_id"):
+                client_order_id = str(row.get(client_key) or "").strip()
+                if client_order_id:
+                    item["client_order_ids"].add(client_order_id)
+                    client_order_index.setdefault(client_order_id, set()).add(trade_id)
             route_correlation_id = _normalize_route_correlation_id(row.get("route_correlation_id"))
             if route_correlation_id:
                 item["route_correlation_id"] = route_correlation_id
@@ -1796,6 +1820,10 @@ def build_broker_reconciliation_report(
             trade_ids = broker_order_index.get(broker_order_id) or set()
             if len(trade_ids) == 1:
                 return next(iter(trade_ids)), "broker_order_id"
+        for client_order_id in sorted(metadata.get("client_order_ids") or []):
+            trade_ids = client_order_index.get(client_order_id) or set()
+            if len(trade_ids) == 1:
+                return next(iter(trade_ids)), "client_order_id"
         if not bool(metadata.get("current_route")):
             trade_id = str(metadata.get("trade_id") or "").strip()
             if trade_id and trade_id in local_groups:
@@ -1837,6 +1865,7 @@ def build_broker_reconciliation_report(
             orphan_key = (
                 str(metadata.get("route_correlation_id") or "").strip()
                 or "|".join(sorted(metadata.get("broker_order_ids") or []))
+                or "|".join(sorted(metadata.get("client_order_ids") or []))
                 or str(metadata.get("trade_id") or "").strip()
                 or f"orphan-{len(unmatched_event_groups) + 1}"
             )
@@ -1854,11 +1883,13 @@ def build_broker_reconciliation_report(
                     "latest_status": None,
                     "events": [],
                     "broker_order_ids": set(metadata.get("broker_order_ids") or set()),
+                    "client_order_ids": set(metadata.get("client_order_ids") or set()),
                 },
             )
             group["event_counts"][event_key] += 1
             group["event_keys"].add(event_key)
             group["broker_order_ids"].update(metadata.get("broker_order_ids") or set())
+            group["client_order_ids"].update(metadata.get("client_order_ids") or set())
             if metadata.get("status"):
                 group["latest_status"] = metadata.get("status")
             group["events"].append(
@@ -1916,7 +1947,13 @@ def build_broker_reconciliation_report(
         issues: list[str] = []
         if local_item and event_info["event_counts"].get("order.submitted", 0) <= 0:
             issues.append("missing_order_submitted_event")
-        if local_item and event_info["event_counts"].get("order.filled", 0) <= 0 and local_entry_qty > 0:
+        fill_quantity_matches = abs(local_entry_qty - ledger_fill_qty) <= tolerance_qty
+        if (
+            local_item
+            and event_info["event_counts"].get("order.filled", 0) <= 0
+            and local_entry_qty > 0
+            and (ledger_fill_qty <= 0 or not fill_quantity_matches)
+        ):
             issues.append("missing_order_filled_event")
         if "closed" in list(local_item.get("sources") or []) and event_info["event_counts"].get("order.closed", 0) <= 0:
             issues.append("missing_order_closed_event")
@@ -1954,6 +1991,7 @@ def build_broker_reconciliation_report(
                 "sources": sorted(set(local_item.get("sources") or [])),
                 "broker_name": local_item.get("broker_name"),
                 "broker_order_ids": sorted(local_item.get("broker_order_ids") or []),
+                "client_order_ids": sorted(local_item.get("client_order_ids") or []),
                 "route_family": local_item.get("route_family") or "legacy",
                 "route_version": local_item.get("route_version"),
                 "route_correlation_id": local_item.get("route_correlation_id"),
@@ -1978,12 +2016,19 @@ def build_broker_reconciliation_report(
     current_route_orphan_event_count = 0
     legacy_orphan_event_count = 0
     for orphan_group in unmatched_event_groups.values():
-        rejected_only = (
-            orphan_group["event_counts"].get("order.rejected", 0) > 0
+        terminal_only = (
+            (
+                orphan_group["event_counts"].get("order.rejected", 0) > 0
+                or orphan_group["event_counts"].get("order.canceled", 0) > 0
+                or orphan_group["event_counts"].get("order.cancelled", 0) > 0
+                or orphan_group["event_counts"].get("order.expired", 0) > 0
+            )
             and orphan_group["event_counts"].get("order.filled", 0) <= 0
             and orphan_group["event_counts"].get("order.closed", 0) <= 0
+            and orphan_group["event_counts"].get("order.partially_closed", 0) <= 0
+            and orphan_group["event_counts"].get("order.close_working", 0) <= 0
         )
-        if rejected_only:
+        if terminal_only:
             continue
         orphan_issue = "current_route_orphan_order_events" if orphan_group.get("current_route") else "legacy_orphan_order_events"
         orphan_event_count = len(list(orphan_group.get("events") or [])) or int(sum(orphan_group["event_counts"].values()))
@@ -2000,6 +2045,7 @@ def build_broker_reconciliation_report(
                 "sources": [],
                 "broker_name": None,
                 "broker_order_ids": sorted(orphan_group.get("broker_order_ids") or []),
+                "client_order_ids": sorted(orphan_group.get("client_order_ids") or []),
                 "route_family": orphan_group.get("route_family") or "legacy",
                 "route_version": orphan_group.get("route_version"),
                 "route_correlation_id": orphan_group.get("route_correlation_id"),

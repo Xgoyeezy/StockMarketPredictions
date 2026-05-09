@@ -11,6 +11,7 @@ import { appConfig } from '../config/appConfig'
 const DEFAULT_FORM = {
   email: '',
   name: '',
+  loginSecret: '',
   organizationName: '',
 }
 
@@ -47,7 +48,7 @@ export default function AuthScreen() {
   const [localError, setLocalError] = useState('')
   const [entryContext, setEntryContext] = useState(null)
   const [entryLoading, setEntryLoading] = useState(false)
-  const provider = authConfig?.provider || 'local-demo'
+  const provider = authConfig?.provider || 'customer-access'
   const usesExternalRedirect = (
     (provider === 'auth0' && authConfig?.auth0?.ready)
     || (provider === 'oidc' && authConfig?.oidc?.ready)
@@ -123,23 +124,23 @@ export default function AuthScreen() {
     if (blockLocalLogin && entryContext?.tenant?.name) {
       return personalMode
         ? `Local sign-in is disabled for ${entryContext.tenant.name}. Continue with the configured identity provider to open this own-account trading desk.`
-        : `Local sign-in is disabled for ${entryContext.tenant.name}. Continue with the configured organization identity provider to open platform operations.`
+        : `Local sign-in is disabled for ${entryContext.tenant.name}. Continue with the configured organization identity provider to open the trading desk.`
     }
     if (providerSelection.domain_match && entryContext?.tenant?.name) {
       return personalMode
         ? `We detected the ${providerSelection.email_domain} sign-in domain for ${entryContext.tenant.name}. SSO is recommended for this operator desk, but local fallback is still available if that profile allows it.`
-        : `We detected the ${providerSelection.email_domain} organization domain for ${entryContext.tenant.name}. SSO is recommended for platform operations, but local fallback is still available if your organization allows it.`
+        : `We detected the ${providerSelection.email_domain} organization domain for ${entryContext.tenant.name}. SSO is recommended for the trading desk, but local fallback is still available if your organization allows it.`
     }
     if (entryContext?.routing?.requires_sso && entryContext?.tenant?.name) {
       const emailDomain = entryContext?.routing?.email_domain_hint ? ` Use your ${entryContext.routing.email_domain_hint} identity.` : ''
       return personalMode
         ? `Continue to ${entryContext.tenant.name} using the configured sign-in flow for this own-account operator desk.${emailDomain}`
-        : `Continue to ${entryContext.tenant.name} using the configured organization identity flow for platform operations.${emailDomain}`
+        : `Continue to ${entryContext.tenant.name} using the configured organization identity flow for the trading desk.${emailDomain}`
     }
     if (usesExternalRedirect) {
       return personalMode
         ? 'Continue with your sign-in provider. We will route you back into the active own-account desk after the callback completes.'
-        : 'Continue with your organization identity provider. We will redeem organization invites and route you back into platform operations after the callback completes.'
+        : 'Continue with your organization identity provider. We will redeem organization invites and route you back into the trading desk after the callback completes.'
     }
     if (authConfig?.supports_signup) {
       return personalMode
@@ -184,6 +185,7 @@ export default function AuthScreen() {
       await signIn({
         email: form.email,
         name: form.name,
+        login_secret: form.loginSecret || undefined,
         tenant_slug: organizationSlug || undefined,
         invite_token: queryInviteToken || undefined,
         organization_name: form.organizationName || undefined,
@@ -214,8 +216,8 @@ export default function AuthScreen() {
   return (
     <div className="auth-screen">
       <div className="auth-screen__panel">
-        <Kicker as="div" className="auth-screen__kicker">{personalMode ? 'Own-account desk access' : 'Organization operations access'}</Kicker>
-        <h1>{entryContext?.tenant?.name ? `Open ${entryContext.tenant.name}` : personalMode ? 'Sign in to your own-account trading desk' : 'Sign in to platform operations'}</h1>
+        <Kicker as="div" className="auth-screen__kicker">{personalMode ? 'Own-account desk access' : 'Trading workspace access'}</Kicker>
+        <h1>{entryContext?.tenant?.name ? `Open ${entryContext.tenant.name}` : personalMode ? 'Sign in to your own-account trading desk' : 'Sign in to the trading desk'}</h1>
         <p>{subtitle}</p>
 
         {entryContext?.tenant || queryInviteToken ? (
@@ -281,6 +283,18 @@ export default function AuthScreen() {
               disabled={busy}
             />
 
+            {authConfig?.local_session?.login_secret_required ? (
+              <TextField
+                label="Login secret"
+                type="password"
+                value={form.loginSecret}
+                onChange={(event) => setForm((current) => ({ ...current, loginSecret: event.target.value }))}
+                placeholder="Provided by the operator"
+                autoComplete="current-password"
+                disabled={busy}
+              />
+            ) : null}
+
             <TextField
               label={personalMode ? 'Desk label' : 'Organization name'}
               type="text"
@@ -309,7 +323,7 @@ export default function AuthScreen() {
             ) : null}
 
             <Button type="submit" variant="solid" disabled={busy || entryLoading}>
-              {busy ? 'Signing in...' : personalMode ? 'Open own-account desk' : 'Open platform operations'}
+              {busy ? 'Signing in...' : personalMode ? 'Open own-account desk' : 'Open trading desk'}
             </Button>
 
             {externalAvailable ? (
@@ -338,8 +352,12 @@ export default function AuthScreen() {
         )}
 
         <div className="auth-screen__meta">
-          <Chip tone="neutral" size="sm">Provider: {authConfig?.provider_label || authConfig?.provider || 'Auth'}</Chip>
-          <Chip tone="neutral" size="sm">Environment: {authConfig?.environment || 'development'}</Chip>
+          {!appConfig.customerReadyMode ? (
+            <>
+              <Chip tone="neutral" size="sm">Provider: {authConfig?.provider_label || authConfig?.provider || 'Auth'}</Chip>
+              <Chip tone="neutral" size="sm">Environment: {authConfig?.environment || 'development'}</Chip>
+            </>
+          ) : null}
           <Chip tone="neutral" size="sm">{authConfig?.supports_signup ? (personalMode ? 'Self-serve desk setup enabled' : 'Self-serve onboarding enabled') : 'Invite-only access'}</Chip>
           {entryContext?.routing?.entry_path ? <Chip tone="neutral" size="sm">Entry: {entryContext.routing.entry_path}</Chip> : null}
         </div>

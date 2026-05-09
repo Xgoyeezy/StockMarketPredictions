@@ -24,6 +24,12 @@ _WORKER_LAST_LOOP_AT: datetime | None = None
 _WORKER_LAST_SUCCESS_AT: datetime | None = None
 _WORKER_LAST_ERROR_AT: datetime | None = None
 _WORKER_LAST_ERROR_MESSAGE: str | None = None
+_WORKER_CURRENT_STAGE: str | None = None
+_WORKER_CURRENT_STAGE_STARTED_AT: datetime | None = None
+_WORKER_LAST_STAGE_COMPLETED_AT: datetime | None = None
+_WORKER_LAST_STAGE_SUMMARY: dict[str, Any] | None = None
+_WORKER_BACKGROUND_STAGE_THREADS: dict[str, Thread] = {}
+_WORKER_BACKGROUND_STAGE_STARTED_AT: dict[str, datetime] = {}
 
 _JOB_TYPE_LABELS = {
     "ai_desk_autonomous_cycle": "AI desk autonomous cycle",
@@ -72,6 +78,36 @@ def _classify_retryable_status(status_code: int | None) -> bool:
 
 def _is_sqlite_lock_error(exc: OperationalError) -> bool:
     return "database is locked" in str(exc).lower()
+
+
+def _rollback_quietly(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:  # pragma: no cover - rollback best effort
+        logger.exception("Failed to roll back async job database session.")
+
+
+def _flush_commit_with_sqlite_retry(db: Session, *, context: str) -> None:
+    last_error: OperationalError | None = None
+    for attempt in range(1, _SQLITE_LOCK_RETRY_ATTEMPTS + 1):
+        try:
+            db.flush()
+            db.commit()
+            return
+        except OperationalError as exc:
+            _rollback_quietly(db)
+            if not _is_sqlite_lock_error(exc) or attempt >= _SQLITE_LOCK_RETRY_ATTEMPTS:
+                raise
+            last_error = exc
+            logger.warning(
+                "Retrying async job %s after SQLite lock (attempt %s/%s).",
+                context,
+                attempt,
+                _SQLITE_LOCK_RETRY_ATTEMPTS,
+            )
+            time.sleep(_SQLITE_LOCK_RETRY_DELAY_SECONDS * attempt)
+    if last_error is not None:
+        raise last_error
 
 
 def enqueue_job(
@@ -186,8 +222,7 @@ def _claim_due_jobs(db: Session, *, limit: int) -> list[str]:
         row.attempt_count = int(row.attempt_count or 0) + 1
         claimed_ids.append(row.id)
     if claimed_ids:
-        db.flush()
-        db.commit()
+        _flush_commit_with_sqlite_retry(db, context="claim due jobs")
     return claimed_ids
 
 
@@ -269,7 +304,7 @@ def recover_stale_running_jobs(
             _mark_job_dead_letter(job, error_message=status_note, result=dict(job.result_json or {}), http_status=job.last_http_status)
             dead_lettered += 1
     if stale_jobs:
-        db.commit()
+        _flush_commit_with_sqlite_retry(db, context="recover stale running jobs")
     return {
         "recovered": recovered,
         "dead_lettered": dead_lettered,
@@ -410,6 +445,10 @@ def run_due_jobs(db: Session, *, limit: int | None = None) -> dict[str, Any]:
         try:
             outcome = _run_job_handler(db, job)
         except Exception as exc:  # pragma: no cover - defensive guard
+            _rollback_quietly(db)
+            job = db.get(AsyncJob, job_id)
+            if job is None:
+                continue
             logger.exception("Async job %s failed with an unexpected error.", job.id)
             outcome = {"ok": False, "retryable": True, "error": str(exc), "result": {}}
 
@@ -434,7 +473,7 @@ def run_due_jobs(db: Session, *, limit: int | None = None) -> dict[str, Any]:
                     http_status=outcome.get("http_status"),
                 )
                 summary["dead_letter"] += 1
-        db.commit()
+        _flush_commit_with_sqlite_retry(db, context=f"complete job {job_id}")
     return summary
 
 
@@ -464,7 +503,13 @@ def get_job_metrics_snapshot(
 
     status_counts = Counter(str(item.status or "queued") for item in jobs)
     type_counts = Counter(str(item.job_type or "unknown") for item in jobs)
+    dead_letter_type_counts = Counter(
+        str(item.job_type or "unknown")
+        for item in jobs
+        if item.status == "dead_letter"
+    )
     pending_jobs = [item for item in jobs if item.status in {"queued", "retrying", "running"}]
+    pending_type_counts = Counter(str(item.job_type or "unknown") for item in pending_jobs)
     running_jobs = [item for item in jobs if item.status == "running"]
     dead_letters = [item for item in jobs if item.status == "dead_letter"]
     recent_jobs = jobs[:12]
@@ -485,7 +530,9 @@ def get_job_metrics_snapshot(
             "running": status_counts.get("running", 0),
             "succeeded": status_counts.get("succeeded", 0),
             "dead_letter": status_counts.get("dead_letter", 0),
+            "dead_letter_by_type": dict(dead_letter_type_counts),
             "pending": len(pending_jobs),
+            "pending_by_type": dict(pending_type_counts),
             "stuck_running_count": len(stuck_running_jobs),
             "oldest_pending_at": min(
                 (
@@ -584,13 +631,73 @@ def get_job_worker_status() -> dict[str, Any]:
     with _WORKER_LOCK:
         thread = _WORKER_THREAD
         running = bool(thread and thread.is_alive())
+        now = _utc_now()
+        current_stage = _WORKER_CURRENT_STAGE
+        current_stage_started_at = _WORKER_CURRENT_STAGE_STARTED_AT
+        background_stage_ages = {
+            stage_name: max(0, int((now - started_at).total_seconds()))
+            for stage_name, started_at in _WORKER_BACKGROUND_STAGE_STARTED_AT.items()
+            if _worker_background_stage_running(stage_name)
+        }
+        background_stale_seconds = max(background_stage_ages.values()) if background_stage_ages else None
+        stage_age_seconds = (
+            max(0, int((now - current_stage_started_at).total_seconds()))
+            if current_stage_started_at is not None
+            else None
+        )
+        loop_age_seconds = (
+            max(0, int((now - _WORKER_LAST_LOOP_AT).total_seconds()))
+            if _WORKER_LAST_LOOP_AT is not None
+            else None
+        )
+        stale_threshold_seconds = max(30, int(getattr(settings, "job_worker_stale_seconds", 90) or 90))
+        background_stage_stale = bool(
+            background_stale_seconds is not None and background_stale_seconds > stale_threshold_seconds
+        )
+        stale = bool(
+            running
+            and (
+                (stage_age_seconds is not None and stage_age_seconds > stale_threshold_seconds)
+                or (
+                    current_stage is None
+                    and loop_age_seconds is not None
+                    and loop_age_seconds > stale_threshold_seconds
+                )
+            )
+        )
         return {
             "enabled": bool(settings.job_worker_enabled),
             "running": running,
+            "status": "running_but_stale" if stale else "running" if running else "stopped",
             "thread_name": thread.name if thread else None,
             "stop_requested": bool(_WORKER_STOP.is_set()),
             "poll_seconds": int(settings.job_worker_poll_seconds),
             "batch_size": int(settings.job_worker_batch_size),
+            "stale": stale,
+            "stale_seconds": stage_age_seconds if current_stage else loop_age_seconds,
+            "background_stage_stale": background_stage_stale,
+            "background_stale_seconds": background_stale_seconds,
+            "stale_threshold_seconds": stale_threshold_seconds,
+            "current_stage": current_stage,
+            "current_stage_started_at": current_stage_started_at.isoformat() if current_stage_started_at else None,
+            "current_stage_age_seconds": stage_age_seconds,
+            "background_stages": {
+                stage_name: {
+                    "running": bool(thread and thread.is_alive()),
+                    "thread_name": thread.name if thread else None,
+                    "started_at": (
+                        _WORKER_BACKGROUND_STAGE_STARTED_AT.get(stage_name).isoformat()
+                        if _WORKER_BACKGROUND_STAGE_STARTED_AT.get(stage_name)
+                        else None
+                    ),
+                    "age_seconds": background_stage_ages.get(stage_name),
+                }
+                for stage_name, thread in _WORKER_BACKGROUND_STAGE_THREADS.items()
+            },
+            "last_stage_completed_at": (
+                _WORKER_LAST_STAGE_COMPLETED_AT.isoformat() if _WORKER_LAST_STAGE_COMPLETED_AT else None
+            ),
+            "last_stage_summary": dict(_WORKER_LAST_STAGE_SUMMARY or {}),
             "last_loop_at": _WORKER_LAST_LOOP_AT.isoformat() if _WORKER_LAST_LOOP_AT else None,
             "last_success_at": _WORKER_LAST_SUCCESS_AT.isoformat() if _WORKER_LAST_SUCCESS_AT else None,
             "last_error_at": _WORKER_LAST_ERROR_AT.isoformat() if _WORKER_LAST_ERROR_AT else None,
@@ -598,54 +705,238 @@ def get_job_worker_status() -> dict[str, Any]:
         }
 
 
+def _summarize_worker_stage_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        summary_keys = (
+            "processed",
+            "eligible",
+            "skipped",
+            "errors",
+            "claimed",
+            "succeeded",
+            "retried",
+            "dead_letter",
+            "desks_processed",
+            "desks_skipped",
+            "desk_errors",
+            "due_desks",
+            "deferred_due_desks",
+            "ran_count",
+            "skipped_count",
+        )
+        return {key: result.get(key) for key in summary_keys if key in result}
+    if result is None:
+        return {}
+    return {"result_type": type(result).__name__}
+
+
+def _run_worker_stage(stage_name: str, action: Any) -> bool:
+    global _WORKER_CURRENT_STAGE, _WORKER_CURRENT_STAGE_STARTED_AT
+    global _WORKER_LAST_STAGE_COMPLETED_AT, _WORKER_LAST_STAGE_SUMMARY
+    global _WORKER_LAST_SUCCESS_AT, _WORKER_LAST_ERROR_AT, _WORKER_LAST_ERROR_MESSAGE
+    stage_started_at = _utc_now()
+    _WORKER_CURRENT_STAGE = stage_name
+    _WORKER_CURRENT_STAGE_STARTED_AT = stage_started_at
+    try:
+        result = action()
+        completed_at = _utc_now()
+        _WORKER_LAST_STAGE_COMPLETED_AT = completed_at
+        _WORKER_LAST_STAGE_SUMMARY = {
+            "stage": stage_name,
+            "status": "succeeded",
+            "started_at": stage_started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
+            "duration_seconds": round((completed_at - stage_started_at).total_seconds(), 3),
+            "result": _summarize_worker_stage_result(result),
+        }
+        _WORKER_LAST_SUCCESS_AT = completed_at
+        return True
+    except Exception as exc:  # pragma: no cover - defensive worker logging
+        completed_at = _utc_now()
+        logger.exception("Async job worker stage failed: %s", stage_name)
+        _WORKER_LAST_ERROR_AT = completed_at
+        _WORKER_LAST_ERROR_MESSAGE = f"Async job worker stage failed: {stage_name}: {exc}"
+        _WORKER_LAST_STAGE_COMPLETED_AT = completed_at
+        _WORKER_LAST_STAGE_SUMMARY = {
+            "stage": stage_name,
+            "status": "failed",
+            "started_at": stage_started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
+            "duration_seconds": round((completed_at - stage_started_at).total_seconds(), 3),
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+        return False
+    finally:
+        _WORKER_CURRENT_STAGE = None
+        _WORKER_CURRENT_STAGE_STARTED_AT = None
+
+
+def _worker_background_stage_running(stage_name: str) -> bool:
+    thread = _WORKER_BACKGROUND_STAGE_THREADS.get(stage_name)
+    return bool(thread and thread.is_alive())
+
+
+def _start_worker_background_stage(stage_name: str, action: Any) -> dict[str, Any]:
+    global _WORKER_LAST_STAGE_SUMMARY
+    if _worker_background_stage_running(stage_name):
+        _WORKER_LAST_STAGE_SUMMARY = {
+            "stage": stage_name,
+            "status": "already_running",
+            "checked_at": _utc_now().isoformat(),
+            "detail": "Stage is still running in its supervised background thread.",
+        }
+        return dict(_WORKER_LAST_STAGE_SUMMARY)
+
+    def _runner() -> None:
+        global _WORKER_LAST_STAGE_COMPLETED_AT, _WORKER_LAST_STAGE_SUMMARY
+        global _WORKER_LAST_SUCCESS_AT, _WORKER_LAST_ERROR_AT, _WORKER_LAST_ERROR_MESSAGE
+        stage_started_at = _WORKER_BACKGROUND_STAGE_STARTED_AT.get(stage_name) or _utc_now()
+        try:
+            result = action()
+            completed_at = _utc_now()
+            _WORKER_LAST_STAGE_COMPLETED_AT = completed_at
+            _WORKER_LAST_STAGE_SUMMARY = {
+                "stage": stage_name,
+                "status": "succeeded",
+                "started_at": stage_started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": round((completed_at - stage_started_at).total_seconds(), 3),
+                "result": _summarize_worker_stage_result(result),
+                "background": True,
+            }
+            _WORKER_LAST_SUCCESS_AT = completed_at
+        except Exception as exc:  # pragma: no cover - defensive worker logging
+            completed_at = _utc_now()
+            logger.exception("Async job worker background stage failed: %s", stage_name)
+            _WORKER_LAST_ERROR_AT = completed_at
+            _WORKER_LAST_ERROR_MESSAGE = f"Async job worker background stage failed: {stage_name}: {exc}"
+            _WORKER_LAST_STAGE_COMPLETED_AT = completed_at
+            _WORKER_LAST_STAGE_SUMMARY = {
+                "stage": stage_name,
+                "status": "failed",
+                "started_at": stage_started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": round((completed_at - stage_started_at).total_seconds(), 3),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "background": True,
+            }
+        finally:
+            _WORKER_BACKGROUND_STAGE_STARTED_AT.pop(stage_name, None)
+
+    thread = Thread(target=_runner, name=f"stock-signals-{stage_name}", daemon=True)
+    _WORKER_BACKGROUND_STAGE_THREADS[stage_name] = thread
+    _WORKER_BACKGROUND_STAGE_STARTED_AT[stage_name] = _utc_now()
+    thread.start()
+    _WORKER_LAST_STAGE_SUMMARY = {
+        "stage": stage_name,
+        "status": "started_background",
+        "started_at": _utc_now().isoformat(),
+        "thread_name": thread.name,
+    }
+    return dict(_WORKER_LAST_STAGE_SUMMARY)
+
+
 def _worker_loop() -> None:
     global _WORKER_LAST_LOOP_AT, _WORKER_LAST_SUCCESS_AT, _WORKER_LAST_ERROR_AT, _WORKER_LAST_ERROR_MESSAGE
     while not _WORKER_STOP.is_set():
         _WORKER_LAST_LOOP_AT = _utc_now()
         try:
-            with SessionLocal() as db:
-                run_due_jobs(db, limit=settings.job_worker_batch_size)
-            with SessionLocal() as db:
-                from backend.services.trade_automation_service import (
-                    run_enabled_trade_automation_cycles,
-                    run_trade_automation_limited_live_cap_expansion_canary_reviews,
-                    run_trade_automation_limited_live_cap_expansion_reports,
-                    run_trade_automation_limited_live_broker_reconciliations,
-                    run_trade_automation_limited_live_daily_closeouts,
-                    run_trade_automation_limited_live_higher_cap_reports,
-                    run_trade_automation_limited_live_next_tier_cap_canary_reviews,
-                    run_trade_automation_limited_live_next_tier_cap_reports,
-                    run_trade_automation_limited_live_rollout_canary_reviews,
-                    run_trade_automation_live_pilot_expansion_canary_reviews,
-                    run_trade_automation_live_pilot_canary_reviews,
-                    run_trade_automation_live_pilot_promotion_reports,
-                    run_trade_automation_live_pilot_window_canary_reviews,
-                    run_trade_automation_paper_broker_reconciliations,
-                    run_trade_automation_paper_canary_reviews,
-                    run_trade_automation_paper_order_lifecycle_canary_reviews,
-                    run_trade_automation_daily_ai_reviews,
-                )
+            def _run_async_jobs_stage() -> Any:
+                with SessionLocal() as db:
+                    return run_due_jobs(db, limit=settings.job_worker_batch_size)
 
-                run_enabled_trade_automation_cycles(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_daily_ai_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_paper_broker_reconciliations(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_paper_order_lifecycle_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_paper_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_live_pilot_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_live_pilot_expansion_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_live_pilot_window_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_live_pilot_promotion_reports(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_rollout_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_cap_expansion_reports(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_cap_expansion_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_next_tier_cap_reports(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_broker_reconciliations(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_daily_closeouts(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_next_tier_cap_canary_reviews(db, limit=settings.job_worker_batch_size)
-                run_trade_automation_limited_live_higher_cap_reports(db, limit=settings.job_worker_batch_size)
-            _WORKER_LAST_SUCCESS_AT = _utc_now()
-            _WORKER_LAST_ERROR_AT = None
-            _WORKER_LAST_ERROR_MESSAGE = None
+            _run_worker_stage("async_jobs", _run_async_jobs_stage)
+            if not settings.trade_automation_worker_enabled:
+                completed_at = _utc_now()
+                _WORKER_LAST_STAGE_COMPLETED_AT = completed_at
+                _WORKER_LAST_STAGE_SUMMARY = {
+                    "stage": "trade_automation_worker",
+                    "status": "skipped",
+                    "completed_at": completed_at.isoformat(),
+                    "detail": "Trade automation background stages are disabled for this runtime profile.",
+                }
+                _WORKER_LAST_SUCCESS_AT = completed_at
+                _WORKER_LAST_ERROR_AT = None
+                _WORKER_LAST_ERROR_MESSAGE = None
+                _WORKER_STOP.wait(max(1, settings.job_worker_poll_seconds))
+                continue
+
+            from backend.services.trade_automation_service import (
+                run_enabled_trade_automation_cycles,
+                run_trade_automation_limited_live_cap_expansion_canary_reviews,
+                run_trade_automation_limited_live_cap_expansion_reports,
+                run_trade_automation_limited_live_broker_reconciliations,
+                run_trade_automation_limited_live_daily_closeouts,
+                run_trade_automation_limited_live_higher_cap_reports,
+                run_trade_automation_limited_live_next_tier_cap_canary_reviews,
+                run_trade_automation_limited_live_next_tier_cap_reports,
+                run_trade_automation_limited_live_rollout_canary_reviews,
+                run_trade_automation_live_pilot_expansion_canary_reviews,
+                run_trade_automation_live_pilot_canary_reviews,
+                run_trade_automation_live_pilot_promotion_reports,
+                run_trade_automation_live_pilot_window_canary_reviews,
+                run_trade_automation_paper_broker_reconciliations,
+                run_trade_automation_paper_canary_reviews,
+                run_trade_automation_paper_evidence_reviews,
+                run_trade_automation_paper_order_lifecycle_canary_reviews,
+                run_trade_automation_replay_lab_reviews,
+                run_trade_automation_transaction_cost_calibration_reviews,
+                run_trade_automation_daily_ai_reviews,
+                trade_automation_write_guard,
+            )
+
+            def _run_trade_stage(stage_name: str, fn: Any) -> bool:
+                def _action() -> Any:
+                    with SessionLocal() as db:
+                        with trade_automation_write_guard():
+                            return fn(db, limit=settings.job_worker_batch_size)
+
+                return _run_worker_stage(stage_name, _action)
+
+            def _trade_automation_cycles_action() -> Any:
+                with SessionLocal() as db:
+                    with trade_automation_write_guard():
+                        return run_enabled_trade_automation_cycles(
+                            db,
+                            limit=settings.job_worker_batch_size,
+                            worker_scan=True,
+                        )
+
+            _start_worker_background_stage("trade_automation_cycles", _trade_automation_cycles_action)
+            if _worker_background_stage_running("trade_automation_cycles"):
+                _WORKER_STOP.wait(max(1, settings.job_worker_poll_seconds))
+                continue
+
+            stages = (
+                ("trade_automation_daily_ai_reviews", run_trade_automation_daily_ai_reviews),
+                ("trade_automation_paper_evidence_reviews", run_trade_automation_paper_evidence_reviews),
+                ("trade_automation_paper_broker_reconciliations", run_trade_automation_paper_broker_reconciliations),
+                ("trade_automation_paper_order_lifecycle_canary_reviews", run_trade_automation_paper_order_lifecycle_canary_reviews),
+                ("trade_automation_paper_canary_reviews", run_trade_automation_paper_canary_reviews),
+                ("trade_automation_replay_lab_reviews", run_trade_automation_replay_lab_reviews),
+                ("trade_automation_transaction_cost_calibration_reviews", run_trade_automation_transaction_cost_calibration_reviews),
+                ("trade_automation_live_pilot_canary_reviews", run_trade_automation_live_pilot_canary_reviews),
+                ("trade_automation_live_pilot_expansion_canary_reviews", run_trade_automation_live_pilot_expansion_canary_reviews),
+                ("trade_automation_live_pilot_window_canary_reviews", run_trade_automation_live_pilot_window_canary_reviews),
+                ("trade_automation_live_pilot_promotion_reports", run_trade_automation_live_pilot_promotion_reports),
+                ("trade_automation_limited_live_rollout_canary_reviews", run_trade_automation_limited_live_rollout_canary_reviews),
+                ("trade_automation_limited_live_cap_expansion_reports", run_trade_automation_limited_live_cap_expansion_reports),
+                ("trade_automation_limited_live_cap_expansion_canary_reviews", run_trade_automation_limited_live_cap_expansion_canary_reviews),
+                ("trade_automation_limited_live_next_tier_cap_reports", run_trade_automation_limited_live_next_tier_cap_reports),
+                ("trade_automation_limited_live_broker_reconciliations", run_trade_automation_limited_live_broker_reconciliations),
+                ("trade_automation_limited_live_daily_closeouts", run_trade_automation_limited_live_daily_closeouts),
+                ("trade_automation_limited_live_next_tier_cap_canary_reviews", run_trade_automation_limited_live_next_tier_cap_canary_reviews),
+                ("trade_automation_limited_live_higher_cap_reports", run_trade_automation_limited_live_higher_cap_reports),
+            )
+            stage_failures = 0
+            for stage_name, fn in stages:
+                if not _run_trade_stage(stage_name, fn):
+                    stage_failures += 1
+            if stage_failures == 0:
+                _WORKER_LAST_ERROR_AT = None
+                _WORKER_LAST_ERROR_MESSAGE = None
         except Exception:  # pragma: no cover - defensive worker logging
             logger.exception("Async job worker loop failed.")
             _WORKER_LAST_ERROR_AT = _utc_now()

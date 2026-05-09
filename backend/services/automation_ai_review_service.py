@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, time, timedelta, timezone
+from time import perf_counter
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -30,6 +31,49 @@ AI_SETTINGS_DEFAULTS: dict[str, Any] = {
     "ai_review_min_trades": 3,
     "ai_max_daily_setting_changes": 4,
     "ai_max_step_pct": 20.0,
+    "ai_evidence_review_enabled": True,
+    "ai_evidence_review_mode": "shadow_review",
+    "ai_evidence_min_confidence": 0.70,
+    "ai_evidence_max_candidates_per_cycle": 12,
+}
+
+AI_EVIDENCE_REVIEW_MODES = {"shadow_review", "paper_assist"}
+AI_EVIDENCE_HARD_BLOCKERS = {
+    "kill_switch",
+    "daily_loss_budget_lock",
+    "daily_objective_entry_lock",
+    "target_reached_protect_streak",
+    "cooldown_active",
+    "stale_quote",
+    "spread_too_wide",
+    "broker_live_locked",
+    "non_alpaca_route",
+    "route_not_paper",
+    "session_closed",
+    "close_cleanup",
+}
+
+AI_EVIDENCE_REASON_CODE_MAP = {
+    "qualified_opportunity_score": "opportunity_score_incomplete",
+    "fresh_deep_or_rapid_confirmation": "confirmation_incomplete",
+    "relative_volume": "volume_evidence_missing",
+    "relative_volume_expansion": "volume_evidence_weak",
+    "spread": "spread_evidence_missing",
+    "valid_trade_decision": "trade_decision_incomplete",
+    "routeable_ranking_tier": "ranking_tier_not_routeable",
+    "ai_evidence_review_slot": "outside_review_limit",
+    "kill_switch": "hard_safety_lock",
+    "daily_loss_budget_lock": "hard_loss_lock",
+    "daily_objective_entry_lock": "hard_objective_lock",
+    "target_reached_protect_streak": "hard_objective_lock",
+    "cooldown_active": "hard_cooldown_lock",
+    "stale_quote": "hard_stale_data",
+    "spread_too_wide": "hard_spread_lock",
+    "broker_live_locked": "hard_live_lock",
+    "non_alpaca_route": "hard_route_lock",
+    "route_not_paper": "hard_route_lock",
+    "session_closed": "hard_session_lock",
+    "close_cleanup": "hard_close_cleanup",
 }
 
 AI_TUNABLE_LIMITS: dict[str, tuple[str, float | int, float | int]] = {
@@ -136,6 +180,11 @@ def _clamp_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:
 
 def normalize_ai_review_settings(settings_state: dict[str, Any] | None) -> dict[str, Any]:
     state = dict(settings_state or {})
+    mode = str(
+        state.get("ai_evidence_review_mode") or AI_SETTINGS_DEFAULTS["ai_evidence_review_mode"]
+    ).strip().lower()
+    if mode not in AI_EVIDENCE_REVIEW_MODES:
+        mode = str(AI_SETTINGS_DEFAULTS["ai_evidence_review_mode"])
     return {
         "ai_daily_review_enabled": _coerce_bool(
             state.get("ai_daily_review_enabled"),
@@ -167,7 +216,546 @@ def normalize_ai_review_settings(settings_state: dict[str, Any] | None) -> dict[
             minimum=1.0,
             maximum=50.0,
         ),
+        "ai_evidence_review_enabled": _coerce_bool(
+            state.get("ai_evidence_review_enabled"),
+            bool(AI_SETTINGS_DEFAULTS["ai_evidence_review_enabled"]),
+        ),
+        "ai_evidence_review_mode": mode,
+        "ai_evidence_min_confidence": _clamp_float(
+            state.get("ai_evidence_min_confidence"),
+            float(AI_SETTINGS_DEFAULTS["ai_evidence_min_confidence"]),
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "ai_evidence_max_candidates_per_cycle": _clamp_int(
+            state.get("ai_evidence_max_candidates_per_cycle"),
+            int(AI_SETTINGS_DEFAULTS["ai_evidence_max_candidates_per_cycle"]),
+            minimum=1,
+            maximum=50,
+        ),
     }
+
+
+def _evidence_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if pd.isna(parsed):
+        return default
+    return float(parsed)
+
+
+def _nested_evidence_float(payload: dict[str, Any], nested_key: str, key: str) -> float | None:
+    nested = payload.get(nested_key)
+    if isinstance(nested, dict):
+        return _evidence_float(nested.get(key))
+    return None
+
+
+def _evidence_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "ready", "fresh"}
+    return bool(value)
+
+
+def _candidate_ai_value(candidate: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = candidate.get(key)
+        if value not in (None, ""):
+            return value
+    for key in keys:
+        for nested_key in ("opportunity_capture", "scores", "deep_analysis", "risk"):
+            nested = candidate.get(nested_key)
+            if isinstance(nested, dict):
+                value = nested.get(key)
+                if value not in (None, ""):
+                    return value
+    return None
+
+
+def _ai_evidence_reason_code(reason: Any) -> str:
+    normalized = str(reason or "").strip().lower()
+    if not normalized:
+        return "unspecified"
+    return AI_EVIDENCE_REASON_CODE_MAP.get(normalized, normalized)
+
+
+def _ai_evidence_review_truth_tag(
+    review: dict[str, Any],
+    candidate: dict[str, Any] | None = None,
+) -> str:
+    candidate = dict(candidate or {})
+    verdict = str(review.get("verdict") or "").strip().lower()
+    blocker = str(candidate.get("blocker") or candidate.get("diagnostic_blocker") or "").strip().lower()
+    opportunity_score = _evidence_float(
+        review.get("opportunity_score"),
+        _evidence_float(candidate.get("opportunity_score"), 0.0) or 0.0,
+    ) or 0.0
+    rapid_confirmed = _evidence_bool(
+        review.get("confirmation_ready")
+        or candidate.get("rapid_confirmed")
+        or candidate.get("confirmation_ready")
+    )
+    if verdict == "approve_evidence" and blocker:
+        return "possible_false_positive_blocked_by_gate"
+    if verdict == "reject_evidence" and opportunity_score >= 72.0 and rapid_confirmed:
+        return "possible_false_negative_strong_event"
+    if verdict == "wait_for_confirmation" and opportunity_score >= 72.0:
+        return "incomplete_high_score_event"
+    if verdict == "size_down":
+        return "approved_with_risk_haircut"
+    if verdict == "approve_evidence":
+        return "shadow_approval_waiting_outcome"
+    if verdict == "reject_evidence":
+        return "shadow_rejection_waiting_outcome"
+    return "shadow_review_waiting_outcome"
+
+
+def build_ai_evidence_review_report(
+    reviews: list[dict[str, Any]],
+    *,
+    candidates: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Aggregate intraday referee reviews without changing trading behavior."""
+
+    now = now or _utc_now()
+    candidate_rows = [dict(item or {}) for item in list(candidates or [])]
+    review_rows = [dict(item or {}) for item in list(reviews or [])]
+    verdict_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    reason_code_counts: Counter[str] = Counter()
+    missing_buckets: Counter[str] = Counter()
+    hard_blocker_counts: Counter[str] = Counter()
+    ticker_approval_counts: Counter[str] = Counter()
+    blocker_rejection_counts: Counter[str] = Counter()
+    truth_tags: Counter[str] = Counter()
+    confidence_values: list[float] = []
+    latency_values: list[float] = []
+    incomplete_rows: list[dict[str, Any]] = []
+
+    for index, review in enumerate(review_rows):
+        candidate = candidate_rows[index] if index < len(candidate_rows) else {}
+        verdict = str(review.get("verdict") or "not_reviewed").strip().lower() or "not_reviewed"
+        status = str(review.get("status") or "not_reviewed").strip().lower() or "not_reviewed"
+        verdict_counts[verdict] += 1
+        status_counts[status] += 1
+        confidence = _evidence_float(review.get("confidence"))
+        if confidence is not None:
+            confidence_values.append(confidence)
+        latency_ms = _evidence_float(review.get("review_latency_ms"))
+        if latency_ms is not None:
+            latency_values.append(latency_ms)
+        ticker = str(review.get("ticker") or candidate.get("ticker") or "").strip().upper()
+        if verdict == "approve_evidence" and ticker:
+            ticker_approval_counts[ticker] += 1
+        blocker = str(candidate.get("blocker") or candidate.get("diagnostic_blocker") or "").strip().lower()
+        if verdict == "reject_evidence" and blocker:
+            blocker_rejection_counts[blocker] += 1
+        for missing in list(review.get("missing_evidence") or []):
+            code = _ai_evidence_reason_code(missing)
+            missing_buckets[code] += 1
+            reason_code_counts[code] += 1
+        for hard_blocker in list(review.get("hard_blockers") or []):
+            code = _ai_evidence_reason_code(hard_blocker)
+            hard_blocker_counts[code] += 1
+            reason_code_counts[code] += 1
+        tag = _ai_evidence_review_truth_tag(review, candidate)
+        truth_tags[tag] += 1
+        if review.get("missing_evidence"):
+            incomplete_rows.append(
+                {
+                    "ticker": ticker or None,
+                    "verdict": verdict,
+                    "missing_evidence": list(review.get("missing_evidence") or [])[:6],
+                    "reason_codes": [_ai_evidence_reason_code(item) for item in list(review.get("missing_evidence") or [])[:6]],
+                    "next_action": review.get("next_action"),
+                }
+            )
+
+    avg_confidence = round(sum(confidence_values) / len(confidence_values), 4) if confidence_values else None
+    return serialize_value(
+        {
+            "generated_at": _serialize_datetime(now),
+            "reviewed_count": status_counts.get("reviewed", 0),
+            "total_count": len(review_rows),
+            "approved_count": verdict_counts.get("approve_evidence", 0),
+            "wait_count": verdict_counts.get("wait_for_confirmation", 0),
+            "size_down_count": verdict_counts.get("size_down", 0),
+            "rejected_count": verdict_counts.get("reject_evidence", 0),
+            "verdict_counts": dict(verdict_counts),
+            "status_counts": dict(status_counts),
+            "reason_code_counts": dict(reason_code_counts),
+            "evidence_incomplete_buckets": dict(missing_buckets),
+            "hard_blocker_counts": dict(hard_blocker_counts),
+            "confidence": {
+                "average": avg_confidence,
+                "min": round(min(confidence_values), 4) if confidence_values else None,
+                "max": round(max(confidence_values), 4) if confidence_values else None,
+                "sample_count": len(confidence_values),
+                "calibration": "shadow_pending_outcomes",
+            },
+            "confidence_drift": {
+                "status": "collecting_shadow_sample",
+                "baseline": avg_confidence,
+                "current": avg_confidence,
+                "drift": 0.0 if avg_confidence is not None else None,
+            },
+            "review_latency": {
+                "average_ms": round(sum(latency_values) / len(latency_values), 4) if latency_values else 0.0,
+                "max_ms": round(max(latency_values), 4) if latency_values else 0.0,
+                "sample_count": len(latency_values),
+            },
+            "approval_trend_by_ticker": dict(ticker_approval_counts),
+            "rejection_trend_by_blocker": dict(blocker_rejection_counts),
+            "shadow_vs_outcome": {
+                "mode": "shadow_pending_outcomes",
+                "truth_tag_counts": dict(truth_tags),
+                "false_positive_tags": {
+                    key: value
+                    for key, value in truth_tags.items()
+                    if key.startswith("possible_false_positive")
+                },
+                "false_negative_tags": {
+                    key: value
+                    for key, value in truth_tags.items()
+                    if key.startswith("possible_false_negative")
+                },
+            },
+            "evidence_incomplete": incomplete_rows[:12],
+            "export": {
+                "available": bool(review_rows),
+                "format": "json",
+                "retention": {
+                    "runtime_rows": len(review_rows),
+                    "history_limit": AI_REVIEW_HISTORY_LIMIT,
+                    "journal_limit_days": AI_DAILY_JOURNAL_LIMIT,
+                },
+            },
+            "operator_override_notes": {
+                "supported": True,
+                "required_for_live": True,
+                "detail": "Operator notes are evidence only; they do not bypass final risk gates.",
+            },
+            "paper_assist": {
+                "dry_run_only": True,
+                "can_approve_orders": False,
+                "can_override_risk_gates": False,
+            },
+        }
+    )
+
+
+def build_missed_trade_ai_review(
+    candidates: list[dict[str, Any]],
+    *,
+    limit: int = 12,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    now = now or _utc_now()
+    rows: list[dict[str, Any]] = []
+    for candidate in list(candidates or []):
+        item = dict(candidate or {})
+        if bool(item.get("eligible")):
+            continue
+        opportunity = dict(item.get("opportunity_capture") or {})
+        score = _evidence_float(opportunity.get("score"), _evidence_float(item.get("opportunity_score"), 0.0) or 0.0) or 0.0
+        stage_score = _evidence_float(item.get("stage_one_score"), 0.0) or 0.0
+        deep_score = _evidence_float(item.get("deep_score"), 0.0) or 0.0
+        review = dict(item.get("ai_evidence_review") or {})
+        if score <= 0.0 and stage_score <= 0.0 and deep_score <= 0.0 and not review:
+            continue
+        rows.append(
+            {
+                "candidate_lifecycle_id": item.get("candidate_lifecycle_id"),
+                "ticker": item.get("ticker"),
+                "opportunity_score": round(score, 4),
+                "stage_one_score": stage_score,
+                "deep_score": deep_score,
+                "blocker": item.get("blocker"),
+                "blocker_at_move": item.get("blocker_at_move") or item.get("blocker"),
+                "ai_verdict": review.get("verdict"),
+                "ai_confidence": review.get("confidence"),
+                "would_we_catch_it_now": (
+                    "yes_needs_final_gates"
+                    if review.get("verdict") in {"approve_evidence", "size_down"}
+                    else "wait_for_confirmation"
+                    if review.get("verdict") == "wait_for_confirmation" or score >= 72.0
+                    else "no_current_evidence"
+                ),
+                "next_action": item.get("next_action") or review.get("next_action"),
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            _evidence_float(item.get("opportunity_score"), 0.0) or 0.0,
+            _evidence_float(item.get("stage_one_score"), 0.0) or 0.0,
+            _evidence_float(item.get("deep_score"), 0.0) or 0.0,
+        ),
+        reverse=True,
+    )
+    catchable = sum(1 for item in rows if item["would_we_catch_it_now"] != "no_current_evidence")
+    return serialize_value(
+        {
+            "generated_at": _serialize_datetime(now),
+            "reviewed_count": len(rows),
+            "catchable_now_count": catchable,
+            "catch_rate": round(catchable / len(rows), 4) if rows else None,
+            "rows": rows[: max(1, int(limit or 12))],
+            "next_action": (
+                "Review high-score blocked rows first; do not loosen risk gates."
+                if rows
+                else "No missed-trade candidates with enough evidence were found in the current diagnostics."
+            ),
+        }
+    )
+
+
+def review_trade_candidate_evidence(
+    candidate: dict[str, Any],
+    *,
+    settings_state: dict[str, Any] | None = None,
+    state: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Rules-backed intraday evidence referee.
+
+    This is intentionally deterministic for v1. It explains evidence quality
+    and never creates a standalone route to execution.
+    """
+
+    started_at = perf_counter()
+    now = now or _utc_now()
+    settings_state = dict(settings_state or {})
+    state = dict(state or {})
+    ai_settings = normalize_ai_review_settings(settings_state)
+    enabled = bool(ai_settings["ai_evidence_review_enabled"])
+    mode = str(ai_settings["ai_evidence_review_mode"])
+    min_confidence = float(ai_settings["ai_evidence_min_confidence"])
+    ticker = str(candidate.get("ticker") or candidate.get("symbol") or "").strip().upper() or None
+    if not enabled:
+        return {
+            "status": "disabled",
+            "mode": mode,
+            "verdict": "wait_for_confirmation",
+            "confidence": 0.0,
+            "reason_codes": ["ai_evidence_review_disabled"],
+            "reasons": ["AI evidence review is disabled."],
+            "missing_evidence": ["ai_evidence_review_enabled"],
+            "evidence_incomplete_buckets": ["ai_evidence_review_disabled"],
+            "next_action": "Use normal strategy, risk, and execution gates.",
+            "reviewed_at": _serialize_datetime(now),
+            "review_latency_ms": round((perf_counter() - started_at) * 1000.0, 4),
+            "ticker": ticker,
+        }
+
+    opportunity_score = (
+        _evidence_float(_candidate_ai_value(candidate, "opportunity_score", "score"))
+        or _nested_evidence_float(candidate, "opportunity_capture", "score")
+        or 0.0
+    )
+    min_opportunity_score = _evidence_float(settings_state.get("min_opportunity_score"), 72.0) or 72.0
+    relative_volume = (
+        _evidence_float(_candidate_ai_value(candidate, "relative_volume"))
+        or _nested_evidence_float(candidate, "opportunity_capture", "relative_volume")
+    )
+    min_relative_volume = _evidence_float(settings_state.get("min_breakout_relative_volume"), 1.4) or 1.4
+    spread_bps = _evidence_float(
+        _candidate_ai_value(candidate, "spread_bps", "spread_estimate_bps", "daily_objective_spread_bps")
+    )
+    max_spread_bps = _evidence_float(
+        settings_state.get("max_spread_bps_for_opportunity"),
+        _evidence_float(settings_state.get("max_spread_bps"), 35.0) or 35.0,
+    ) or 35.0
+    execution_score = _evidence_float(_candidate_ai_value(candidate, "execution_score"), 0.0) or 0.0
+    portfolio_score = _evidence_float(_candidate_ai_value(candidate, "portfolio_score"), 0.0) or 0.0
+    deep_score = _evidence_float(_candidate_ai_value(candidate, "deep_score"), 0.0) or 0.0
+    edge_to_cost = _evidence_float(_candidate_ai_value(candidate, "edge_to_cost_ratio"))
+    opportunity_type = str(
+        _candidate_ai_value(candidate, "opportunity_type", "type") or "none"
+    ).strip().lower()
+    rapid_confirmed = _evidence_bool(_candidate_ai_value(candidate, "rapid_confirmed"))
+    deep_status = str(_candidate_ai_value(candidate, "deep_analysis_status", "status") or "").strip().lower()
+    deep_cache_fresh = _evidence_bool(_candidate_ai_value(candidate, "deep_analysis_cache_fresh", "cache_fresh"))
+    blocker = str(
+        candidate.get("blocker")
+        or candidate.get("diagnostic_blocker")
+        or candidate.get("rejected_reason")
+        or ""
+    ).strip().lower()
+    ranking_tier = str(candidate.get("ranking_tier") or "").strip().lower()
+    trade_decision = str(candidate.get("trade_decision") or "").strip().upper()
+    execution_intent = str(settings_state.get("execution_intent") or "").strip().lower()
+
+    reasons: list[str] = []
+    missing: list[str] = []
+    hard_blockers: list[str] = []
+    confirmation_ready = rapid_confirmed or (deep_status == "deep_analysis_ready" and deep_cache_fresh)
+    if settings_state.get("kill_switch"):
+        hard_blockers.append("kill_switch")
+    if execution_intent and execution_intent != "broker_paper":
+        hard_blockers.append("route_not_paper")
+    for reason_key in (
+        blocker,
+        str((candidate.get("risk") or {}).get("reason") if isinstance(candidate.get("risk"), dict) else ""),
+    ):
+        normalized = str(reason_key or "").strip().lower()
+        if normalized in AI_EVIDENCE_HARD_BLOCKERS:
+            hard_blockers.append(normalized)
+
+    if opportunity_score < min_opportunity_score:
+        missing.append("qualified_opportunity_score")
+    else:
+        reasons.append(f"Opportunity score {opportunity_score:.1f} meets the {min_opportunity_score:.1f} threshold.")
+    if not confirmation_ready:
+        missing.append("fresh_deep_or_rapid_confirmation")
+    else:
+        reasons.append("Fresh deep-analysis or rapid confirmation is present.")
+    if relative_volume is None:
+        missing.append("relative_volume")
+    elif relative_volume < min_relative_volume:
+        missing.append("relative_volume_expansion")
+    else:
+        reasons.append(f"Relative volume {relative_volume:.2f} supports the setup.")
+    if spread_bps is None:
+        missing.append("spread")
+    elif spread_bps > max_spread_bps:
+        hard_blockers.append("spread_too_wide")
+    else:
+        reasons.append(f"Spread {spread_bps:.1f} bps is inside the {max_spread_bps:.1f} bps cap.")
+    if trade_decision and trade_decision != "VALID TRADE":
+        missing.append("valid_trade_decision")
+    if ranking_tier == "stand_down":
+        missing.append("routeable_ranking_tier")
+
+    score_components = [
+        opportunity_score,
+        execution_score,
+        portfolio_score,
+        deep_score if deep_score else opportunity_score,
+    ]
+    score_confidence = sum(max(0.0, min(item, 100.0)) for item in score_components) / (len(score_components) * 100.0)
+    confidence = score_confidence
+    if confirmation_ready:
+        confidence += 0.08
+    if edge_to_cost is not None and edge_to_cost >= 3.0:
+        confidence += 0.04
+    if hard_blockers:
+        confidence = min(confidence, 0.35)
+    elif missing:
+        confidence = min(confidence, 0.68)
+    confidence = round(max(0.0, min(confidence, 0.99)), 2)
+
+    if hard_blockers:
+        verdict = "reject_evidence"
+        status = "reviewed"
+        next_action = "Do not route this candidate; hard safety or route evidence is blocking it."
+        reasons.append("Hard blocker: " + ", ".join(sorted(set(hard_blockers))) + ".")
+    elif "fresh_deep_or_rapid_confirmation" in missing or "relative_volume_expansion" in missing:
+        verdict = "wait_for_confirmation"
+        status = "reviewed"
+        next_action = "Wait for confirmation, relative volume, and fresh quote evidence before considering a route."
+    elif spread_bps is not None and spread_bps > max_spread_bps * 0.75:
+        verdict = "size_down"
+        status = "reviewed"
+        next_action = "Evidence is usable, but price quality is thin; keep risk small if all final gates pass."
+    elif not missing and confidence >= min_confidence:
+        verdict = "approve_evidence"
+        status = "reviewed"
+        next_action = "Evidence supports consideration; final strategy and risk gates still decide routing."
+    elif opportunity_score >= min_opportunity_score:
+        verdict = "size_down"
+        status = "reviewed"
+        next_action = "Evidence is mixed; require final confirmation and smaller paper risk before routing."
+    else:
+        verdict = "reject_evidence"
+        status = "reviewed"
+        next_action = "Skip this setup until the opportunity score and confirmation improve."
+
+    reason_codes = sorted(
+        {
+            _ai_evidence_reason_code(item)
+            for item in [*missing, *hard_blockers]
+            if str(item or "").strip()
+        }
+    )
+    return {
+        "status": status,
+        "mode": mode,
+        "verdict": verdict,
+        "confidence": confidence,
+        "min_confidence": min_confidence,
+        "reason_codes": reason_codes,
+        "reasons": reasons[:6] or ["No strong supporting evidence was found."],
+        "missing_evidence": sorted(set(item for item in missing if item)),
+        "evidence_incomplete_buckets": reason_codes,
+        "hard_blockers": sorted(set(item for item in hard_blockers if item)),
+        "opportunity_type": opportunity_type,
+        "opportunity_score": round(float(opportunity_score), 2),
+        "confirmation_ready": bool(confirmation_ready),
+        "paper_route_only": True,
+        "can_override_risk_gates": False,
+        "paper_assist_dry_run_only": True,
+        "operator_override_note_required": mode == "paper_assist",
+        "next_action": next_action,
+        "reviewed_at": _serialize_datetime(now),
+        "review_latency_ms": round((perf_counter() - started_at) * 1000.0, 4),
+        "ticker": ticker,
+    }
+
+
+def apply_ai_evidence_review_candidate_overlay(
+    candidates: list[dict[str, Any]],
+    *,
+    state: dict[str, Any],
+    current_equity: float | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    settings_state = dict((state or {}).get("settings") or {})
+    ai_settings = normalize_ai_review_settings(settings_state)
+    max_reviews = int(ai_settings["ai_evidence_max_candidates_per_cycle"])
+    mode = str(ai_settings["ai_evidence_review_mode"])
+    reviewed: list[dict[str, Any]] = []
+    for index, candidate in enumerate(candidates):
+        next_candidate = dict(candidate)
+        if index < max_reviews:
+            review = review_trade_candidate_evidence(
+                next_candidate,
+                settings_state=settings_state,
+                state=state,
+                now=now,
+            )
+        else:
+            review = {
+                "status": "skipped",
+                "mode": mode,
+                "verdict": "wait_for_confirmation",
+                "confidence": 0.0,
+                "reason_codes": ["outside_review_limit"],
+                "reasons": ["Candidate was outside the per-cycle AI evidence review limit."],
+                "missing_evidence": ["ai_evidence_review_slot"],
+                "evidence_incomplete_buckets": ["outside_review_limit"],
+                "next_action": "Wait for a higher ranked candidate review slot.",
+                "reviewed_at": _serialize_datetime(now or _utc_now()),
+                "review_latency_ms": 0.0,
+                "ticker": str(next_candidate.get("ticker") or "").strip().upper() or None,
+                "paper_route_only": True,
+                "can_override_risk_gates": False,
+                "paper_assist_dry_run_only": True,
+                "operator_override_note_required": mode == "paper_assist",
+            }
+        next_candidate["ai_evidence_review"] = serialize_value(review)
+        if mode == "paper_assist" and review.get("verdict") in {"reject_evidence", "wait_for_confirmation"}:
+            next_candidate["auto_entry_eligible"] = False
+            next_candidate["ai_evidence_blocked"] = True
+            next_candidate["ai_evidence_block_reason"] = review.get("verdict")
+        elif mode == "paper_assist" and review.get("verdict") == "size_down":
+            next_candidate["ai_evidence_size_down"] = True
+            next_candidate["portfolio_score"] = max(_evidence_float(next_candidate.get("portfolio_score"), 0.0) or 0.0 - 8.0, 0.0)
+            next_candidate["execution_score"] = max(_evidence_float(next_candidate.get("execution_score"), 0.0) or 0.0 - 4.0, 0.0)
+        reviewed.append(next_candidate)
+    return reviewed
 
 
 def normalize_ai_review_runtime(runtime_state: dict[str, Any] | None) -> dict[str, Any]:

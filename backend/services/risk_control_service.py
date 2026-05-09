@@ -374,7 +374,17 @@ def _expected_edge_bps(candidate: dict[str, Any]) -> float | None:
 
 
 def _average_dollar_volume(candidate: dict[str, Any]) -> float | None:
-    direct = _first_numeric(candidate, ("average_dollar_volume", "avg_dollar_volume", "average_daily_dollar_volume", "dollar_volume"))
+    direct = _first_numeric(
+        candidate,
+        (
+            "liquidity_reference",
+            "session_dollar_volume",
+            "average_dollar_volume",
+            "avg_dollar_volume",
+            "average_daily_dollar_volume",
+            "dollar_volume",
+        ),
+    )
     if direct is not None:
         return direct
     volume = _first_numeric(candidate, ("average_volume", "avg_volume", "volume"))

@@ -4,7 +4,7 @@ Use this checklist before calling a non-demo environment `staging-ready`.
 
 ## 1. Environment File
 
-1. Create a real staging env file from [.env.staging.example](/C:/Users/marcc/PycharmProjects/StockMarketPredictions/.env.staging.example).
+1. Create a real staging env file from [.env.staging.example](/D:/marcc/PycharmProjects/StockMarketPredictions/.env.staging.example).
 2. Fill all non-placeholder values for:
    - `DATABASE_URL`
    - `AUTH_SESSION_SECRET`
@@ -48,7 +48,7 @@ For local staging, `set-access-mode -AccessMode local` also sets `AUTH_SESSION_S
 
 Managed Postgres shortcut:
 
-1. set the managed `DATABASE_URL` in [.env.staging](/C:/Users/marcc/PycharmProjects/StockMarketPredictions/.env.staging)
+1. set the managed `DATABASE_URL` in [.env.staging](/D:/marcc/PycharmProjects/StockMarketPredictions/.env.staging)
    - `.\scripts\staging_ops.ps1 -Action set-db-url -DatabaseUrl "postgresql+psycopg://..."`
 2. inspect the target safely
    - `.\scripts\staging_ops.ps1 -Action show-db-url`

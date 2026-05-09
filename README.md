@@ -94,7 +94,29 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The Docker setup stores backend runtime files in the `backend-storage` volume.
+The Docker setup runs Postgres, applies Alembic migrations before API startup, and stores backend runtime files in the `backend-storage` volume. Alembic is the source of truth for productized schema changes; local startup still keeps runtime `create_all()` compatibility for developer ergonomics.
+
+First-run bootstraps a default tenant + admin (only when the database is empty). Credentials are written to:
+
+- `runtime-logs/first-run-credentials.json`
+
+By default the Docker runtime enables local-session auth (`AUTH_ENABLED=true`, `ALLOW_DEMO_AUTH=false`) and disables self-serve signup (`LOCAL_AUTH_ALLOW_SIGNUP=false`). If `LOCAL_AUTH_LOGIN_SECRET` is not provided, the container generates one and persists it in the credentials file above.
+
+Useful migration commands:
+
+```bash
+python -m alembic -c alembic.ini upgrade head
+python -m alembic -c alembic.ini downgrade base
+```
+
+Live trading and managed-advisory flags default off:
+
+```bash
+FEATURE_LIVE_TRADING=false
+FEATURE_MANAGED_ADVISORY=false
+READINESS_MIN_LIVE_SCORE=85
+ALPACA_LIVE_TRADING_ENABLED=false
+```
 
 ## Verification
 ```bash
@@ -106,6 +128,41 @@ Personal-use operating notes are documented in:
 
 - `PERSONAL_USE.md`
 - `REAL_MONEY_EXECUTION_ROADMAP.md`
+- `docs/broker_trading_desk_architecture.md`
+- `docs/compliance_checklist.md`
+- `docs/readiness_scoring.md`
+- `docs/live_trading_flow.md`
+- `docs/trading_safety_hardening.md`
+- `docs/hidden_ops_route_inventory.md`
+
+## Premium live trading control-plane controls
+
+The productized control plane is a paper-validated live automation desk layered over connected broker accounts. Connected brokers handle custody, account statements, execution, and regulatory brokerage functions; this app handles strategy lifecycle, readiness scoring, risk gates, audit replay, execution evidence, and user-authorized automation.
+
+The control plane exposes:
+
+- `/api/strategies/*`
+- `/api/automation/*`
+- `/api/readiness/*`
+- `/api/risk/*`
+- `/api/audit/*`
+- `/api/execution-analytics/*`
+- `/api/live/*`
+- `/api/live/authorizations/*`
+- `/api/live/orders/*`
+
+Frontend routes:
+
+- `/strategies`
+- `/strategies/:strategyId`
+- `/strategies/:strategyId/live`
+- `/risk`
+- `/audit`
+- `/execution-quality`
+- `/live`
+- `/live/approvals`
+
+The live-control invariant is server-side: no signal path submits directly to a live broker. A live flow must create durable `TradeDecision`, `LiveOrderIntent`, `LiveRiskCheck`, approval, receipt, risk event, and audit/domain evidence. The app does not provide custody, clearing, statements, SIPC membership, or broker-dealer operation; those remain connected-broker responsibilities.
 
 Backend verification buckets can be listed or run individually with:
 
@@ -116,6 +173,16 @@ make backend-identity
 make backend-ops
 make backend-execution
 ```
+
+Trading-safety readiness can be checked without exposing secrets:
+
+```bash
+python scripts/trading_safety_tools.py market-ready --env-file .env --tenant-slug systematic-equities
+python scripts/trading_safety_tools.py route-table
+python scripts/trading_safety_tools.py weak-strong-sweep
+```
+
+The market-ready report combines env presence checks, latest safety state, daily ledger summary, route-table health, HFT watchdog status, artifact indexing, and weak/strong scan findings. It writes a validation artifact under `runtime-exports/`.
 
 ## Operations
 - Deployment readiness is surfaced in the release center from live files in this workspace.

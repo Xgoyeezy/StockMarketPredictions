@@ -102,16 +102,22 @@ class EquitiesMomentumDesk(StrategyDesk):
                 expected_holding_period=signal.expected_holding_period,
                 risk_estimate=signal.risk_estimate,
                 required_capital=round(capital_base * weight, 2),
-                metadata={"research_only": True},
+                metadata={"paper_route": True},
             )
             for symbol in leaders
         )
 
     def validate_signal(self, signal: DeskSignal, risk_state: dict[str, Any]) -> DeskValidationResult:
+        candidate_count = int(signal.components.get("candidate_count", 0) or 0)
+        allowed = bool(candidate_count > 0 and signal.confidence_score >= 0.55)
         return DeskValidationResult(
             desk_key=self.desk_key,
-            allowed=False,
-            reason="research_only",
-            detail="Equities momentum desk is available for research and backtesting until paper validation is promoted.",
-            metrics={"candidate_count": signal.components.get("candidate_count", 0), "confidence_score": signal.confidence_score},
+            allowed=allowed,
+            reason="accepted" if allowed else "insufficient_momentum",
+            detail=(
+                "Equities momentum candidates cleared paper-routing confidence gates."
+                if allowed
+                else "Equities momentum candidates did not clear paper-routing confidence gates."
+            ),
+            metrics={"candidate_count": candidate_count, "confidence_score": signal.confidence_score},
         )

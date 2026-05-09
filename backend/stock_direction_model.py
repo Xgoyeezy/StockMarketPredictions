@@ -296,6 +296,48 @@ class PredictionEnsembleSummary(TypedDict):
     split_embargo_bars: int
 
 
+class MetaLabelSignal(TypedDict):
+    version: str
+    status: str
+    tradeability_probability: float
+    decision: str
+    threshold: float
+    sample_size: int
+    confidence: str
+    top_drivers: List[str]
+    shadow_only: bool
+    summary: str
+
+
+class TradableDirectionSignal(TypedDict):
+    version: str
+    status: str
+    shadow_only: bool
+    routing_eligible: bool
+    supported_interval: bool
+    interval: str
+    horizon_bars: int
+    decision: str
+    direction: str
+    probabilities: dict[str, float]
+    directional_confidence: float
+    confidence_score: float
+    expected_edge_bps: float
+    estimated_cost_bps: float
+    edge_to_cost_ratio: float | None
+    no_trade_buffer_bps: float
+    horizon_volatility_bps: float
+    beta: float
+    benchmark_symbol: str
+    sample_size: int
+    backtest_split_count: int
+    metrics: dict[str, float | int | None]
+    journal_comparison: dict[str, object]
+    top_drivers: List[str]
+    reasons: List[str]
+    summary: str
+
+
 class PriceForecast(TypedDict):
     forecast_horizon_bars: int
     base_probability_up: float
@@ -330,6 +372,8 @@ class PriceForecast(TypedDict):
     contribution_breakdown: dict[str, float | str]
     news_sentiment: NewsSentimentInfo
     journal_calibration: dict[str, object]
+    meta_label: MetaLabelSignal
+    tradable_direction: TradableDirectionSignal
 
 
 class InstitutionalFlowProfile(TypedDict):
@@ -590,6 +634,17 @@ _LIVE_PRICE_CACHE: Dict[str, float] = {}
 _LIVE_PRICE_CACHE_TS: Dict[str, float] = {}
 _CONTRACT_MID_CACHE: Dict[str, float] = {}
 _CONTRACT_MID_CACHE_TS: Dict[str, float] = {}
+
+
+def _cache_age_seconds(cache_timestamp: float | None) -> float | None:
+    if cache_timestamp is None:
+        return None
+    try:
+        return max(0.0, time.monotonic() - float(cache_timestamp))
+    except (TypeError, ValueError):
+        return None
+
+
 _ALIGNMENT_CACHE: Dict[Tuple[str, int, str], tuple[str, float]] = {}
 _ALIGNMENT_CACHE_TS: Dict[Tuple[str, int, str], float] = {}
 _FILE_READ_CACHE: Dict[str, pd.DataFrame] = {}
@@ -608,6 +663,18 @@ PAPER_OPEN_TRADES_PATH = STORAGE_DIR / "paper_open_trades.csv"
 PAPER_CLOSED_TRADES_PATH = STORAGE_DIR / "paper_closed_trades.csv"
 FORECAST_JOURNAL_PATH = STORAGE_DIR / "forecast_journal.csv"
 INTRADAY_PREDICTION_STACK_VERSION = "intraday_hybrid_v1"
+TRADABLE_DIRECTION_STACK_VERSION = "tradable_direction_v1"
+TRADABLE_DIRECTION_SUPPORTED_INTERVALS = {"1h", "1d"}
+TRADABLE_DIRECTION_CLASS_ORDER = ("down", "no_trade", "up")
+TRADABLE_DIRECTION_MIN_SAMPLES = 80
+TRADABLE_DIRECTION_VOL_BUFFER_MULTIPLIER = 0.25
+REGIME_META_LABEL_STACK_VERSION = "regime_meta_label_v1"
+REGIME_META_LABEL_MIN_SAMPLES = 30
+REGIME_META_LABEL_THRESHOLD = 0.6
+REGIME_META_LABEL_SKIP_THRESHOLD = 0.42
+REGIME_META_LABEL_MOVE_THRESHOLD = 0.0015
+REGIME_META_LABEL_CACHE_TTL_SECONDS = 300.0
+_REGIME_META_LABEL_MODEL_CACHE: dict[tuple[str, str, str, int], dict[str, object]] = {}
 
 
 @dataclass
@@ -3392,6 +3459,7 @@ def build_price_forecast(
     event_revision: EventRevisionInfo | None = None,
     ensemble_summary: PredictionEnsembleSummary | None = None,
     journal_calibration: dict[str, float | int | None] | None = None,
+    tradable_direction: TradableDirectionSignal | None = None,
 ) -> PriceForecast:
     news_score = float(news_info["sentiment_score"])
     news_confidence = float(news_info["confidence"])
@@ -3640,7 +3708,7 @@ def build_price_forecast(
     elif adjusted_probability_up <= 0.55:
         label = "Expected range / mixed"
 
-    return {
+    forecast_payload: PriceForecast = {
         "forecast_horizon_bars": max(1, int(settings.horizon)),
         "base_probability_up": round(float(base_probability_up), 4),
         "state_adjusted_probability_up": round(float(adjusted_probability_up), 4),
@@ -3681,7 +3749,20 @@ def build_price_forecast(
         "contribution_breakdown": contribution_breakdown,
         "news_sentiment": news_info,
         "journal_calibration": calibration,
+        "meta_label": _neutral_meta_label_signal(),
+        "tradable_direction": tradable_direction
+        or _neutral_tradable_direction_signal(
+            interval=settings.interval,
+            horizon=max(1, int(settings.horizon)),
+        ),
     }
+    forecast_payload["meta_label"] = build_regime_meta_label_signal(
+        ticker=settings.ticker,
+        interval=settings.interval,
+        forecast=cast(dict[str, object], forecast_payload),
+        event_risk=event_risk,
+    )
+    return forecast_payload
 
 
 def build_feature_table(
@@ -3812,6 +3893,662 @@ def build_feature_table(
     return feature_table
 
 
+def is_tradable_direction_supported_interval(interval: str | None) -> bool:
+    return str(interval or "").strip().lower() in TRADABLE_DIRECTION_SUPPORTED_INTERVALS
+
+
+def get_tradable_direction_benchmark_symbol(ticker: str) -> str:
+    normalized = _normalize_symbol(ticker)
+    benchmark = _benchmark_symbol_for_ticker(normalized)
+    if benchmark == normalized:
+        return "QQQ" if normalized != "QQQ" else "SPY"
+    return benchmark
+
+
+def _empty_tradable_direction_journal_comparison() -> dict[str, object]:
+    return {
+        "resolved_count": 0,
+        "hit_rate": None,
+        "average_expected_edge_bps": None,
+        "average_realized_residual_bps": None,
+        "no_trade_rate": None,
+    }
+
+
+def _neutral_tradable_direction_signal(
+    *,
+    interval: str | None,
+    horizon: int,
+    status: str | None = None,
+    summary: str | None = None,
+    reasons: Sequence[str] | None = None,
+) -> TradableDirectionSignal:
+    normalized_interval = str(interval or "").strip().lower()
+    supported = is_tradable_direction_supported_interval(normalized_interval)
+    resolved_status = status or ("collecting" if supported else "unsupported_interval")
+    resolved_summary = summary
+    if not resolved_summary:
+        if supported:
+            resolved_summary = "Tradable direction is collecting enough hourly/daily evidence before it can score this setup."
+        else:
+            resolved_summary = "Tradable direction v1 only runs on 1h and 1d intervals."
+    return {
+        "version": TRADABLE_DIRECTION_STACK_VERSION,
+        "status": resolved_status,
+        "shadow_only": True,
+        "routing_eligible": False,
+        "supported_interval": supported,
+        "interval": normalized_interval,
+        "horizon_bars": max(1, int(horizon or 1)),
+        "decision": "no_trade",
+        "direction": "flat",
+        "probabilities": {"down": 0.0, "no_trade": 1.0, "up": 0.0},
+        "directional_confidence": 0.0,
+        "confidence_score": 0.0,
+        "expected_edge_bps": 0.0,
+        "estimated_cost_bps": 0.0,
+        "edge_to_cost_ratio": None,
+        "no_trade_buffer_bps": 0.0,
+        "horizon_volatility_bps": 0.0,
+        "beta": 0.0,
+        "benchmark_symbol": "",
+        "sample_size": 0,
+        "backtest_split_count": 0,
+        "metrics": {
+            "accuracy": None,
+            "balanced_accuracy": None,
+            "coverage": None,
+            "directional_precision": None,
+        },
+        "journal_comparison": _empty_tradable_direction_journal_comparison(),
+        "top_drivers": [],
+        "reasons": list(reasons or [resolved_summary]),
+        "summary": resolved_summary,
+    }
+
+
+def _tradable_direction_label_for_values(residual_return: float, no_trade_buffer_return: float) -> str | None:
+    if math.isnan(residual_return) or math.isnan(no_trade_buffer_return):
+        return None
+    if residual_return > no_trade_buffer_return:
+        return "up"
+    if residual_return < -no_trade_buffer_return:
+        return "down"
+    return "no_trade"
+
+
+def _aligned_tradable_direction_close(
+    frame: pd.DataFrame | None,
+    *,
+    index: pd.Index,
+    symbol: str,
+) -> pd.Series:
+    if frame is None or frame.empty:
+        return pd.Series(index=index, dtype=float)
+    try:
+        normalized = normalize_model_ohlcv_frame(frame.copy(), symbol)
+    except Exception:
+        normalized = frame.copy()
+    close_source = normalized.get("Close")
+    if close_source is None:
+        close_source = normalized.get("close")
+    if close_source is None:
+        return pd.Series(index=index, dtype=float)
+    close = pd.to_numeric(close_source, errors="coerce")
+    close.index = pd.to_datetime(close.index, errors="coerce")
+    close = close[close.index.notna()].sort_index()
+    if close.empty:
+        return pd.Series(index=index, dtype=float)
+    return close.reindex(index, method="ffill")
+
+
+def _tradable_direction_cost_bps_series(price: pd.DataFrame, settings: ModelConfig) -> pd.Series:
+    close = pd.to_numeric(price.get("Close"), errors="coerce")
+    volume = pd.to_numeric(price.get("Volume"), errors="coerce")
+    dollar_volume = (close * volume).replace([np.inf, -np.inf], np.nan)
+    average_dollar_volume = dollar_volume.rolling(20, min_periods=5).mean()
+    controlled_universe = _normalize_symbol(settings.ticker) in set(get_controlled_liquid_universe())
+    spread_bps = pd.Series(18.0 if not controlled_universe else 6.0, index=price.index, dtype=float)
+    spread_bps = spread_bps.mask(average_dollar_volume >= 25_000_000.0, 12.0)
+    spread_bps = spread_bps.mask(average_dollar_volume >= 100_000_000.0, 8.0)
+    spread_bps = spread_bps.mask(average_dollar_volume >= 500_000_000.0, 5.0)
+    spread_bps = spread_bps.mask(average_dollar_volume >= 2_500_000_000.0, 3.0)
+    base_slippage_bps = 2.0 if str(settings.interval).lower() == "1d" else 3.0
+    return (base_slippage_bps + (spread_bps / 2.0)).astype(float)
+
+
+def build_tradable_direction_label_frame(
+    price: pd.DataFrame,
+    settings: ModelConfig,
+    *,
+    benchmark_frame: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    normalized_price = normalize_model_ohlcv_frame(price.copy(), settings.ticker)
+    close = pd.to_numeric(normalized_price["Close"], errors="coerce")
+    horizon = max(1, int(settings.horizon or 1))
+    benchmark_symbol = get_tradable_direction_benchmark_symbol(settings.ticker)
+    benchmark_close = _aligned_tradable_direction_close(
+        benchmark_frame,
+        index=normalized_price.index,
+        symbol=benchmark_symbol,
+    )
+    benchmark_available = not benchmark_close.dropna().empty
+
+    own_return = close.pct_change(fill_method=None)
+    if benchmark_available:
+        benchmark_return = benchmark_close.pct_change(fill_method=None)
+        beta_window = 60 if str(settings.interval).lower() == "1h" else 40
+        beta = own_return.rolling(beta_window, min_periods=20).cov(benchmark_return)
+        beta = beta / benchmark_return.rolling(beta_window, min_periods=20).var().replace(0, np.nan)
+        beta = beta.replace([np.inf, -np.inf], np.nan).clip(-3.0, 3.0).fillna(1.0)
+        benchmark_future_return = benchmark_close.shift(-horizon) / benchmark_close.replace(0, np.nan) - 1.0
+    else:
+        benchmark_return = pd.Series(0.0, index=normalized_price.index, dtype=float)
+        beta = pd.Series(0.0, index=normalized_price.index, dtype=float)
+        benchmark_future_return = pd.Series(0.0, index=normalized_price.index, dtype=float)
+
+    future_return = close.shift(-horizon) / close.replace(0, np.nan) - 1.0
+    residual_future_return = future_return - (beta * benchmark_future_return)
+    residual_bar_return = own_return - (beta * benchmark_return)
+    vol_window = 60 if str(settings.interval).lower() == "1h" else 40
+    horizon_volatility = residual_bar_return.rolling(vol_window, min_periods=20).std() * math.sqrt(horizon)
+    fallback_volatility = own_return.rolling(20, min_periods=10).std() * math.sqrt(horizon)
+    horizon_volatility = horizon_volatility.fillna(fallback_volatility)
+
+    estimated_cost_bps = _tradable_direction_cost_bps_series(normalized_price, settings)
+    estimated_cost_return = estimated_cost_bps / 10000.0
+    no_trade_buffer_return = estimated_cost_return + (horizon_volatility * TRADABLE_DIRECTION_VOL_BUFFER_MULTIPLIER)
+
+    labels = pd.Series(index=normalized_price.index, dtype=object)
+    valid = residual_future_return.notna() & no_trade_buffer_return.notna()
+    labels.loc[valid & (residual_future_return > no_trade_buffer_return)] = "up"
+    labels.loc[valid & (residual_future_return < -no_trade_buffer_return)] = "down"
+    labels.loc[valid & labels.isna()] = "no_trade"
+
+    return pd.DataFrame(
+        {
+            "target_tradable_direction": labels,
+            "residual_future_return": residual_future_return,
+            "future_return": future_return,
+            "benchmark_future_return": benchmark_future_return,
+            "tradable_direction_beta": beta,
+            "horizon_volatility": horizon_volatility,
+            "estimated_cost_bps": estimated_cost_bps,
+            "no_trade_buffer_return": no_trade_buffer_return,
+            "no_trade_buffer_bps": no_trade_buffer_return * 10000.0,
+            "benchmark_symbol": benchmark_symbol,
+            "benchmark_available": benchmark_available,
+        },
+        index=normalized_price.index,
+    ).replace([np.inf, -np.inf], np.nan)
+
+
+def build_tradable_direction_logit_model(max_iter: int = 180) -> Pipeline:
+    return Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                LogisticRegression(
+                    max_iter=max(80, int(max_iter)),
+                    solver="lbfgs",
+                    class_weight="balanced",
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+
+
+def build_tradable_direction_boost_model(max_iter: int = 120) -> Pipeline:
+    return Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            (
+                "model",
+                HistGradientBoostingClassifier(
+                    max_depth=4,
+                    learning_rate=0.045,
+                    max_iter=max(40, int(max_iter)),
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+
+
+def _tradable_direction_probabilities_from_model(model: Pipeline, matrix: pd.DataFrame) -> dict[str, float]:
+    probabilities = {class_name: 0.0 for class_name in TRADABLE_DIRECTION_CLASS_ORDER}
+    raw = model.predict_proba(matrix)[0]
+    estimator = model.named_steps.get("model") if hasattr(model, "named_steps") else model
+    for class_name, probability in zip(getattr(estimator, "classes_", []), raw):
+        normalized = str(class_name)
+        if normalized in probabilities:
+            probabilities[normalized] = float(probability)
+    total = sum(probabilities.values())
+    if total <= 0:
+        return {"down": 0.0, "no_trade": 1.0, "up": 0.0}
+    return {key: float(value / total) for key, value in probabilities.items()}
+
+
+def _tradable_direction_metrics(target: pd.Series, probabilities: pd.DataFrame) -> dict[str, float | int | None]:
+    valid = probabilities.dropna(how="all")
+    if valid.empty:
+        return {
+            "accuracy": None,
+            "balanced_accuracy": None,
+            "coverage": None,
+            "directional_precision": None,
+            "sample_size": 0,
+        }
+    aligned_target = target.reindex(valid.index).dropna().astype(str)
+    valid = valid.reindex(aligned_target.index).dropna(how="all")
+    if valid.empty:
+        return {
+            "accuracy": None,
+            "balanced_accuracy": None,
+            "coverage": None,
+            "directional_precision": None,
+            "sample_size": 0,
+        }
+    class_columns = list(TRADABLE_DIRECTION_CLASS_ORDER)
+    predictions = valid[class_columns].idxmax(axis=1).astype(str)
+    accuracy = float((predictions == aligned_target).mean())
+    recalls = []
+    for class_name in TRADABLE_DIRECTION_CLASS_ORDER:
+        class_mask = aligned_target.eq(class_name)
+        if class_mask.any():
+            recalls.append(float((predictions.loc[class_mask] == class_name).mean()))
+    directional_mask = predictions.ne("no_trade")
+    directional_precision = (
+        float((predictions.loc[directional_mask] == aligned_target.loc[directional_mask]).mean())
+        if directional_mask.any()
+        else None
+    )
+    return {
+        "accuracy": round(accuracy, 4),
+        "balanced_accuracy": round(float(sum(recalls) / len(recalls)), 4) if recalls else None,
+        "coverage": round(float(directional_mask.mean()), 4),
+        "directional_precision": round(directional_precision, 4) if directional_precision is not None else None,
+        "sample_size": int(len(aligned_target)),
+    }
+
+
+def _run_tradable_direction_backtest(
+    feature_matrix: pd.DataFrame,
+    target: pd.Series,
+    *,
+    model_builder: Callable[[], Pipeline],
+    embargo_bars: int,
+) -> tuple[pd.DataFrame, dict[str, float | int | None], int]:
+    probabilities = pd.DataFrame(index=feature_matrix.index, columns=TRADABLE_DIRECTION_CLASS_ORDER, dtype=float)
+    if len(feature_matrix) < 30 or target.nunique() < 2:
+        return probabilities, _tradable_direction_metrics(target, probabilities), 0
+
+    splits = _purged_time_series_splits(feature_matrix, embargo_bars=embargo_bars)
+    used_splits = 0
+    for train_index, test_index in splits:
+        x_train = feature_matrix.iloc[train_index]
+        y_train = target.iloc[train_index].astype(str)
+        if len(x_train) < 20 or y_train.nunique() < 2:
+            continue
+        valid_columns = list(x_train.columns[x_train.notna().any(axis=0)])
+        if not valid_columns:
+            continue
+        x_train = x_train.loc[:, valid_columns]
+        x_test = feature_matrix.iloc[test_index].loc[:, valid_columns]
+        try:
+            model = model_builder()
+            model.fit(x_train, y_train)
+            raw = model.predict_proba(x_test)
+            estimator = model.named_steps.get("model") if hasattr(model, "named_steps") else model
+            for class_name, class_probabilities in zip(getattr(estimator, "classes_", []), raw.T):
+                normalized = str(class_name)
+                if normalized in probabilities.columns:
+                    probabilities.iloc[test_index, probabilities.columns.get_loc(normalized)] = class_probabilities
+            used_splits += 1
+        except Exception:
+            continue
+    return probabilities, _tradable_direction_metrics(target, probabilities), used_splits
+
+
+def _calibrate_tradable_direction_probabilities(
+    raw_probabilities: dict[str, float],
+    historical_probabilities: pd.DataFrame,
+    target: pd.Series,
+) -> dict[str, float]:
+    calibrated = {class_name: float(raw_probabilities.get(class_name, 0.0)) for class_name in TRADABLE_DIRECTION_CLASS_ORDER}
+    valid = historical_probabilities.dropna(how="all")
+    if len(valid) < 30:
+        total = sum(calibrated.values()) or 1.0
+        return {key: float(value / total) for key, value in calibrated.items()}
+    aligned_target = target.reindex(valid.index).dropna().astype(str)
+    valid = valid.reindex(aligned_target.index).dropna(how="all")
+    if len(valid) < 30:
+        total = sum(calibrated.values()) or 1.0
+        return {key: float(value / total) for key, value in calibrated.items()}
+
+    sample_window = min(260, len(valid))
+    recent_probabilities = valid.tail(sample_window)
+    recent_target = aligned_target.reindex(recent_probabilities.index)
+    for class_name in TRADABLE_DIRECTION_CLASS_ORDER:
+        class_probability = recent_probabilities[class_name].dropna()
+        if len(class_probability) < 20:
+            continue
+        distances = (class_probability - calibrated[class_name]).abs()
+        nearest_count = min(max(20, sample_window // 4), len(distances))
+        nearest_index = distances.nsmallest(nearest_count).index
+        empirical_rate = float(recent_target.loc[nearest_index].eq(class_name).mean())
+        blend_weight = min(0.35, 0.12 + len(nearest_index) / 260.0)
+        calibrated[class_name] = ((1.0 - blend_weight) * calibrated[class_name]) + (blend_weight * empirical_rate)
+
+    total = sum(max(0.0, value) for value in calibrated.values())
+    if total <= 0:
+        return {"down": 0.0, "no_trade": 1.0, "up": 0.0}
+    return {key: float(max(0.0, value) / total) for key, value in calibrated.items()}
+
+
+def _tradable_direction_top_drivers(feature_matrix: pd.DataFrame, latest_features: pd.DataFrame, limit: int = 4) -> list[str]:
+    if feature_matrix.empty or latest_features.empty:
+        return []
+    recent = feature_matrix.tail(min(240, len(feature_matrix))).copy()
+    latest = latest_features.iloc[0]
+    means = recent.mean(numeric_only=True)
+    stds = recent.std(numeric_only=True).replace(0, np.nan)
+    zscores = ((latest.reindex(means.index) - means) / stds).replace([np.inf, -np.inf], np.nan).dropna().abs()
+    drivers = []
+    for name in zscores.sort_values(ascending=False).head(limit).index:
+        label = str(name).replace("_", " ").replace("td ", "").strip()
+        if label and label not in drivers:
+            drivers.append(label)
+    return drivers
+
+
+def _tradable_direction_model_weight(metrics: dict[str, float | int | None]) -> float:
+    balanced_accuracy = _safe_float(metrics.get("balanced_accuracy"), 0.34)
+    accuracy = _safe_float(metrics.get("accuracy"), 0.34)
+    directional_precision = _safe_float(metrics.get("directional_precision"), accuracy)
+    score = 0.35 + ((balanced_accuracy - 0.33) * 1.2) + ((directional_precision - 0.33) * 0.45)
+    return float(np.clip(score, 0.2, 1.4))
+
+
+def tradable_direction_journal_comparison_summary(
+    ticker: str,
+    interval: str,
+    file_path: Path = FORECAST_JOURNAL_PATH,
+) -> dict[str, object]:
+    journal = read_forecast_journal(file_path)
+    if journal.empty:
+        return _empty_tradable_direction_journal_comparison()
+    rows = journal.copy()
+    rows = rows.loc[
+        rows.get("ticker", pd.Series("", index=rows.index)).astype(str).str.upper().eq(_normalize_symbol(ticker))
+        & rows.get("interval", pd.Series("", index=rows.index)).astype(str).str.lower().eq(str(interval or "").lower())
+        & rows.get("prediction_stack_version", pd.Series("", index=rows.index)).astype(str).eq(TRADABLE_DIRECTION_STACK_VERSION)
+    ].copy()
+    if rows.empty:
+        return _empty_tradable_direction_journal_comparison()
+    resolved = rows.loc[rows.get("resolved_at", pd.Series("", index=rows.index)).fillna("").astype(str).str.strip().ne("")].tail(120)
+    if resolved.empty:
+        return _empty_tradable_direction_journal_comparison()
+    hit = pd.to_numeric(resolved.get("actual_tradable_hit"), errors="coerce")
+    edge = pd.to_numeric(resolved.get("tradable_direction_expected_edge_bps"), errors="coerce")
+    residual = pd.to_numeric(resolved.get("actual_residual_return"), errors="coerce") * 10000.0
+    predicted = resolved.get("predicted_tradable_direction", pd.Series("", index=resolved.index)).astype(str)
+    hit = hit.dropna()
+    return {
+        "resolved_count": int(len(resolved)),
+        "hit_rate": round(float(hit.mean()), 4) if not hit.empty else None,
+        "average_expected_edge_bps": round(float(edge.dropna().mean()), 4) if not edge.dropna().empty else None,
+        "average_realized_residual_bps": round(float(residual.dropna().mean()), 4) if not residual.dropna().empty else None,
+        "no_trade_rate": round(float(predicted.eq("no_trade").mean()), 4),
+    }
+
+
+def build_tradable_direction_shadow_signal(
+    price: pd.DataFrame,
+    settings: ModelConfig,
+    *,
+    benchmark_frame: pd.DataFrame | None = None,
+    sector_frame: pd.DataFrame | None = None,
+    peer_frames: dict[str, pd.DataFrame] | None = None,
+    market_state: MarketStateInfo | None = None,
+    relative_strength: RelativeStrengthInfo | None = None,
+    options_flow: OptionsFlowInfo | None = None,
+    event_revision: EventRevisionInfo | None = None,
+    news_info: NewsSentimentInfo | None = None,
+    journal_calibration: dict[str, object] | None = None,
+    fast_mode: bool = False,
+) -> TradableDirectionSignal:
+    normalized_interval = str(settings.interval or "").strip().lower()
+    horizon = max(1, int(settings.horizon or 1))
+    if not is_tradable_direction_supported_interval(normalized_interval):
+        return _neutral_tradable_direction_signal(interval=normalized_interval, horizon=horizon)
+
+    try:
+        normalized_price = normalize_model_ohlcv_frame(price.copy(), settings.ticker)
+        feature_table = build_feature_table(
+            normalized_price,
+            settings,
+            benchmark_frame=benchmark_frame,
+            sector_frame=sector_frame,
+            peer_frames=peer_frames,
+        )
+        label_frame = build_tradable_direction_label_frame(
+            normalized_price,
+            settings,
+            benchmark_frame=benchmark_frame,
+        )
+        feature_matrix_all = feature_table.drop(columns=["future_return", "target_up"], errors="ignore").copy()
+        context_values = {
+            "td_market_trend_score": _safe_float((market_state or {}).get("market_trend_score"), 0.0),
+            "td_market_breadth_score": _safe_float((market_state or {}).get("breadth_score"), 0.0),
+            "td_relative_strength_score": _safe_float((relative_strength or {}).get("relative_strength_score"), 0.5),
+            "td_options_flow_pressure": _safe_float((options_flow or {}).get("net_flow_pressure"), 0.0),
+            "td_event_revision_score": _safe_float((event_revision or {}).get("analyst_revision_score"), 0.0),
+            "td_news_sentiment_score": _safe_float((news_info or {}).get("sentiment_score"), 0.0),
+            "td_news_confidence": _safe_float((news_info or {}).get("confidence"), 0.0),
+            "td_journal_resolved_count": _safe_float((journal_calibration or {}).get("resolved_count"), 0.0),
+            "td_journal_average_error": _safe_float((journal_calibration or {}).get("average_error"), 0.25),
+        }
+        for column, value in context_values.items():
+            feature_matrix_all[column] = value
+
+        labels = label_frame["target_tradable_direction"].reindex(feature_matrix_all.index)
+        train_mask = labels.notna() & feature_matrix_all.notna().any(axis=1)
+        feature_matrix = feature_matrix_all.loc[train_mask].replace([np.inf, -np.inf], np.nan)
+        target = labels.loc[train_mask].astype(str)
+        if fast_mode and len(feature_matrix) > 420:
+            feature_matrix = feature_matrix.tail(420)
+            target = target.reindex(feature_matrix.index)
+        min_samples = 60 if fast_mode else TRADABLE_DIRECTION_MIN_SAMPLES
+        if len(feature_matrix) < min_samples or target.nunique() < 2:
+            return _neutral_tradable_direction_signal(
+                interval=normalized_interval,
+                horizon=horizon,
+                status="collecting",
+                summary=f"Tradable direction needs at least {min_samples} labeled hourly/daily samples with more than one class.",
+                reasons=[f"Available labeled samples: {len(feature_matrix)}."],
+            )
+
+        feature_matrix = feature_matrix.dropna(axis=1, how="all")
+        latest_features = feature_matrix_all.tail(1).replace([np.inf, -np.inf], np.nan).reindex(columns=feature_matrix.columns)
+        model_specs: list[tuple[str, Callable[[], Pipeline]]] = [
+            ("logistic", lambda: build_tradable_direction_logit_model(max_iter=140 if fast_mode else 200)),
+            ("boosting", lambda: build_tradable_direction_boost_model(max_iter=60 if fast_mode else 120)),
+        ]
+        model_outputs: list[dict[str, object]] = []
+        for model_name, builder in model_specs:
+            try:
+                backtest_probabilities, metrics, split_count = _run_tradable_direction_backtest(
+                    feature_matrix,
+                    target,
+                    model_builder=builder,
+                    embargo_bars=horizon,
+                )
+                model = builder()
+                train_x = feature_matrix
+                train_y = target
+                if len(train_x) < 30 or train_y.nunique() < 2:
+                    continue
+                model.fit(train_x, train_y)
+                latest_probabilities = _tradable_direction_probabilities_from_model(model, latest_features)
+                model_outputs.append(
+                    {
+                        "name": model_name,
+                        "latest_probabilities": latest_probabilities,
+                        "backtest_probabilities": backtest_probabilities,
+                        "metrics": metrics,
+                        "split_count": split_count,
+                        "weight": _tradable_direction_model_weight(metrics),
+                    }
+                )
+            except Exception:
+                continue
+
+        if not model_outputs:
+            return _neutral_tradable_direction_signal(
+                interval=normalized_interval,
+                horizon=horizon,
+                status="unavailable",
+                summary="Tradable direction could not train a stable shadow model for this setup.",
+            )
+
+        combined_weight = sum(float(item["weight"]) for item in model_outputs)
+        raw_probabilities = {class_name: 0.0 for class_name in TRADABLE_DIRECTION_CLASS_ORDER}
+        combined_backtest = pd.DataFrame(0.0, index=feature_matrix.index, columns=TRADABLE_DIRECTION_CLASS_ORDER)
+        combined_backtest_weight = pd.Series(0.0, index=feature_matrix.index, dtype=float)
+        for item in model_outputs:
+            weight = float(item["weight"])
+            latest_probabilities = cast(dict[str, float], item["latest_probabilities"])
+            for class_name in TRADABLE_DIRECTION_CLASS_ORDER:
+                raw_probabilities[class_name] += latest_probabilities.get(class_name, 0.0) * weight
+            backtest_probabilities = cast(pd.DataFrame, item["backtest_probabilities"])
+            valid_rows = backtest_probabilities.dropna(how="all").index
+            if len(valid_rows):
+                class_columns = list(TRADABLE_DIRECTION_CLASS_ORDER)
+                combined_backtest.loc[valid_rows, class_columns] += backtest_probabilities.loc[valid_rows, class_columns].fillna(0.0) * weight
+                combined_backtest_weight.loc[valid_rows] += weight
+        raw_probabilities = {
+            class_name: float(value / max(combined_weight, 1e-6))
+            for class_name, value in raw_probabilities.items()
+        }
+        weighted_rows = combined_backtest_weight > 0
+        class_columns = list(TRADABLE_DIRECTION_CLASS_ORDER)
+        combined_backtest.loc[weighted_rows, class_columns] = combined_backtest.loc[weighted_rows, class_columns].div(
+            combined_backtest_weight.loc[weighted_rows],
+            axis=0,
+        )
+        combined_backtest.loc[~weighted_rows, class_columns] = np.nan
+        probabilities = _calibrate_tradable_direction_probabilities(raw_probabilities, combined_backtest, target)
+        metrics = _tradable_direction_metrics(target, combined_backtest)
+
+        latest_label = label_frame.reindex(feature_matrix_all.index).tail(1).iloc[0]
+        no_trade_buffer_bps = _safe_float(latest_label.get("no_trade_buffer_bps"), 0.0)
+        horizon_volatility_bps = _safe_float(latest_label.get("horizon_volatility"), 0.0) * 10000.0
+        estimated_cost_bps = _safe_float(latest_label.get("estimated_cost_bps"), 0.0)
+        beta = _safe_float(latest_label.get("tradable_direction_beta"), 0.0)
+        benchmark_symbol = str(latest_label.get("benchmark_symbol") or get_tradable_direction_benchmark_symbol(settings.ticker))
+        label_context = label_frame.reindex(target.index)
+        residual_by_class = label_context.groupby(target)["residual_future_return"].mean()
+        expected_residual_return = 0.0
+        for class_name in TRADABLE_DIRECTION_CLASS_ORDER:
+            class_mean = _safe_float(residual_by_class.get(class_name), float("nan"))
+            if math.isnan(class_mean):
+                if class_name == "up":
+                    class_mean = max(no_trade_buffer_bps / 10000.0, 0.0001)
+                elif class_name == "down":
+                    class_mean = -max(no_trade_buffer_bps / 10000.0, 0.0001)
+                else:
+                    class_mean = 0.0
+            expected_residual_return += probabilities.get(class_name, 0.0) * class_mean
+        expected_edge_bps = abs(float(expected_residual_return) * 10000.0)
+        directional_confidence = max(probabilities.get("up", 0.0), probabilities.get("down", 0.0))
+        decision = max(TRADABLE_DIRECTION_CLASS_ORDER, key=lambda class_name: probabilities.get(class_name, 0.0))
+        reasons = [
+            "Shadow-only evidence; this layer is blocked from routing.",
+            f"Residual return is beta-adjusted against {benchmark_symbol or 'the benchmark'} before labels are assigned.",
+        ]
+        if decision != "no_trade" and expected_edge_bps < no_trade_buffer_bps:
+            reasons.append(
+                f"Expected edge {expected_edge_bps:.1f} bps is inside the {no_trade_buffer_bps:.1f} bps cost and volatility buffer."
+            )
+            decision = "no_trade"
+        elif decision == "no_trade":
+            reasons.append(
+                f"No-trade probability is highest or the expected edge is inside the {no_trade_buffer_bps:.1f} bps buffer."
+            )
+        else:
+            reasons.append(
+                f"Expected edge {expected_edge_bps:.1f} bps is being compared with {estimated_cost_bps:.1f} bps estimated cost."
+            )
+        if not bool(latest_label.get("benchmark_available")):
+            reasons.append("Benchmark history was unavailable, so residual labeling fell back to raw ticker return.")
+
+        max_probability = probabilities.get(decision, 0.0)
+        balanced_accuracy = _safe_float(metrics.get("balanced_accuracy"), 0.33)
+        confidence_score = float(
+            np.clip(
+                0.28
+                + ((max_probability - (1.0 / 3.0)) * 0.85)
+                + ((balanced_accuracy - 0.33) * 0.35)
+                + min(len(feature_matrix) / 600.0, 0.18),
+                0.05,
+                0.99,
+            )
+        )
+        edge_to_cost_ratio = expected_edge_bps / estimated_cost_bps if estimated_cost_bps > 0 else None
+        direction = "long" if decision == "up" else "short" if decision == "down" else "flat"
+        split_count = max(int(item.get("split_count") or 0) for item in model_outputs)
+        comparison = tradable_direction_journal_comparison_summary(settings.ticker, normalized_interval)
+        top_drivers = _tradable_direction_top_drivers(feature_matrix, latest_features)
+        summary = (
+            f"New direction method is shadowing {decision.replace('_', ' ')} with "
+            f"{max_probability:.0%} class probability and {expected_edge_bps:.1f} bps expected residual edge."
+        )
+        rounded_probabilities = {key: round(float(probabilities.get(key, 0.0)), 4) for key in TRADABLE_DIRECTION_CLASS_ORDER}
+        probability_delta = round(1.0 - sum(rounded_probabilities.values()), 4)
+        if probability_delta:
+            rounded_probabilities[decision] = round(rounded_probabilities.get(decision, 0.0) + probability_delta, 4)
+        return {
+            "version": TRADABLE_DIRECTION_STACK_VERSION,
+            "status": "ready",
+            "shadow_only": True,
+            "routing_eligible": False,
+            "supported_interval": True,
+            "interval": normalized_interval,
+            "horizon_bars": horizon,
+            "decision": decision,
+            "direction": direction,
+            "probabilities": rounded_probabilities,
+            "directional_confidence": round(float(directional_confidence), 4),
+            "confidence_score": round(confidence_score, 4),
+            "expected_edge_bps": round(float(expected_edge_bps), 4),
+            "estimated_cost_bps": round(float(estimated_cost_bps), 4),
+            "edge_to_cost_ratio": round(float(edge_to_cost_ratio), 4) if edge_to_cost_ratio is not None else None,
+            "no_trade_buffer_bps": round(float(no_trade_buffer_bps), 4),
+            "horizon_volatility_bps": round(float(horizon_volatility_bps), 4),
+            "beta": round(float(beta), 4),
+            "benchmark_symbol": benchmark_symbol,
+            "sample_size": int(len(feature_matrix)),
+            "backtest_split_count": int(split_count),
+            "metrics": metrics,
+            "journal_comparison": comparison,
+            "top_drivers": top_drivers,
+            "reasons": reasons[:5],
+            "summary": summary,
+        }
+    except Exception as exc:
+        return _neutral_tradable_direction_signal(
+            interval=normalized_interval,
+            horizon=horizon,
+            status="unavailable",
+            summary="Tradable direction v1 could not score this setup.",
+            reasons=[str(exc) or "Unknown tradable direction scoring error."],
+        )
+
+
 def build_model(max_iter: int = 200) -> Pipeline:
     model = HistGradientBoostingClassifier(
         max_depth=5,
@@ -3841,6 +4578,407 @@ def build_fast_model(max_iter: int = 80) -> Pipeline:
             ("model", model),
         ]
     )
+
+
+_META_LABEL_NUMERIC_FEATURES = [
+    "probability_up",
+    "probability_edge",
+    "direction_bias",
+    "technical_probability_up",
+    "technical_edge",
+    "expected_move",
+    "expected_move_abs",
+    "forecast_confidence",
+    "uncertainty_score",
+    "driver_agreement_score",
+    "regime_strength_score",
+    "relative_strength_score",
+    "journal_probability_shift",
+    "news_probability_shift",
+    "market_state_probability_shift",
+    "relative_strength_probability_shift",
+    "options_flow_probability_shift",
+    "event_revision_probability_shift",
+    "event_probability_shift",
+    "event_risk",
+    "degraded_prediction",
+    "stale_state_count",
+    "calibration_resolved_count",
+    "calibration_empirical_hit_rate",
+    "calibration_average_error",
+]
+
+_META_LABEL_CATEGORICAL_FEATURES = [
+    "market_regime",
+    "volatility_regime",
+    "session_label",
+    "prediction_data_quality",
+]
+
+
+def _neutral_meta_label_signal(
+    *,
+    status: str = "insufficient_sample",
+    sample_size: int = 0,
+    summary: str | None = None,
+) -> MetaLabelSignal:
+    return {
+        "version": REGIME_META_LABEL_STACK_VERSION,
+        "status": status,
+        "tradeability_probability": 0.5,
+        "decision": "watch",
+        "threshold": REGIME_META_LABEL_THRESHOLD,
+        "sample_size": max(0, int(sample_size)),
+        "confidence": "low",
+        "top_drivers": [],
+        "shadow_only": True,
+        "summary": summary
+        or "Meta-labeling is collecting enough resolved forecast history before trusting this layer.",
+    }
+
+
+def _meta_label_decision(probability: float) -> str:
+    if probability >= REGIME_META_LABEL_THRESHOLD:
+        return "trust"
+    if probability <= REGIME_META_LABEL_SKIP_THRESHOLD:
+        return "skip"
+    return "watch"
+
+
+def _meta_label_confidence(probability: float, sample_size: int) -> str:
+    distance = abs(float(probability) - 0.5)
+    if sample_size >= 120 and distance >= 0.18:
+        return "high"
+    if sample_size >= 60 and distance >= 0.1:
+        return "medium"
+    return "low"
+
+
+def _meta_label_direction_from_probability(probability_up: float) -> int:
+    if math.isnan(probability_up):
+        return 0
+    if probability_up >= 0.55:
+        return 1
+    if probability_up <= 0.45:
+        return -1
+    return 0
+
+
+def _source_get(source: object, key: str, default: object = None) -> object:
+    if isinstance(source, dict):
+        return source.get(key, default)
+    if isinstance(source, pd.Series):
+        return source.get(key, default)
+    return default
+
+
+def _meta_label_feature_record(
+    source: object,
+    *,
+    event_risk: bool | None = None,
+) -> dict[str, object]:
+    contribution_breakdown = _source_get(source, "contribution_breakdown", {})
+    if not isinstance(contribution_breakdown, dict):
+        contribution_breakdown = {}
+    journal_calibration = _source_get(source, "journal_calibration", {})
+    if not isinstance(journal_calibration, dict):
+        journal_calibration = {}
+    market_state = _source_get(source, "market_state", {})
+    if not isinstance(market_state, dict):
+        market_state = {}
+    state_freshness = _source_get(source, "state_freshness", {})
+    if not isinstance(state_freshness, dict):
+        state_freshness = {}
+
+    probability_up = _safe_float(
+        _source_get(source, "probability_up", _source_get(source, "adjusted_probability_up", _source_get(source, "state_adjusted_probability_up"))),
+        0.5,
+    )
+    technical_probability_up = _safe_float(_source_get(source, "technical_probability_up"), probability_up)
+    expected_move = _safe_float(_source_get(source, "expected_move", _source_get(source, "adjusted_expected_move")), 0.0)
+    direction_bias = float(_meta_label_direction_from_probability(probability_up))
+    resolved_event_risk = _safe_bool(_source_get(source, "event_risk")) if event_risk is None else bool(event_risk)
+
+    stale_state_count = 0
+    for value in state_freshness.values():
+        if not isinstance(value, dict):
+            continue
+        freshness_status = str(value.get("freshness_status") or value.get("status") or "").strip().lower()
+        if freshness_status and freshness_status not in {"fresh", "live"}:
+            stale_state_count += 1
+    if not stale_state_count:
+        for key in (
+            "market_state_freshness_status",
+            "relative_strength_freshness_status",
+            "options_flow_freshness_status",
+            "event_revision_freshness_status",
+        ):
+            freshness_status = str(_source_get(source, key, "") or "").strip().lower()
+            if freshness_status and freshness_status not in {"fresh", "live"}:
+                stale_state_count += 1
+
+    record: dict[str, object] = {
+        "probability_up": probability_up,
+        "probability_edge": abs(probability_up - 0.5) * 2.0,
+        "direction_bias": direction_bias,
+        "technical_probability_up": technical_probability_up,
+        "technical_edge": abs(technical_probability_up - 0.5) * 2.0,
+        "expected_move": expected_move,
+        "expected_move_abs": abs(expected_move),
+        "forecast_confidence": _safe_float(_source_get(source, "forecast_confidence", _source_get(source, "confidence_score")), 0.0),
+        "uncertainty_score": _safe_float(_source_get(source, "uncertainty_score"), 0.5),
+        "driver_agreement_score": _safe_float(_source_get(source, "driver_agreement_score"), 0.5),
+        "regime_strength_score": _safe_float(_source_get(source, "regime_strength_score"), 0.5),
+        "relative_strength_score": _safe_float(_source_get(source, "relative_strength_score"), 0.5),
+        "journal_probability_shift": _safe_float(_source_get(source, "journal_probability_shift", contribution_breakdown.get("journal_probability_shift")), 0.0),
+        "news_probability_shift": _safe_float(_source_get(source, "news_probability_shift", contribution_breakdown.get("news_probability_shift")), 0.0),
+        "market_state_probability_shift": _safe_float(_source_get(source, "market_state_probability_shift", contribution_breakdown.get("market_state_probability_shift")), 0.0),
+        "relative_strength_probability_shift": _safe_float(_source_get(source, "relative_strength_probability_shift", contribution_breakdown.get("relative_strength_probability_shift")), 0.0),
+        "options_flow_probability_shift": _safe_float(_source_get(source, "options_flow_probability_shift", contribution_breakdown.get("options_flow_probability_shift")), 0.0),
+        "event_revision_probability_shift": _safe_float(_source_get(source, "event_revision_probability_shift", contribution_breakdown.get("event_revision_probability_shift")), 0.0),
+        "event_probability_shift": _safe_float(_source_get(source, "event_probability_shift", contribution_breakdown.get("event_probability_shift")), 0.0),
+        "event_risk": 1.0 if resolved_event_risk else 0.0,
+        "degraded_prediction": 1.0 if _safe_bool(_source_get(source, "degraded_prediction")) else 0.0,
+        "stale_state_count": float(stale_state_count),
+        "calibration_resolved_count": _safe_float(journal_calibration.get("resolved_count"), 0.0),
+        "calibration_empirical_hit_rate": _safe_float(journal_calibration.get("empirical_hit_rate"), 0.5),
+        "calibration_average_error": _safe_float(journal_calibration.get("average_error"), 0.25),
+        "market_regime": str(_source_get(source, "market_regime") or "unknown").strip().lower() or "unknown",
+        "volatility_regime": str(_source_get(source, "volatility_regime") or "unknown").strip().lower() or "unknown",
+        "session_label": str(
+            _source_get(source, "session_label", market_state.get("time_of_day_bucket") or "unknown")
+        ).strip().lower() or "unknown",
+        "prediction_data_quality": str(_source_get(source, "prediction_data_quality") or "unknown").strip().lower() or "unknown",
+    }
+    return record
+
+
+def _encode_meta_label_features(
+    records: Sequence[dict[str, object]],
+    *,
+    feature_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    frame = pd.DataFrame(list(records))
+    if frame.empty:
+        return pd.DataFrame(columns=list(feature_columns or []), dtype=float)
+
+    numeric = pd.DataFrame(index=frame.index)
+    for column in _META_LABEL_NUMERIC_FEATURES:
+        numeric[column] = pd.to_numeric(frame.get(column, 0.0), errors="coerce")
+    numeric = numeric.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    categorical = pd.DataFrame(index=frame.index)
+    for column in _META_LABEL_CATEGORICAL_FEATURES:
+        raw_column = frame[column] if column in frame.columns else pd.Series("unknown", index=frame.index)
+        categorical[column] = raw_column.fillna("unknown").astype(str).str.strip().str.lower()
+    encoded_categorical = pd.get_dummies(categorical, columns=_META_LABEL_CATEGORICAL_FEATURES, prefix=_META_LABEL_CATEGORICAL_FEATURES)
+    encoded = pd.concat([numeric, encoded_categorical], axis=1).astype(float)
+    if feature_columns is not None:
+        encoded = encoded.reindex(columns=list(feature_columns), fill_value=0.0)
+    return encoded
+
+
+def _resolved_meta_label_target(row: pd.Series) -> int | None:
+    resolved_at = str(row.get("resolved_at") or "").strip()
+    if not resolved_at:
+        return None
+
+    probability_up = _safe_float(row.get("probability_up"), float("nan"))
+    direction = _meta_label_direction_from_probability(probability_up)
+    if direction == 0:
+        return 0
+
+    actual_return = _safe_float(row.get("actual_return"), float("nan"))
+    if not math.isnan(actual_return):
+        expected_move = abs(_safe_float(row.get("expected_move"), 0.0))
+        move_threshold = max(REGIME_META_LABEL_MOVE_THRESHOLD, expected_move * 0.1)
+        return 1 if (actual_return * direction) >= move_threshold else 0
+
+    actual_target_up = _safe_float(row.get("actual_target_up"), float("nan"))
+    if math.isnan(actual_target_up):
+        return None
+    if direction > 0:
+        return 1 if actual_target_up >= 0.5 else 0
+    return 1 if actual_target_up < 0.5 else 0
+
+
+def _meta_label_journal_marker(file_path: Path) -> int:
+    try:
+        return int(file_path.stat().st_mtime_ns)
+    except Exception:
+        return 0
+
+
+def _regime_meta_label_model_info(
+    ticker: str,
+    interval: str,
+    *,
+    file_path: Path = FORECAST_JOURNAL_PATH,
+) -> dict[str, object]:
+    normalized_ticker = _normalize_symbol(ticker)
+    normalized_interval = str(interval or "").strip().lower()
+    marker = _meta_label_journal_marker(file_path)
+    cache_key = (normalized_ticker, normalized_interval, _file_cache_key(file_path), marker)
+    cached = _REGIME_META_LABEL_MODEL_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and (now - float(cached.get("cached_at", 0.0))) <= REGIME_META_LABEL_CACHE_TTL_SECONDS:
+        return cached
+
+    journal = read_forecast_journal(file_path)
+    if journal.empty:
+        info = {
+            "cached_at": now,
+            "status": "insufficient_sample",
+            "sample_size": 0,
+        }
+        _REGIME_META_LABEL_MODEL_CACHE[cache_key] = info
+        return info
+
+    ticker_series = journal.get("ticker", pd.Series("", index=journal.index)).astype(str).str.upper()
+    interval_series = journal.get("interval", pd.Series("", index=journal.index)).astype(str).str.lower()
+    resolved_series = journal.get("resolved_at", pd.Series("", index=journal.index)).fillna("").astype(str).str.strip()
+    scoped = journal.loc[
+        ticker_series.eq(normalized_ticker)
+        & interval_series.eq(normalized_interval)
+        & resolved_series.ne("")
+    ].copy()
+    if "prediction_stack_version" in scoped.columns:
+        scoped = scoped.loc[
+            scoped["prediction_stack_version"].fillna("").astype(str).ne(TRADABLE_DIRECTION_STACK_VERSION)
+        ].copy()
+
+    records: list[dict[str, object]] = []
+    labels: list[int] = []
+    for _, row in scoped.iterrows():
+        label = _resolved_meta_label_target(row)
+        if label is None:
+            continue
+        records.append(_meta_label_feature_record(row))
+        labels.append(int(label))
+
+    sample_size = len(labels)
+    if sample_size < REGIME_META_LABEL_MIN_SAMPLES or len(set(labels)) < 2:
+        info = {
+            "cached_at": now,
+            "status": "insufficient_sample",
+            "sample_size": sample_size,
+        }
+        _REGIME_META_LABEL_MODEL_CACHE[cache_key] = info
+        return info
+
+    feature_matrix = _encode_meta_label_features(records)
+    target = pd.Series(labels, dtype=int)
+    model = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                LogisticRegression(
+                    max_iter=120,
+                    solver="liblinear",
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+    try:
+        model.fit(feature_matrix, target)
+    except Exception:
+        info = {
+            "cached_at": now,
+            "status": "unavailable",
+            "sample_size": sample_size,
+        }
+        _REGIME_META_LABEL_MODEL_CACHE[cache_key] = info
+        return info
+
+    info = {
+        "cached_at": now,
+        "status": "ready",
+        "sample_size": sample_size,
+        "feature_columns": list(feature_matrix.columns),
+        "model": model,
+    }
+    _REGIME_META_LABEL_MODEL_CACHE[cache_key] = info
+    return info
+
+
+def _meta_label_top_drivers(model: Pipeline, feature_columns: Sequence[str], limit: int = 3) -> list[str]:
+    try:
+        logistic_model = model.named_steps.get("model")
+        coefficients = getattr(logistic_model, "coef_", None)
+        if coefficients is None:
+            return []
+        weights = np.asarray(coefficients)[0]
+        ranked = sorted(
+            zip(feature_columns, weights),
+            key=lambda item: abs(float(item[1])),
+            reverse=True,
+        )
+        drivers = []
+        for name, _ in ranked:
+            cleaned = str(name)
+            for prefix in _META_LABEL_CATEGORICAL_FEATURES:
+                cleaned = cleaned.replace(f"{prefix}_", f"{prefix}:")
+            if cleaned not in drivers:
+                drivers.append(cleaned)
+            if len(drivers) >= limit:
+                break
+        return drivers
+    except Exception:
+        return []
+
+
+def build_regime_meta_label_signal(
+    *,
+    ticker: str,
+    interval: str,
+    forecast: dict[str, object],
+    event_risk: bool | None = None,
+    file_path: Path = FORECAST_JOURNAL_PATH,
+) -> MetaLabelSignal:
+    info = _regime_meta_label_model_info(ticker, interval, file_path=file_path)
+    sample_size = int(info.get("sample_size") or 0)
+    if info.get("status") != "ready":
+        return _neutral_meta_label_signal(
+            status=str(info.get("status") or "insufficient_sample"),
+            sample_size=sample_size,
+        )
+
+    model = info.get("model")
+    feature_columns = info.get("feature_columns")
+    if not isinstance(model, Pipeline) or not isinstance(feature_columns, list):
+        return _neutral_meta_label_signal(status="unavailable", sample_size=sample_size)
+
+    record = _meta_label_feature_record(forecast, event_risk=event_risk)
+    current_features = _encode_meta_label_features([record], feature_columns=feature_columns)
+    try:
+        probability = float(model.predict_proba(current_features)[0, 1])
+    except Exception:
+        return _neutral_meta_label_signal(status="unavailable", sample_size=sample_size)
+
+    probability = float(np.clip(probability, 0.0, 1.0))
+    decision = _meta_label_decision(probability)
+    confidence = _meta_label_confidence(probability, sample_size)
+    top_drivers = _meta_label_top_drivers(model, feature_columns)
+    summary = {
+        "trust": "The resolved regime memory supports trusting this directional signal, but v1 remains shadow-only.",
+        "watch": "The meta-label is not strong enough to promote or reject the signal on its own.",
+        "skip": "Resolved regime memory is weak for this kind of signal, so treat it as a lower-trust setup.",
+    }.get(decision, "Meta-label output is advisory only.")
+    return {
+        "version": REGIME_META_LABEL_STACK_VERSION,
+        "status": "ready",
+        "tradeability_probability": round(probability, 4),
+        "decision": decision,
+        "threshold": REGIME_META_LABEL_THRESHOLD,
+        "sample_size": sample_size,
+        "confidence": confidence,
+        "top_drivers": top_drivers,
+        "shadow_only": True,
+        "summary": summary,
+    }
 
 
 def warm_model_runtime() -> None:
@@ -4945,6 +6083,26 @@ def analyze_ticker(
         settings.ticker,
         fast_mode=fast_mode,
     )
+    if fast_mode:
+        tradable_direction_signal = _neutral_tradable_direction_signal(
+            interval=settings.interval,
+            horizon=max(1, int(settings.horizon)),
+        )
+    else:
+        tradable_direction_signal = build_tradable_direction_shadow_signal(
+            price,
+            settings,
+            benchmark_frame=benchmark_frame,
+            sector_frame=sector_frame,
+            peer_frames=peer_frames,
+            market_state=market_state_info,
+            relative_strength=relative_strength_info,
+            options_flow=options_flow_info,
+            event_revision=event_revision_info,
+            news_info=news_info,
+            journal_calibration=journal_calibration,
+            fast_mode=fast_mode,
+        )
     forecast = build_price_forecast(
         latest_close=close_value,
         technical_probability_up=float(ensemble_summary.get("technical_probability_up", base_probability_up_value)),
@@ -4959,6 +6117,7 @@ def analyze_ticker(
         event_revision=event_revision_info,
         ensemble_summary=ensemble_summary,
         journal_calibration=journal_calibration,
+        tradable_direction=tradable_direction_signal,
     )
     probability_up_value = float(forecast["state_adjusted_probability_up"])
     expected_move_value = float(forecast["adjusted_expected_move"])
@@ -5711,6 +6870,56 @@ def _deserialize_trade_frame_objects(frame: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def _trade_units(row: pd.Series | dict[str, object]) -> float:
+    getter = row.get if hasattr(row, "get") else lambda key, default=None: default
+    for key in ("quantity", "remaining_contracts", "suggested_contracts", "filled_contracts", "broker_qty", "qty"):
+        value = _safe_float(getter(key), float("nan"))
+        if not math.isnan(value) and value > 0:
+            return float(value)
+    return 0.0
+
+
+def _equity_entry_underlying_price(row: pd.Series | dict[str, object]) -> float:
+    getter = row.get if hasattr(row, "get") else lambda key, default=None: default
+    for key in ("actual_fill_price", "broker_filled_avg_price", "entry_price", "live_price_at_open"):
+        value = _safe_float(getter(key), float("nan"))
+        if not math.isnan(value) and value > 0:
+            return float(value)
+
+    contract_mid = _safe_float(getter("contract_mid_at_open"), float("nan"))
+    if math.isnan(contract_mid) or contract_mid <= 0:
+        return float("nan")
+
+    # Legacy equity rows stored a synthetic contract mid as share price / 100.
+    # Broker-reconciled rows store the full share fill price. Normalize both.
+    return float(contract_mid * 100.0) if contract_mid <= 25.0 else float(contract_mid)
+
+
+def _equity_close_underlying_price(close_underlying_price: float, close_contract_mid: float) -> float:
+    underlying = _safe_float(close_underlying_price, float("nan"))
+    if not math.isnan(underlying) and underlying > 0:
+        return float(underlying)
+
+    contract_mid = _safe_float(close_contract_mid, float("nan"))
+    if math.isnan(contract_mid) or contract_mid <= 0:
+        return float("nan")
+    return float(contract_mid * 100.0) if contract_mid <= 25.0 else float(contract_mid)
+
+
+def _directional_share_pnl(
+    *,
+    entry_price: float,
+    current_price: float,
+    quantity: float,
+    side: str,
+) -> tuple[float, float]:
+    if entry_price <= 0 or current_price <= 0 or quantity <= 0:
+        return float("nan"), float("nan")
+    direction = -1.0 if str(side or "").strip().upper() == "SELL" else 1.0
+    pnl_per_share = (float(current_price) - float(entry_price)) * direction
+    return float(pnl_per_share), float(pnl_per_share * quantity)
+
+
 def read_open_trades(file_path: Path = OPEN_TRADES_PATH) -> pd.DataFrame:
     return _deserialize_trade_frame_objects(_read_csv_cached(file_path))
 
@@ -5792,6 +7001,8 @@ def build_forecast_journal_record(
     state_freshness = dict(report.get("state_freshness") or forecast.get("state_freshness") or {})
     market_state = dict(report.get("market_state") or forecast.get("market_state") or {})
     event_context = dict(report.get("event_context") or {})
+    tradable_direction = dict(forecast.get("tradable_direction") or {})
+    tradable_probabilities = dict(tradable_direction.get("probabilities") or {})
 
     def _freshness_status(key: str) -> str:
         freshness = state_freshness.get(key)
@@ -5847,6 +7058,10 @@ def build_forecast_journal_record(
         "upper_price": float(forecast.get("upper_price", float("nan"))),
         "lower_price": float(forecast.get("lower_price", float("nan"))),
         "forecast_confidence": float(forecast.get("confidence_score", float("nan"))),
+        "uncertainty_score": float(forecast.get("uncertainty_score", float("nan"))),
+        "driver_agreement_score": float(forecast.get("driver_agreement_score", float("nan"))),
+        "regime_strength_score": float(forecast.get("regime_strength_score", float("nan"))),
+        "relative_strength_score": float(forecast.get("relative_strength_score", float("nan"))),
         "technical_confidence_component": float(
             dict(forecast.get("contribution_breakdown") or {}).get("technical_confidence_component", float("nan"))
         ),
@@ -5890,11 +7105,70 @@ def build_forecast_journal_record(
         "event_reason": str(report.get("event_reason", "")),
         "next_event_name": str(report.get("next_event_name", "")),
         "next_event_date": str(report.get("next_event_date", "")),
+        "tradable_direction_status": str(tradable_direction.get("status") or ""),
+        "predicted_tradable_direction": str(tradable_direction.get("decision") or ""),
+        "tradable_direction_probability_down": _safe_float(tradable_probabilities.get("down"), float("nan")),
+        "tradable_direction_probability_no_trade": _safe_float(tradable_probabilities.get("no_trade"), float("nan")),
+        "tradable_direction_probability_up": _safe_float(tradable_probabilities.get("up"), float("nan")),
+        "tradable_direction_confidence": _safe_float(tradable_direction.get("confidence_score"), float("nan")),
+        "tradable_direction_expected_edge_bps": _safe_float(tradable_direction.get("expected_edge_bps"), float("nan")),
+        "tradable_direction_estimated_cost_bps": _safe_float(tradable_direction.get("estimated_cost_bps"), float("nan")),
+        "tradable_direction_no_trade_buffer_bps": _safe_float(tradable_direction.get("no_trade_buffer_bps"), float("nan")),
+        "tradable_direction_horizon_volatility_bps": _safe_float(tradable_direction.get("horizon_volatility_bps"), float("nan")),
+        "tradable_direction_beta": _safe_float(tradable_direction.get("beta"), float("nan")),
+        "tradable_direction_benchmark_symbol": str(tradable_direction.get("benchmark_symbol") or ""),
+        "actual_tradable_direction": "",
+        "actual_residual_return": float("nan"),
+        "actual_benchmark_return": float("nan"),
+        "actual_tradable_hit": float("nan"),
         "resolved_at": "",
         "actual_close": float("nan"),
         "actual_return": float("nan"),
         "actual_target_up": float("nan"),
     }
+
+
+def build_tradable_direction_forecast_journal_record(
+    report: AnalysisReport,
+    *,
+    forecast_at: str | None = None,
+    forecast_group_id: str | None = None,
+    tenant_id: str | None = None,
+    tenant_slug: str | None = None,
+) -> dict[str, object] | None:
+    forecast = dict(report.get("forecast") or {})
+    tradable_direction = dict(forecast.get("tradable_direction") or {})
+    if not tradable_direction or not _safe_bool(tradable_direction.get("supported_interval")):
+        return None
+    record = build_forecast_journal_record(
+        report,
+        forecast_at=forecast_at,
+        forecast_group_id=forecast_group_id,
+        prediction_stack_version=TRADABLE_DIRECTION_STACK_VERSION,
+        prediction_configuration="shadow_tradable_direction",
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+    )
+    probabilities = dict(tradable_direction.get("probabilities") or {})
+    decision = str(tradable_direction.get("decision") or "no_trade").strip().lower() or "no_trade"
+    signed_edge_direction = 1.0 if decision == "up" else -1.0 if decision == "down" else 0.0
+    expected_edge_bps = _safe_float(tradable_direction.get("expected_edge_bps"), float("nan"))
+    record.update(
+        {
+            "prediction_stack_version": TRADABLE_DIRECTION_STACK_VERSION,
+            "prediction_configuration": "shadow_tradable_direction",
+            "probability_up": _safe_float(probabilities.get("up"), float("nan")),
+            "expected_move": (expected_edge_bps / 10000.0) * signed_edge_direction if not math.isnan(expected_edge_bps) else float("nan"),
+            "forecast_confidence": _safe_float(tradable_direction.get("confidence_score"), float("nan")),
+            "predicted_tradable_direction": decision,
+            "actual_tradable_direction": "",
+            "actual_residual_return": float("nan"),
+            "actual_benchmark_return": float("nan"),
+            "actual_tradable_hit": float("nan"),
+            "actual_target_up": float("nan"),
+        }
+    )
+    return record
 
 
 def _build_shadow_prediction_report(
@@ -5997,7 +7271,7 @@ def build_paired_forecast_journal_records(
 ) -> list[dict[str, object]]:
     forecast_at_value = str(forecast_at or utc_now().isoformat())
     if str(getattr(settings, "market_data_adapter", "") or "").strip().lower() != "hybrid":
-        return [
+        records = [
             build_forecast_journal_record(
                 report,
                 forecast_at=forecast_at_value,
@@ -6005,6 +7279,15 @@ def build_paired_forecast_journal_records(
                 tenant_slug=tenant_slug,
             )
         ]
+        tradable_record = build_tradable_direction_forecast_journal_record(
+            report,
+            forecast_at=forecast_at_value,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+        )
+        if tradable_record is not None:
+            records.append(tradable_record)
+        return records
 
     forecast_group_id = str(uuid4())
     hybrid_report = _build_shadow_prediction_report(
@@ -6047,6 +7330,15 @@ def build_paired_forecast_journal_records(
                 tenant_slug=tenant_slug,
             ),
         )
+    tradable_record = build_tradable_direction_forecast_journal_record(
+        report,
+        forecast_at=forecast_at_value,
+        forecast_group_id=forecast_group_id,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+    )
+    if tradable_record is not None:
+        records.append(tradable_record)
     return records
 
 
@@ -6055,6 +7347,7 @@ def resolve_forecast_journal_entries(
     interval: str,
     current_history: pd.DataFrame,
     file_path: Path = FORECAST_JOURNAL_PATH,
+    benchmark_history: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     journal = read_forecast_journal(file_path)
     if journal.empty:
@@ -6077,8 +7370,21 @@ def resolve_forecast_journal_entries(
     if history.empty:
         return journal
 
+    benchmark = pd.DataFrame()
+    if isinstance(benchmark_history, pd.DataFrame) and not benchmark_history.empty:
+        benchmark = benchmark_history.copy()
+        if "Close" in benchmark.columns:
+            benchmark = benchmark.sort_index()
+            benchmark.index = pd.to_datetime(benchmark.index, errors="coerce")
+            benchmark = benchmark[benchmark.index.notna()]
+        else:
+            benchmark = pd.DataFrame()
+
     if "resolved_at" in journal.columns:
         journal["resolved_at"] = journal["resolved_at"].astype(object)
+    for text_column in ("actual_tradable_direction", "predicted_tradable_direction"):
+        if text_column in journal.columns:
+            journal[text_column] = journal[text_column].astype(object)
 
     interval_delta = pd.Timedelta(seconds=interval_seconds(interval))
     updated = False
@@ -6100,10 +7406,41 @@ def resolve_forecast_journal_entries(
 
         actual_close = float(pd.to_numeric(target_rows["Close"], errors="coerce").dropna().iloc[0])
         actual_return = (actual_close / forecast_close) - 1.0 if forecast_close else float("nan")
+        prediction_stack_version = str(journal.at[index, "prediction_stack_version"] if "prediction_stack_version" in journal.columns else "").strip()
         journal.at[index, "resolved_at"] = target_rows.index[0].isoformat()
         journal.at[index, "actual_close"] = actual_close
         journal.at[index, "actual_return"] = actual_return
         journal.at[index, "actual_target_up"] = 1.0 if actual_return > 0 else 0.0
+        if prediction_stack_version == TRADABLE_DIRECTION_STACK_VERSION:
+            benchmark_return = float("nan")
+            if not benchmark.empty:
+                forecast_time = _align_timestamp_to_index_timezone(forecast_at, benchmark.index)
+                benchmark_forecast_rows = benchmark.loc[benchmark.index <= forecast_time]
+                benchmark_target_time = _align_timestamp_to_index_timezone(target_time, benchmark.index)
+                benchmark_target_rows = benchmark.loc[benchmark.index >= benchmark_target_time]
+                if not benchmark_forecast_rows.empty and not benchmark_target_rows.empty:
+                    benchmark_start = _safe_float(pd.to_numeric(benchmark_forecast_rows["Close"], errors="coerce").dropna().iloc[-1], float("nan"))
+                    benchmark_end = _safe_float(pd.to_numeric(benchmark_target_rows["Close"], errors="coerce").dropna().iloc[0], float("nan"))
+                    if not math.isnan(benchmark_start) and benchmark_start:
+                        benchmark_return = (benchmark_end / benchmark_start) - 1.0
+            beta = _safe_float(journal.at[index, "tradable_direction_beta"] if "tradable_direction_beta" in journal.columns else 0.0, 0.0)
+            residual_return = actual_return - (beta * benchmark_return) if not math.isnan(benchmark_return) else actual_return
+            buffer_bps = _safe_float(
+                journal.at[index, "tradable_direction_no_trade_buffer_bps"] if "tradable_direction_no_trade_buffer_bps" in journal.columns else float("nan"),
+                float("nan"),
+            )
+            actual_direction = _tradable_direction_label_for_values(
+                residual_return,
+                buffer_bps / 10000.0 if not math.isnan(buffer_bps) else 0.0,
+            ) or ""
+            predicted_direction = str(
+                journal.at[index, "predicted_tradable_direction"] if "predicted_tradable_direction" in journal.columns else ""
+            ).strip().lower()
+            journal.at[index, "actual_benchmark_return"] = benchmark_return
+            journal.at[index, "actual_residual_return"] = residual_return
+            journal.at[index, "actual_tradable_direction"] = actual_direction
+            journal.at[index, "actual_tradable_hit"] = 1.0 if predicted_direction and predicted_direction == actual_direction else 0.0
+            journal.at[index, "actual_target_up"] = float("nan")
         updated = True
 
     if updated:
@@ -6161,6 +7498,12 @@ def journal_probability_calibration_summary(
         & journal.get("interval", pd.Series(dtype=str)).astype(str).eq(str(interval))
     )
     rows = journal.loc[mask].copy()
+    if rows.empty:
+        return _empty_summary()
+    if "prediction_stack_version" in rows.columns:
+        rows = rows.loc[
+            rows["prediction_stack_version"].fillna("").astype(str).ne(TRADABLE_DIRECTION_STACK_VERSION)
+        ].copy()
     if rows.empty:
         return _empty_summary()
 
@@ -6528,8 +7871,10 @@ def close_trade_by_index(
         return None
     entry_contract_mid = float(pd.to_numeric(trade.get("contract_mid_at_open", float("nan")), errors="coerce"))
     normalized_close_contract_mid = float(close_contract_mid)
+    close_underlying_value = float(close_underlying_price)
     if instrument_type == "equity":
-        normalized_close_contract_mid = float(close_underlying_price) / 100.0
+        close_underlying_value = _equity_close_underlying_price(close_underlying_price, close_contract_mid)
+        normalized_close_contract_mid = close_underlying_value / 100.0 if not math.isnan(close_underlying_value) else float(close_contract_mid)
 
     fraction = min(max(float(close_fraction), 0.0), 1.0)
     if contracts <= 1:
@@ -6545,8 +7890,16 @@ def close_trade_by_index(
     pnl_per_contract = float("nan")
     realized_pnl = float("nan")
 
-    if not math.isnan(entry_contract_mid) and contracts > 0:
-        if instrument_type == "equity" and broker_side == "SELL":
+    if instrument_type == "equity":
+        entry_underlying = _equity_entry_underlying_price(trade)
+        pnl_per_contract, realized_pnl = _directional_share_pnl(
+            entry_price=entry_underlying,
+            current_price=close_underlying_value,
+            quantity=contracts_to_close,
+            side=broker_side,
+        )
+    elif not math.isnan(entry_contract_mid) and contracts > 0:
+        if broker_side == "SELL":
             pnl_per_contract = (entry_contract_mid - normalized_close_contract_mid) * 100.0
         else:
             pnl_per_contract = (normalized_close_contract_mid - entry_contract_mid) * 100.0
@@ -6555,7 +7908,7 @@ def close_trade_by_index(
     closed_record = {
         **trade.to_dict(),
         "closed_at": utc_now().isoformat(),
-        "live_price_at_close": float(close_underlying_price),
+        "live_price_at_close": close_underlying_value if not math.isnan(close_underlying_value) else float(close_underlying_price),
         "contract_mid_at_close": normalized_close_contract_mid,
         "closed_contracts": float(contracts_to_close),
         "remaining_contracts_after_close": float(remaining_contracts),
@@ -6660,20 +8013,45 @@ def monitor_open_trades(file_path: Path = OPEN_TRADES_PATH) -> pd.DataFrame:
         ticker = str(row.get("ticker", ""))
         contract_symbol = str(row.get("contract_symbol", ""))
         instrument_type = str(row.get("instrument_type", "listed_option") or "listed_option").strip().lower()
+        broker_side = str(row.get("broker_side") or "BUY").strip().upper() or "BUY"
         entry_contract_mid = float(pd.to_numeric(row.get("contract_mid_at_open", float("nan")), errors="coerce"))
         contracts = float(pd.to_numeric(row.get("suggested_contracts", 0), errors="coerce"))
 
         current_underlying = float(underlying_prices.get(_normalize_symbol(ticker), float("nan"))) if ticker else float("nan")
         if instrument_type == "equity" and not math.isnan(current_underlying):
             current_contract_mid = float(current_underlying / 100.0)
+            current_quote_age_seconds = _cache_age_seconds(_LIVE_PRICE_CACHE_TS.get(_normalize_symbol(ticker)))
+            current_quote_source = "live_equity_price"
         else:
             current_contract_mid = float(contract_mids.get(_normalize_symbol(contract_symbol), float("nan"))) if contract_symbol else float("nan")
             if math.isnan(current_contract_mid) and contract_symbol:
                 current_contract_mid = get_contract_mid_from_symbol(contract_symbol)
+            current_quote_age_seconds = (
+                _cache_age_seconds(_CONTRACT_MID_CACHE_TS.get(_normalize_symbol(contract_symbol)))
+                if contract_symbol and not math.isnan(current_contract_mid)
+                else None
+            )
+            if current_quote_age_seconds is None and not math.isnan(current_underlying):
+                current_quote_age_seconds = _cache_age_seconds(_LIVE_PRICE_CACHE_TS.get(_normalize_symbol(ticker)))
+                current_quote_source = "live_underlying_price"
+            else:
+                current_quote_source = "live_contract_mid"
         option_return_pct = float("nan")
         unrealized_pnl = float("nan")
 
-        if not math.isnan(entry_contract_mid) and entry_contract_mid > 0 and not math.isnan(current_contract_mid):
+        if instrument_type == "equity" and not math.isnan(current_underlying):
+            entry_underlying = _equity_entry_underlying_price(row)
+            units = _trade_units(row)
+            if not math.isnan(entry_underlying) and entry_underlying > 0 and units > 0:
+                direction = -1.0 if broker_side == "SELL" else 1.0
+                option_return_pct = ((current_underlying - entry_underlying) / entry_underlying) * direction
+                _, unrealized_pnl = _directional_share_pnl(
+                    entry_price=entry_underlying,
+                    current_price=current_underlying,
+                    quantity=units,
+                    side=broker_side,
+                )
+        elif not math.isnan(entry_contract_mid) and entry_contract_mid > 0 and not math.isnan(current_contract_mid):
             option_return_pct = (current_contract_mid - entry_contract_mid) / entry_contract_mid
             unrealized_pnl = (current_contract_mid - entry_contract_mid) * 100.0 * contracts
 
@@ -6689,6 +8067,17 @@ def monitor_open_trades(file_path: Path = OPEN_TRADES_PATH) -> pd.DataFrame:
                 "current_underlying": current_underlying,
                 "current_underlying_price": current_underlying,
                 "current_contract_mid": current_contract_mid,
+                "quote_age_seconds": (
+                    round(float(current_quote_age_seconds), 4)
+                    if current_quote_age_seconds is not None
+                    else None
+                ),
+                "market_data_age_seconds": (
+                    round(float(current_quote_age_seconds), 4)
+                    if current_quote_age_seconds is not None
+                    else None
+                ),
+                "quote_freshness_source": current_quote_source if current_quote_age_seconds is not None else "unconfirmed",
                 "option_return_pct": option_return_pct,
                 "unrealized_pnl": unrealized_pnl,
                 "monitor_action": action,
@@ -7406,6 +8795,11 @@ def close_paper_trade_by_index(
         return
 
     entry_contract_mid = float(pd.to_numeric(trade.get("contract_mid_at_open", float("nan")), errors="coerce"))
+    close_underlying_value = float(close_underlying_price)
+    normalized_close_contract_mid = float(close_contract_mid)
+    if instrument_type == "equity":
+        close_underlying_value = _equity_close_underlying_price(close_underlying_price, close_contract_mid)
+        normalized_close_contract_mid = close_underlying_value / 100.0 if not math.isnan(close_underlying_value) else float(close_contract_mid)
     fraction = min(max(float(close_fraction), 0.0), 1.0)
 
     if original_contracts <= 1:
@@ -7420,11 +8814,19 @@ def close_paper_trade_by_index(
 
     pnl_per_contract = float("nan")
     realized_pnl = float("nan")
-    if not math.isnan(entry_contract_mid):
-        if instrument_type == "equity" and broker_side == "SELL":
-            pnl_per_contract = (entry_contract_mid - float(close_contract_mid)) * 100.0
+    if instrument_type == "equity":
+        entry_underlying = _equity_entry_underlying_price(trade)
+        pnl_per_contract, realized_pnl = _directional_share_pnl(
+            entry_price=entry_underlying,
+            current_price=close_underlying_value,
+            quantity=contracts_to_close,
+            side=broker_side,
+        )
+    elif not math.isnan(entry_contract_mid):
+        if broker_side == "SELL":
+            pnl_per_contract = (entry_contract_mid - normalized_close_contract_mid) * 100.0
         else:
-            pnl_per_contract = (float(close_contract_mid) - entry_contract_mid) * 100.0
+            pnl_per_contract = (normalized_close_contract_mid - entry_contract_mid) * 100.0
         realized_pnl = pnl_per_contract * contracts_to_close
 
     closed_status = "CLOSED" if remaining_contracts == 0 else "PARTIAL"
@@ -7432,8 +8834,8 @@ def close_paper_trade_by_index(
     closed_record = {
         **trade.to_dict(),
         "closed_at": utc_now().isoformat(),
-        "live_price_at_close": float(close_underlying_price),
-        "contract_mid_at_close": float(close_contract_mid),
+        "live_price_at_close": close_underlying_value if not math.isnan(close_underlying_value) else float(close_underlying_price),
+        "contract_mid_at_close": normalized_close_contract_mid,
         "closed_contracts": float(contracts_to_close),
         "remaining_contracts_after_close": float(remaining_contracts),
         "close_fraction": float(fraction),
@@ -7479,15 +8881,32 @@ def monitor_paper_trades(file_path: Path = PAPER_OPEN_TRADES_PATH) -> pd.DataFra
     for _, row in paper_trades.iterrows():
         ticker = str(row.get("ticker", ""))
         contract_symbol = str(row.get("contract_symbol", ""))
+        instrument_type = str(row.get("instrument_type", "listed_option") or "listed_option").strip().lower()
+        broker_side = str(row.get("broker_side") or "BUY").strip().upper() or "BUY"
         entry_contract_mid = float(pd.to_numeric(row.get("contract_mid_at_open", float("nan")), errors="coerce"))
         contracts = float(pd.to_numeric(row.get("suggested_contracts", 0), errors="coerce"))
 
         current_underlying = get_live_price(ticker) if ticker else float("nan")
-        current_contract_mid = get_contract_mid_from_symbol(contract_symbol)
+        if instrument_type == "equity" and not math.isnan(current_underlying):
+            current_contract_mid = float(current_underlying / 100.0)
+        else:
+            current_contract_mid = get_contract_mid_from_symbol(contract_symbol)
         option_return_pct = float("nan")
         unrealized_pnl = float("nan")
 
-        if not math.isnan(entry_contract_mid) and entry_contract_mid > 0 and not math.isnan(current_contract_mid):
+        if instrument_type == "equity" and not math.isnan(current_underlying):
+            entry_underlying = _equity_entry_underlying_price(row)
+            units = _trade_units(row)
+            if not math.isnan(entry_underlying) and entry_underlying > 0 and units > 0:
+                direction = -1.0 if broker_side == "SELL" else 1.0
+                option_return_pct = ((current_underlying - entry_underlying) / entry_underlying) * direction
+                _, unrealized_pnl = _directional_share_pnl(
+                    entry_price=entry_underlying,
+                    current_price=current_underlying,
+                    quantity=units,
+                    side=broker_side,
+                )
+        elif not math.isnan(entry_contract_mid) and entry_contract_mid > 0 and not math.isnan(current_contract_mid):
             option_return_pct = (current_contract_mid - entry_contract_mid) / entry_contract_mid
             unrealized_pnl = (current_contract_mid - entry_contract_mid) * 100.0 * contracts
 
@@ -7497,6 +8916,7 @@ def monitor_paper_trades(file_path: Path = PAPER_OPEN_TRADES_PATH) -> pd.DataFra
             current_contract_mid=current_contract_mid,
         )
         action = str(exit_evaluation["monitor_action"])
+        quote_age_seconds = 0.0 if not math.isnan(current_underlying) or not math.isnan(current_contract_mid) else float("nan")
 
         monitored_rows.append(
             {
@@ -7504,6 +8924,8 @@ def monitor_paper_trades(file_path: Path = PAPER_OPEN_TRADES_PATH) -> pd.DataFra
                 "current_underlying": current_underlying,
                 "current_underlying_price": current_underlying,
                 "current_contract_mid": current_contract_mid,
+                "quote_age_seconds": quote_age_seconds,
+                "last_quote_at": utc_now().isoformat() if not math.isnan(quote_age_seconds) else "",
                 "option_return_pct": option_return_pct,
                 "unrealized_pnl": unrealized_pnl,
                 "monitor_action": action,

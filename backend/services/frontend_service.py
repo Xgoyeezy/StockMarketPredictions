@@ -55,6 +55,10 @@ _bootstrap_cache_lock = Lock()
 _bootstrap_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
 _dashboard_cache_lock = Lock()
 _dashboard_snapshot_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
+_dashboard_snapshot_refresh_inflight: set[tuple[Any, ...]] = set()
+_ops_status_cache_lock = Lock()
+_ops_status_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
+_ops_status_refresh_inflight: set[tuple[Any, ...]] = set()
 _watchlist_prefetch_lock = Lock()
 _watchlist_prefetch_inflight: set[tuple[Any, ...]] = set()
 _desk_prefetch_lock = Lock()
@@ -78,6 +82,10 @@ def clear_frontend_snapshot_cache() -> None:
         _bootstrap_cache.clear()
     with _dashboard_cache_lock:
         _dashboard_snapshot_cache.clear()
+        _dashboard_snapshot_refresh_inflight.clear()
+    with _ops_status_cache_lock:
+        _ops_status_cache.clear()
+        _ops_status_refresh_inflight.clear()
 
 
 def _get_cached_bootstrap(cache_key: tuple[Any, ...]) -> Any | None:
@@ -103,7 +111,14 @@ def _dashboard_snapshot_ttl_seconds() -> int:
     return min(configured, 15)
 
 
-def _get_cached_dashboard_snapshot(cache_key: tuple[Any, ...]) -> Any | None:
+def _dashboard_snapshot_stale_seconds() -> int:
+    ttl_seconds = _dashboard_snapshot_ttl_seconds()
+    if ttl_seconds <= 0:
+        return 0
+    return min(max(ttl_seconds * 6, 60), 180)
+
+
+def _get_cached_dashboard_snapshot(cache_key: tuple[Any, ...], *, allow_stale: bool = False) -> Any | None:
     ttl_seconds = _dashboard_snapshot_ttl_seconds()
     if ttl_seconds <= 0:
         return None
@@ -114,9 +129,13 @@ def _get_cached_dashboard_snapshot(cache_key: tuple[Any, ...]) -> Any | None:
             return None
         expires_at, payload = cached
         if expires_at <= now:
-            _dashboard_snapshot_cache.pop(cache_key, None)
+            stale_until = expires_at + _dashboard_snapshot_stale_seconds()
+            if allow_stale and stale_until > now:
+                return payload
+            if stale_until <= now:
+                _dashboard_snapshot_cache.pop(cache_key, None)
             return None
-        return deepcopy(payload)
+        return payload
 
 
 def _store_cached_dashboard_snapshot(cache_key: tuple[Any, ...], payload: Any) -> None:
@@ -126,10 +145,85 @@ def _store_cached_dashboard_snapshot(cache_key: tuple[Any, ...], payload: Any) -
     now = time()
     expires_at = now + ttl_seconds
     with _dashboard_cache_lock:
-        expired_keys = [key for key, (expiry, _) in _dashboard_snapshot_cache.items() if expiry <= now]
+        stale_seconds = _dashboard_snapshot_stale_seconds()
+        expired_keys = [key for key, (expiry, _) in _dashboard_snapshot_cache.items() if expiry + stale_seconds <= now]
         for key in expired_keys:
             _dashboard_snapshot_cache.pop(key, None)
-        _dashboard_snapshot_cache[cache_key] = (expires_at, deepcopy(payload))
+        _dashboard_snapshot_cache[cache_key] = (expires_at, payload)
+
+
+def _claim_dashboard_snapshot_refresh(cache_key: tuple[Any, ...]) -> bool:
+    with _dashboard_cache_lock:
+        if cache_key in _dashboard_snapshot_refresh_inflight:
+            return False
+        _dashboard_snapshot_refresh_inflight.add(cache_key)
+        return True
+
+
+def _release_dashboard_snapshot_refresh(cache_key: tuple[Any, ...]) -> None:
+    with _dashboard_cache_lock:
+        _dashboard_snapshot_refresh_inflight.discard(cache_key)
+
+
+def _ops_status_ttl_seconds() -> int:
+    configured = max(0, int(settings.frontend_snapshot_cache_ttl_seconds))
+    if configured <= 0:
+        return 0
+    return min(configured, 15)
+
+
+def _ops_status_stale_seconds() -> int:
+    ttl_seconds = _ops_status_ttl_seconds()
+    if ttl_seconds <= 0:
+        return 0
+    return min(max(ttl_seconds * 8, 60), 180)
+
+
+def _get_cached_ops_status(cache_key: tuple[Any, ...], *, allow_stale: bool = False) -> Any | None:
+    ttl_seconds = _ops_status_ttl_seconds()
+    if ttl_seconds <= 0:
+        return None
+    now = time()
+    with _ops_status_cache_lock:
+        cached = _ops_status_cache.get(cache_key)
+        if not cached:
+            return None
+        expires_at, payload = cached
+        if expires_at <= now:
+            stale_until = expires_at + _ops_status_stale_seconds()
+            if allow_stale and stale_until > now:
+                return payload
+            if stale_until <= now:
+                _ops_status_cache.pop(cache_key, None)
+            return None
+        return payload
+
+
+def _store_cached_ops_status(cache_key: tuple[Any, ...], payload: Any) -> None:
+    ttl_seconds = _ops_status_ttl_seconds()
+    if ttl_seconds <= 0:
+        return
+    now = time()
+    expires_at = now + ttl_seconds
+    with _ops_status_cache_lock:
+        stale_seconds = _ops_status_stale_seconds()
+        expired_keys = [key for key, (expiry, _) in _ops_status_cache.items() if expiry + stale_seconds <= now]
+        for key in expired_keys:
+            _ops_status_cache.pop(key, None)
+        _ops_status_cache[cache_key] = (expires_at, payload)
+
+
+def _claim_ops_status_refresh(cache_key: tuple[Any, ...]) -> bool:
+    with _ops_status_cache_lock:
+        if cache_key in _ops_status_refresh_inflight:
+            return False
+        _ops_status_refresh_inflight.add(cache_key)
+        return True
+
+
+def _release_ops_status_refresh(cache_key: tuple[Any, ...]) -> None:
+    with _ops_status_cache_lock:
+        _ops_status_refresh_inflight.discard(cache_key)
 
 
 def _store_cached_bootstrap(cache_key: tuple[Any, ...], payload: Any) -> None:
@@ -452,6 +546,9 @@ def _build_service_smoke_snapshot(
     if worker_status.get("enabled") and not worker_status.get("running"):
         job_status = "blocked"
         job_message = "Background worker is enabled but not running."
+    elif worker_status.get("stale") or worker_status.get("status") == "running_but_stale":
+        job_status = "warning"
+        job_message = "Background worker is running but stale."
     elif dead_letters > 0:
         job_status = "blocked"
         job_message = "Dead-letter jobs are present."
@@ -652,6 +749,34 @@ def _prefetch_desk_dashboard_snapshot(current_user: Any) -> None:
                 _desk_prefetch_inflight.discard(prefetch_key)
 
     worker = Thread(target=_run, name="desk-dashboard-prefetch", daemon=True)
+    worker.start()
+
+
+def _start_dashboard_snapshot_refresh(
+    *,
+    cache_key: tuple[Any, ...],
+    current_user: Any | None,
+    consumer: str | None,
+    account_profile: str | None,
+    linked_account_id: str | None,
+) -> None:
+    def _run() -> None:
+        try:
+            with SessionLocal() as db:
+                get_dashboard_snapshot(
+                    current_user=current_user,
+                    db=db,
+                    consumer=consumer,
+                    account_profile=account_profile,
+                    linked_account_id=linked_account_id,
+                    _force_refresh=True,
+                )
+        except Exception:
+            return
+        finally:
+            _release_dashboard_snapshot_refresh(cache_key)
+
+    worker = Thread(target=_run, name="dashboard-refresh", daemon=True)
     worker.start()
 
 
@@ -862,6 +987,7 @@ def get_dashboard_snapshot(
     consumer: str | None = None,
     account_profile: str | None = None,
     linked_account_id: str | None = None,
+    _force_refresh: bool = False,
 ) -> dict[str, Any]:
     started_at = perf_counter()
     stages: list[dict[str, Any]] = []
@@ -873,36 +999,76 @@ def get_dashboard_snapshot(
     normalized_linked_account_id = str(linked_account_id or "").strip()
     cache_key = (tenant_slug, normalized_consumer, normalized_account_profile, normalized_linked_account_id)
     stages.append({"name": "cache_lookup", "duration_ms": round((perf_counter() - started_at) * 1000, 2), "status": "ok"})
-    cached_payload = _get_cached_dashboard_snapshot(cache_key)
-    if cached_payload is not None:
-        record_route_profile(
-            route_key="frontend.dashboard_snapshot",
-            total_duration_seconds=perf_counter() - started_at,
-            stages=stages,
-            context={
-                "tenant_slug": tenant_slug,
-                "ticker_count": 0,
-                "consumer": normalized_consumer,
-                "account_profile": normalized_account_profile,
-                "linked_account_id": normalized_linked_account_id,
-                "cache_status": "hit",
-            },
-        )
-        record_operation(
-            name="frontend.dashboard_snapshot",
-            duration_seconds=perf_counter() - started_at,
-            cache_status="hit",
-            context={
-                "tenant_slug": tenant_slug,
-                "ticker_count": 0,
-                "consumer": normalized_consumer,
-                "account_profile": normalized_account_profile,
-                "linked_account_id": normalized_linked_account_id,
-            },
-        )
-        return cached_payload
+    if not _force_refresh:
+        cached_payload = _get_cached_dashboard_snapshot(cache_key)
+        if cached_payload is not None:
+            record_route_profile(
+                route_key="frontend.dashboard_snapshot",
+                total_duration_seconds=perf_counter() - started_at,
+                stages=stages,
+                context={
+                    "tenant_slug": tenant_slug,
+                    "ticker_count": 0,
+                    "consumer": normalized_consumer,
+                    "account_profile": normalized_account_profile,
+                    "linked_account_id": normalized_linked_account_id,
+                    "cache_status": "hit",
+                },
+            )
+            record_operation(
+                name="frontend.dashboard_snapshot",
+                duration_seconds=perf_counter() - started_at,
+                cache_status="hit",
+                context={
+                    "tenant_slug": tenant_slug,
+                    "ticker_count": 0,
+                    "consumer": normalized_consumer,
+                    "account_profile": normalized_account_profile,
+                    "linked_account_id": normalized_linked_account_id,
+                },
+            )
+            return cached_payload
+        stale_payload = _get_cached_dashboard_snapshot(cache_key, allow_stale=True)
+        if stale_payload is not None:
+            stages.append({"name": "stale_cache_lookup", "duration_ms": round((perf_counter() - started_at) * 1000, 2), "status": "ok"})
+            if _claim_dashboard_snapshot_refresh(cache_key):
+                _start_dashboard_snapshot_refresh(
+                    cache_key=cache_key,
+                    current_user=current_user,
+                    consumer=consumer,
+                    account_profile=account_profile,
+                    linked_account_id=linked_account_id,
+                )
+            record_route_profile(
+                route_key="frontend.dashboard_snapshot",
+                total_duration_seconds=perf_counter() - started_at,
+                stages=stages,
+                context={
+                    "tenant_slug": tenant_slug,
+                    "ticker_count": 0,
+                    "consumer": normalized_consumer,
+                    "account_profile": normalized_account_profile,
+                    "linked_account_id": normalized_linked_account_id,
+                    "cache_status": "stale_hit",
+                },
+            )
+            record_operation(
+                name="frontend.dashboard_snapshot",
+                duration_seconds=perf_counter() - started_at,
+                cache_status="hit",
+                context={
+                    "tenant_slug": tenant_slug,
+                    "ticker_count": 0,
+                    "consumer": normalized_consumer,
+                    "account_profile": normalized_account_profile,
+                    "linked_account_id": normalized_linked_account_id,
+                    "stale": True,
+                },
+            )
+            return stale_payload
     defaults = _profile_stage(stages, "defaults", get_defaults)
-    dashboard_tickers = defaults["default_scan_tickers"][:6]
+    dashboard_ticker_limit = 3 if normalized_consumer == "desk" else 6
+    dashboard_tickers = defaults["default_scan_tickers"][:dashboard_ticker_limit]
     scan_request = ScanRequest(
         tickers=dashboard_tickers,
         interval=defaults["default_interval"],
@@ -1206,7 +1372,7 @@ def get_release_notes() -> dict[str, Any]:
 
 
 
-def get_operations_status(user_id: str, tenant_slug: str | None = None, *, current_user: Any | None = None) -> dict[str, Any]:
+def _build_operations_status(user_id: str, tenant_slug: str | None = None, *, current_user: Any | None = None) -> dict[str, Any]:
     health = get_health()
     release = get_release_info()
     _safe_call(lambda: drain_due_jobs(limit=settings.job_worker_batch_size), {"claimed": 0, "succeeded": 0, "retried": 0, "dead_letter": 0})
@@ -1663,3 +1829,116 @@ def get_operations_status(user_id: str, tenant_slug: str | None = None, *, curre
         "market_data": market_data,
         "timestamp": health.get('timestamp'),
     }
+
+
+def _minimal_operations_status(user_id: str, tenant_slug: str | None = None) -> dict[str, Any]:
+    health = _safe_call(get_health, {"timestamp": None, "status": "unknown"})
+    release = _safe_call(get_release_info, {"version": settings.app_version, "phase": settings.app_phase})
+    request_metrics = _safe_call(get_request_metrics_snapshot, {"summary": {}})
+    operation_metrics = _safe_call(get_operation_metrics_snapshot, {"summary": {}})
+    route_profiles = _safe_call(get_route_profile_snapshot, {"summary": {}, "routes": []})
+    upstream_metrics = _safe_call(get_upstream_metrics_snapshot, {"summary": {}})
+    job_metrics = {"summary": {"status": "refreshing"}, "recent_jobs": []}
+    worker_status = _safe_call(
+        get_job_worker_status,
+        {"enabled": False, "running": False, "status": "refreshing"},
+    )
+    return {
+        "health": health,
+        "release": release,
+        "counts": {
+            "alerts": 0,
+            "workspaces": 0,
+            "favorite_tickers": 0,
+            "recent_tickers": 0,
+            "active_notes": 0,
+            "overdue_notes": 0,
+            "high_priority_notes": 0,
+            "open_trades": 0,
+        },
+        "portfolio": {"realized_pnl": 0, "win_rate": 0, "profit_factor": 0},
+        "observability": {
+            "requests": request_metrics,
+            "operations": operation_metrics,
+            "route_profiles": route_profiles,
+            "upstream": upstream_metrics,
+            "jobs": {**job_metrics, "worker": worker_status},
+        },
+        "readiness": {"summary": {"status": "refreshing", "ready": False, "next_action": "Operations snapshot is refreshing."}},
+        "release_gates": {"summary": {"status": "refreshing", "ready": False}},
+        "billing": {"summary": {"status": "refreshing"}},
+        "service_smoke": {"summary": {"status": "refreshing"}},
+        "rate_limits": {"summary": {"enabled": False}},
+        "orders": {"summary": {"status": "refreshing"}},
+        "launch": {"summary": {"status": "refreshing"}},
+        "phase_a": {"summary": {"status": "refreshing"}},
+        "deployment": {"summary": {"status": "refreshing"}},
+        "enterprise_readiness": {"summary": {"status": "refreshing"}},
+        "market_data": {"status": "refreshing", "message": "Operations snapshot is refreshing."},
+        "timestamp": health.get("timestamp"),
+        "source": "ops-status-fast-fallback",
+        "user_id": user_id,
+        "tenant_slug": tenant_slug,
+    }
+
+
+def _start_ops_status_refresh(
+    *,
+    cache_key: tuple[Any, ...],
+    user_id: str,
+    tenant_slug: str | None,
+    current_user: Any | None,
+) -> None:
+    def _run() -> None:
+        try:
+            payload = _build_operations_status(user_id, tenant_slug, current_user=current_user)
+            _store_cached_ops_status(cache_key, payload)
+        except Exception:
+            return
+        finally:
+            _release_ops_status_refresh(cache_key)
+
+    Thread(target=_run, name="ops-status-refresh", daemon=True).start()
+
+
+def _with_fresh_worker_status(payload: dict[str, Any]) -> dict[str, Any]:
+    refreshed = dict(payload or {})
+    worker_status = _safe_call(
+        get_job_worker_status,
+        {"enabled": False, "running": False, "status": "refreshing"},
+    )
+    observability = dict(refreshed.get("observability") or {})
+    jobs = dict(observability.get("jobs") or {})
+    jobs["worker"] = worker_status
+    observability["jobs"] = jobs
+    refreshed["observability"] = observability
+    return refreshed
+
+
+def get_operations_status(user_id: str, tenant_slug: str | None = None, *, current_user: Any | None = None) -> dict[str, Any]:
+    cache_key = (str(user_id or ""), str(tenant_slug or ""), str(getattr(current_user, "active_tenant_slug", "") or ""))
+    if current_user is None:
+        payload = _build_operations_status(user_id, tenant_slug, current_user=current_user)
+        _store_cached_ops_status(cache_key, payload)
+        return _with_fresh_worker_status(payload)
+    cached = _get_cached_ops_status(cache_key)
+    if cached is not None:
+        return _with_fresh_worker_status(cached)
+    stale = _get_cached_ops_status(cache_key, allow_stale=True)
+    if stale is not None:
+        if _claim_ops_status_refresh(cache_key):
+            _start_ops_status_refresh(
+                cache_key=cache_key,
+                user_id=user_id,
+                tenant_slug=tenant_slug,
+                current_user=current_user,
+            )
+        return _with_fresh_worker_status(stale)
+    if _claim_ops_status_refresh(cache_key):
+        _start_ops_status_refresh(
+            cache_key=cache_key,
+            user_id=user_id,
+            tenant_slug=tenant_slug,
+            current_user=current_user,
+        )
+    return _with_fresh_worker_status(_minimal_operations_status(user_id, tenant_slug))

@@ -317,7 +317,10 @@ class RolloutSupportTests(unittest.TestCase):
             "quote_timestamp": pd.Timestamp.now(tz="UTC").isoformat(),
         }
 
-        with patch.object(sdm, "get_contract_quote_from_chain", return_value=fresh_contract):
+        with (
+            patch.object(trade_automation_service, "settings", SimpleNamespace(options_data_provider="alpaca")),
+            patch.object(sdm, "get_contract_quote_from_chain", return_value=fresh_contract),
+        ):
             refresh = trade_automation_service._refresh_option_quote_for_close(
                 {
                     "ticker": "SPY",
@@ -347,6 +350,19 @@ class RolloutSupportTests(unittest.TestCase):
         self.assertEqual(fields["order_type"], "limit")
         self.assertEqual(fields["time_in_force"], "day")
         self.assertEqual(fields["limit_price"], 2.65)
+
+    def test_automation_order_fields_normalize_equity_limit_price_for_alpaca(self) -> None:
+        fields = trade_automation_service._build_automation_order_fields(
+            candidate={"live_price": 280.635},
+            settings_state={
+                "order_type": "limit",
+                "time_in_force": "day",
+                "instrument_type": "equity",
+            },
+            instrument_type="equity",
+        )
+
+        self.assertEqual(fields["limit_price"], 280.64)
 
     def test_update_trade_automation_settings_allows_listed_options_and_normalizes_constraints(self) -> None:
         tenant = SimpleNamespace(id="tenant-1", slug="alpha-desk", metadata_json={})
@@ -1186,6 +1202,32 @@ class RolloutSupportTests(unittest.TestCase):
         self.assertEqual(monitored_by_trade[equity_trade["trade_id"]]["monitor_action"], equity_eval["monitor_action"])
         self.assertEqual(monitored_by_trade[equity_trade["trade_id"]]["current_exit_stage"], equity_eval["current_exit_stage"])
         self.assertAlmostEqual(monitored_by_trade[equity_trade["trade_id"]]["current_contract_mid"], 1.06)
+
+    def test_monitor_open_trades_overwrites_stale_entry_quote_age_with_current_price_age(self) -> None:
+        equity_trade = self._build_trade_row(
+            ticker="QQQ",
+            verdict="BULLISH",
+            instrument_type="equity",
+            contract_symbol="EQUITY:QQQ",
+            invalidation_price=95.0,
+        )
+        equity_trade["quote_age_seconds"] = 9999.0
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(sdm.time, "monotonic", return_value=1000.0),
+            patch.dict(sdm._LIVE_PRICE_CACHE_TS, {"QQQ": 995.0}, clear=True),
+            patch.object(sdm, "batch_get_live_prices", return_value={"QQQ": 106.0}),
+            patch.object(sdm, "batch_get_contract_mids", return_value={}),
+        ):
+            file_path = Path(tmpdir) / "open_trades.csv"
+            pd.DataFrame([equity_trade]).to_csv(file_path, index=False)
+            monitored = sdm.monitor_open_trades(file_path=file_path)
+
+        row = monitored.to_dict(orient="records")[0]
+        self.assertEqual(row["quote_age_seconds"], 5.0)
+        self.assertEqual(row["market_data_age_seconds"], 5.0)
+        self.assertEqual(row["quote_freshness_source"], "live_equity_price")
 
     def test_reconcile_local_broker_paper_state_uses_option_contract_symbol(self) -> None:
         open_trades = pd.DataFrame(

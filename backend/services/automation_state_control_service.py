@@ -39,6 +39,78 @@ STATE_LABELS = {
 }
 
 
+def _compact_evidence_value(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"type": type(value).__name__}
+    compact: dict[str, Any] = {}
+    for key in (
+        "status",
+        "state",
+        "score",
+        "block_new_entries",
+        "manual_action_required",
+        "sample_count",
+        "warning_count",
+        "blocker_count",
+        "pending_exit_count",
+        "stuck_exit_count",
+        "open_heat_pct",
+        "evaluated_at",
+        "related_note_id",
+    ):
+        if key in value:
+            compact[key] = serialize_value(value.get(key))
+    warnings = value.get("warnings")
+    if isinstance(warnings, list):
+        compact["warning_count"] = len(warnings)
+    blockers = value.get("blockers")
+    if isinstance(blockers, list):
+        compact["blocker_count"] = len(blockers)
+    actions = value.get("defensive_actions") or value.get("actions")
+    if isinstance(actions, list):
+        compact["action_count"] = len(actions)
+    if not compact:
+        compact["keys"] = sorted(str(key) for key in value.keys())[:20]
+    return compact
+
+
+def _compact_state_control_evaluation(last_evaluation: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(last_evaluation, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for key in (
+        "state",
+        "candidate_state",
+        "status",
+        "score",
+        "component_scores",
+        "triggered_signals",
+        "active_overrides",
+        "skipped_actions",
+        "hard_faults",
+        "manual_action_required",
+        "block_new_entries",
+        "last_transition",
+        "session_day",
+        "profile_key",
+        "linked_account_id",
+        "note_id",
+        "evaluated_at",
+    ):
+        if key not in last_evaluation:
+            continue
+        value = last_evaluation.get(key)
+        if key == "triggered_signals" and isinstance(value, list):
+            value = value[:STATE_CONTROL_SIGNAL_LIMIT]
+        elif key in {"active_overrides", "skipped_actions", "hard_faults"} and isinstance(value, list):
+            value = value[:STATE_CONTROL_SIGNAL_LIMIT]
+        compact[key] = serialize_value(value)
+    evidence = last_evaluation.get("evidence")
+    if isinstance(evidence, dict):
+        compact["evidence_summary"] = {str(key): _compact_evidence_value(value) for key, value in evidence.items()}
+    return compact
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -182,12 +254,13 @@ def normalize_state_control_runtime(runtime_state: dict[str, Any] | None) -> dic
         if isinstance(item, dict)
     ]
     state = _normalize_state(runtime.get("state_control_state") or last_evaluation.get("state"))
+    compact_last_evaluation = _compact_state_control_evaluation(last_evaluation)
     return {
         "state_control_state": state,
         "state_control_score": _clamp_float(runtime.get("state_control_score"), 100.0, minimum=0.0, maximum=100.0),
         "state_control_active_overrides": active_overrides,
         "state_control_effective_overrides": effective_overrides,
-        "state_control_last_evaluation": serialize_value(last_evaluation),
+        "state_control_last_evaluation": compact_last_evaluation,
         "state_control_last_transition": serialize_value(runtime.get("state_control_last_transition")),
         "state_control_transition_history": transition_history,
         "state_control_last_note_id": str(runtime.get("state_control_last_note_id") or "").strip() or None,
@@ -349,7 +422,7 @@ def _collect_evidence(
     equity_base = max(
         _coerce_float(state.get("__actual_funds"), 0.0)
         or _coerce_float(state.get("__effective_funds"), 0.0)
-        or _coerce_float(settings_state.get("account_size"), 10000.0),
+        or _coerce_float(settings_state.get("account_size"), 100000.0),
         1.0,
     )
     last_candidate = dict(runtime.get("last_candidate") or {})
@@ -384,6 +457,9 @@ def _collect_evidence(
         "path_evaluations": serialize_value(path_evaluations[:20]),
         "calibration": serialize_value(calibration),
         "accuracy_calibration": serialize_value(runtime.get("accuracy_calibration_last_report") or {}),
+        "transaction_cost_calibration": serialize_value(
+            runtime.get("transaction_cost_calibration_last_report") or {}
+        ),
         "loss_containment": serialize_value(runtime.get("loss_containment_last_report") or {}),
         "exit_watchdog": serialize_value(runtime.get("exit_watchdog_last_report") or {}),
         "last_cycle_age_seconds": last_cycle_age_seconds,
@@ -433,7 +509,7 @@ def _score_data_integrity(evidence: dict[str, Any], signals: list[dict[str, Any]
             detail="Ledger and snapshot consistency is not fully available.",
             penalty=12,
         )
-    if reconciliation in {"failed", "issues_present", "orphaned", "inconsistent"} or orphan_count > 0:
+    if reconciliation in {"failed", "orphaned", "inconsistent"} or orphan_count > 0:
         score -= _signal(
             signals,
             component="data_integrity",
@@ -442,6 +518,16 @@ def _score_data_integrity(evidence: dict[str, Any], signals: list[dict[str, Any]
             detail="Current-route reconciliation found unresolved order-event issues.",
             penalty=80,
             hard_fault=True,
+            metrics={"status": reconciliation, "orphan_order_event_count": orphan_count},
+        )
+    elif reconciliation == "issues_present":
+        score -= _signal(
+            signals,
+            component="data_integrity",
+            signal="route_reconciliation_review",
+            severity="watch",
+            detail="Current-route reconciliation has advisory issues but no confirmed orphan order events.",
+            penalty=12,
             metrics={"status": reconciliation, "orphan_order_event_count": orphan_count},
         )
     if sample_status == "sufficient" and coverage and coverage not in {"complete", "ledger_backed"}:
@@ -586,9 +672,48 @@ def _score_alpha_efficacy(evidence: dict[str, Any], signals: list[dict[str, Any]
             penalty=14,
             metrics={"confidence_error": confidence_error},
         )
+    runtime = dict(evidence.get("runtime") or {})
     loss_status = str(loss_containment.get("status") or "").strip().lower()
+    loss_report_open_count = _coerce_int(loss_containment.get("open_position_count"), 0)
+    current_open_count = _coerce_int(evidence.get("open_position_count"), 0)
+    loss_report_stale = False
+    if current_open_count == 0 and (
+        loss_report_open_count > 0
+        or any(isinstance(item, dict) for item in list(loss_containment.get("defensive_actions") or []))
+    ):
+        loss_report_stale = True
+    loss_evaluated_at = _parse_datetime(loss_containment.get("evaluated_at"))
+    paper_report = runtime.get("paper_broker_reconciliation_last_report")
+    latest_route_event_at = _parse_datetime(runtime.get("current_route_latest_event_at"))
+    if latest_route_event_at is None and isinstance(paper_report, dict):
+        latest_route_event_at = _parse_datetime(paper_report.get("current_route_latest_event_at"))
+    if loss_evaluated_at and latest_route_event_at and latest_route_event_at > loss_evaluated_at:
+        loss_report_stale = True
+    if loss_report_stale:
+        score -= _signal(
+            signals,
+            component="alpha_efficacy",
+            signal="stale_loss_containment_report",
+            severity="watch",
+            detail="Previous loss-containment defensive-exit evidence is stale after current position/reconciliation state.",
+            penalty=8,
+            hard_fault=False,
+            metrics={
+                "report_status": loss_status or None,
+                "report_open_position_count": loss_report_open_count,
+                "current_open_position_count": current_open_count,
+            },
+        )
+        loss_containment = {**loss_containment, "status": "stale_ignored", "entries_blocked": False}
+        loss_status = "stale_ignored"
     open_heat_pct = loss_containment.get("open_heat_pct")
-    defensive_action_count = len(loss_containment.get("defensive_actions") or [])
+    defensive_action_count = len(
+        [
+            item
+            for item in list(loss_containment.get("defensive_actions") or [])
+            if bool(item.get("auto_close_eligible"))
+        ]
+    )
     if loss_status in {"blocked", "action_required"} or bool(loss_containment.get("entries_blocked")):
         hard_fault = loss_status == "action_required" or defensive_action_count > 0
         score -= _signal(
@@ -653,6 +778,7 @@ def _score_execution_quality(evidence: dict[str, Any], signals: list[dict[str, A
     settings_state = dict(evidence.get("settings") or {})
     runtime = dict(evidence.get("runtime") or {})
     slippage = dict(evidence.get("slippage") or {})
+    transaction_cost = dict(evidence.get("transaction_cost_calibration") or {})
     statuses = dict(evidence.get("event_status_counts") or {})
     event_keys = dict(evidence.get("event_key_counts") or {})
     avg_slippage = slippage.get("average_abs_bps")
@@ -683,6 +809,23 @@ def _score_execution_quality(evidence: dict[str, Any], signals: list[dict[str, A
             penalty=72 if severe else 22,
             hard_fault=severe,
             metrics={"worst_abs_bps": worst_slippage},
+        )
+    cost_status = str(transaction_cost.get("status") or "").strip().lower()
+    cost_error = _coerce_float(transaction_cost.get("estimated_vs_realized_cost_error_bps"), 0.0)
+    if cost_status in {"blocked", "warning"} or cost_error > 10.0:
+        severe = cost_status == "blocked" or cost_error >= 30.0
+        score -= _signal(
+            signals,
+            component="execution_quality",
+            signal="transaction_cost_drift",
+            severity="de_risk" if severe else "watch",
+            detail=f"Transaction cost calibration drift is {cost_error:.1f} bps.",
+            penalty=34 if severe else 16,
+            metrics={
+                "status": transaction_cost.get("status"),
+                "cost_error_bps": transaction_cost.get("estimated_vs_realized_cost_error_bps"),
+                "sample_count": transaction_cost.get("sample_count"),
+            },
         )
     if error_streak >= max_error_streak:
         score -= _signal(
@@ -1326,7 +1469,7 @@ def evaluate_trade_automation_state_control(
     runtime["state_control_score"] = round(score, 4)
     runtime["state_control_clean_cycle_count"] = clean_cycles
     runtime["state_control_active_overrides"] = serialize_value(review.get("active_overrides") or [])
-    runtime["state_control_last_evaluation"] = serialize_value(review)
+    runtime["state_control_last_evaluation"] = _compact_state_control_evaluation(review)
     runtime["state_control_last_review_at"] = _serialize_datetime(now)
     runtime["state_control_last_error"] = None
     if transition:

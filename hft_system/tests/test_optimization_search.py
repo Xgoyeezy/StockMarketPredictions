@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from hft.market_data.schemas import MarketEvent
 from hft.optimization.search import optimize_market_making
 from hft.optimization.types import OptimizationRunConfig
 from hft.risk.limits import HFTLimitConfig
+from tests._workspace_tmp import reset_tmp_dir
 
 
 def build_session_events(session_id: str, *, day_offset: int) -> list[MarketEvent]:
@@ -51,7 +51,7 @@ def build_session_events(session_id: str, *, day_offset: int) -> list[MarketEven
 
 class OptimizationSearchTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_opt_")
+        self.tmpdir = str(reset_tmp_dir("optimization_search"))
         self.session_events = {
             f"session-{index:02d}": build_session_events(f"session-{index:02d}", day_offset=index)
             for index in range(5)
@@ -80,7 +80,7 @@ class OptimizationSearchTest(unittest.TestCase):
             fee_model={},
         )
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_opt_")
+        self.tmpdir = str(reset_tmp_dir("optimization_search"))
         right = optimize_market_making(
             session_events=self.session_events,
             base_dir=self.tmpdir,

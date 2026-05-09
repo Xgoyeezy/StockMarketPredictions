@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import tempfile
 import unittest
 
 from hft.backtest.engine import ReplayBacktestEngine, ReplayRunConfig
@@ -9,6 +8,7 @@ from hft.execution.simulator import LatencyProfile
 from hft.market_data.schemas import MarketEvent
 from hft.risk.limits import HFTLimitConfig
 from hft.strategies.market_making import InventoryAwareMarketMakingStrategy
+from tests._workspace_tmp import reset_tmp_dir
 
 
 def sample_events() -> list[MarketEvent]:
@@ -23,7 +23,7 @@ def sample_events() -> list[MarketEvent]:
 
 class ReplayDeterminismTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_replay_")
+        self.tmpdir = str(reset_tmp_dir("replay_determinism"))
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -51,7 +51,7 @@ class ReplayDeterminismTest(unittest.TestCase):
     def test_same_seed_same_results(self) -> None:
         left = self.run_once()
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_replay_")
+        self.tmpdir = str(reset_tmp_dir("replay_determinism"))
         right = self.run_once()
 
         self.assertEqual(left.metrics, right.metrics)

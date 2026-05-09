@@ -1,12 +1,16 @@
 const env = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : {}
-const personalMode = (env.VITE_PERSONAL_MODE || 'true').toLowerCase() !== 'false'
+const customerReadyMode = (env.VITE_CUSTOMER_READY_MODE || 'true').toLowerCase() !== 'false'
+const personalMode = (env.VITE_PERSONAL_MODE || (customerReadyMode ? 'false' : 'true')).toLowerCase() !== 'false'
+const showAdminSurfaces = (env.VITE_SHOW_ADMIN_SURFACES || 'false').toLowerCase() === 'true'
 
 export const appConfig = {
+  customerReadyMode,
   personalMode,
-  appName: env.VITE_APP_NAME || (personalMode ? 'Personal Trading Research Desk' : 'Trading Platform Operations'),
-  appTagline: env.VITE_APP_TAGLINE || (personalMode ? 'Self-directed research, risk checks, and execution control for your own account' : 'Organization operations and execution control plane'),
-  publicAppName: env.VITE_PUBLIC_APP_NAME || (personalMode ? 'Personal Trading Research Desk' : 'Stock Options Signal'),
-  publicAppTagline: env.VITE_PUBLIC_APP_TAGLINE || (personalMode ? 'Private own-account trading workstation for self-directed research and execution control.' : 'Private pilot trading application built on Alpaca OAuth.'),
+  showAdminSurfaces,
+  appName: env.VITE_APP_NAME || (personalMode ? 'Personal Trading Research Desk' : 'Quant Evidence Desk'),
+  appTagline: env.VITE_APP_TAGLINE || (personalMode ? 'Self-directed research, risk checks, and execution control for your own account' : 'Paper-validated live automation control for trading teams'),
+  publicAppName: env.VITE_PUBLIC_APP_NAME || (personalMode ? 'Personal Trading Research Desk' : 'Quant Evidence OS'),
+  publicAppTagline: env.VITE_PUBLIC_APP_TAGLINE || (personalMode ? 'Private own-account trading workstation for self-directed research and execution control.' : 'A premium control plane for risk-gated automation, evidence review, and execution proof.'),
   publicSupportEmail: env.VITE_PUBLIC_SUPPORT_EMAIL || '',
   publicSupportUrl: env.VITE_PUBLIC_SUPPORT_URL || '',
   apiBaseUrl: env.VITE_API_BASE_URL || '',

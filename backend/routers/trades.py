@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from backend.core.auth import CurrentUser, get_current_user
@@ -25,6 +27,7 @@ from backend.services.trade_service import (
     build_trade_intent_trust_packet_json,
     cancel_pending_order_from_request,
     close_trade_from_request,
+    coerce_preview_trade_request,
     conditionally_approve_trade_intent,
     create_trade_intent_from_request,
     expire_trade_intent,
@@ -78,10 +81,11 @@ def open_trade(
 
 @router.post("/preview", response_model=ApiEnvelope)
 def preview_trade(
-    request: OpenTradeRequest,
+    request_payload: Any = Body(default=None),
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ApiEnvelope:
+    request = coerce_preview_trade_request(request_payload)
     return envelope(preview_trade_from_request(request, db=db, current_user=current_user))
 
 

@@ -155,7 +155,7 @@ export default function TradesPage() {
           riskPercent: preferences?.defaultRiskPercent,
         },
         defaults: {
-          accountSize: 1000,
+          accountSize: 100000,
           riskPercent: 0.5,
         },
       }),
@@ -338,7 +338,7 @@ export default function TradesPage() {
   const rolloutPolicyAction =
     reviewOnlyMode || !rolloutReadiness.allowsLiveRollout
       ? {
-          label: 'Review broker-live policy',
+          label: 'Review live policy',
           onClick: () => navigate('/settings'),
         }
       : {
@@ -495,7 +495,7 @@ export default function TradesPage() {
       />
       <StrategyDeskStatusPanel
         eyebrow="Quant desks"
-        title="Desk validation and route pressure"
+        title="Desk validation and execution evidence"
         subtitle="The same desk runtime feeding allocator targets should stay visible while you manage open trades, so fills, exits, and new desk publications can be read together."
       />
       <WorkflowGuide
@@ -503,7 +503,7 @@ export default function TradesPage() {
         phaseLabel="Phase 3 - Act safely"
         phaseTone={reviewOnlyMode ? 'warning' : 'positive'}
         title={tradingStyle === 'intraday' ? `Use this page to manage ${intradayPresetProfile.shortLabel.toLowerCase()} risk before the session degrades.` : 'Use this page to manage risk and verify execution quality before looking for the next idea.'}
-        description={tradingStyle === 'intraday' ? `${intradayPresetProfile.description} Use this surface to reduce same-session complexity, verify execution quality, and keep broker-live discipline visible.` : 'A live position should make the desk calmer, not more reactive. This surface is for reducing risk, checking route quality, and making sure broker-live discipline stays visible.'}
+        description={tradingStyle === 'intraday' ? `${intradayPresetProfile.description} Use this surface to reduce same-session complexity, verify execution quality, and keep live-control discipline visible.` : 'A live position should make the desk calmer, not more reactive. This surface is for reducing risk, checking route quality, and making sure live-control discipline stays visible.'}
         steps={buildWorkflowSteps(2)}
         cards={[
           {
@@ -516,15 +516,15 @@ export default function TradesPage() {
           {
             label: 'Best next move',
             value: reviewOnlyMode ? 'Stay review-first until the desk unlocks again.' : (tradingStyle === 'intraday' ? `Sync, inspect, trim, or flatten before the ${intradayPresetProfile.shortLabel.toLowerCase()} window degrades.` : 'Sync, inspect, reduce, or close before adding complexity.'),
-            detail: tradingStyle === 'intraday' ? 'Use broker-live readiness, execution review, and the active session window to decide whether the position needs cleanup, not more action.' : 'Use broker-live readiness and execution review to decide whether the position needs cleanup, not more action.',
+            detail: tradingStyle === 'intraday' ? 'Use live readiness, execution review, and the active session window to decide whether the position needs cleanup, not more action.' : 'Use live readiness and execution review to decide whether the position needs cleanup, not more action.',
             tone: 'positive',
             actionLabel: reviewLoopAction.label,
             onAction: reviewLoopAction.onClick,
           },
           {
             label: 'Do not ignore',
-            value: tradingStyle === 'intraday' ? 'Route drift, cleanup pressure, and broker-live locks are part of the trade story.' : 'Route drift and broker-live locks are part of the trade story.',
-            detail: tradingStyle === 'intraday' ? `A ${intradayPresetProfile.shortLabel.toLowerCase()} trade can be directionally right and still fail operationally because fills, timing, or broker-live readiness controls slipped.` : 'A setup can be directionally right and still fail operationally because fills, routing, or broker-live readiness controls slipped.',
+            value: tradingStyle === 'intraday' ? 'Route drift, cleanup pressure, and live locks are part of the trade story.' : 'Route drift and live locks are part of the trade story.',
+            detail: tradingStyle === 'intraday' ? `A ${intradayPresetProfile.shortLabel.toLowerCase()} trade can be directionally right and still fail operationally because fills, timing, or live readiness controls slipped.` : 'A setup can be directionally right and still fail operationally because fills, routing, or live readiness controls slipped.',
             tone: 'warning',
             actionLabel: rolloutPolicyAction.label,
             onAction: rolloutPolicyAction.onClick,
@@ -557,19 +557,19 @@ export default function TradesPage() {
         </section>
       </SectionCard>
       <SectionCard
-        title="Broker-live readiness"
+        title="Live readiness"
         subtitle={rolloutReadiness.detail}
       >
         <section className="metrics-grid">
           {rolloutReadiness.cards.map((item) => <MetricCard key={item.label} {...item} />)}
         </section>
         <div className="ui-panel ui-panel--section">
-          <div className="ui-panel__kicker">Broker-live gate</div>
+          <div className="ui-panel__kicker">Live gate</div>
           <div className="ui-panel__title">{rolloutReadiness.label}</div>
           <div className="ui-panel__note">
             {rolloutReadiness.allowsLiveRollout
-              ? 'Paper stability is clear enough for broker-live pilot routing.'
-              : 'Broker-live routing should stay paper-first until these controls clear.'}
+              ? 'Paper stability is clear enough for scoped live routing.'
+    : 'Alpaca live routing should stay paper-first until these controls clear.'}
           </div>
           <div className="ui-panel__note">{rolloutReadiness.basis}</div>
           <div className="inline-meta-list">
@@ -597,7 +597,7 @@ export default function TradesPage() {
         </div>
       </SectionCard>
       <SectionCard
-        title="Broker-live pilot audit"
+        title="Live attempt audit"
         subtitle={livePilotAudit.detail}
       >
         <section className="metrics-grid">
@@ -609,7 +609,7 @@ export default function TradesPage() {
             <div className="ui-panel__title">
               {livePilotAudit.latest.ticker} · {livePilotAudit.latest.eventLabel}
             </div>
-            <div className="ui-panel__note">{livePilotAudit.latest.detail || 'Broker-live pilot event recorded.'}</div>
+            <div className="ui-panel__note">{livePilotAudit.latest.detail || 'Live attempt event recorded.'}</div>
             <div className="ui-panel__note">{livePilotAudit.latest.basis || 'No saved gate basis recorded.'}</div>
             <div className="inline-meta-list">
               <span className="inline-meta-list__item">
@@ -625,14 +625,14 @@ export default function TradesPage() {
           </div>
         ) : (
           <EmptyState
-            title="No broker-live pilot attempts"
-            description="Once broker-live is selected and the paper gate evaluates the route, the attempt will be recorded here."
+            title="No live attempts"
+          description="Once Alpaca live is selected and the paper gate evaluates the route, the attempt will be recorded here."
           />
         )}
         {livePilotAudit.items.length ? (
           <ListTable>
             <table className="signal-table ui-list-table">
-              <caption className="ui-visually-hidden">Broker-live pilot audit history</caption>
+              <caption className="ui-visually-hidden">Live attempt audit history</caption>
               <thead>
                 <tr><th scope="col">Attempt</th><th scope="col">Gate</th><th scope="col">Replay basis</th><th scope="col">Live drift</th></tr>
               </thead>

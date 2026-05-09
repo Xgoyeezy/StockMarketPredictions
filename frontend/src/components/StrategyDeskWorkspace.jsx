@@ -110,7 +110,7 @@ export default function StrategyDeskWorkspace({
   pageKicker = 'Quant control plane',
   pageTitle = 'Strategy desks',
   pageDescription = 'Internal multi-desk strategy runtime for macro, stat-arb, cross-sectional, event, and volatility workflows.',
-  pageHelper = 'Macro and stat-arb are personal-paper routable first. Scheduling, live routing, brokerage-linked routing, and research-desk execution stay blocked until lifecycle evidence is clean.',
+  pageHelper = 'Macro and stat-arb are Alpaca-paper routable first. Scheduling, live routing, linked-account routing, and research-desk execution stay blocked until lifecycle evidence is clean.',
   pageBadge,
 }) {
   const { pushToast } = useToast()
@@ -814,7 +814,7 @@ export default function StrategyDeskWorkspace({
             <div>Delta {formatNumber(item.requested_delta_quantity, 3)}</div>
             <div>Filled {formatNumber(item.filled_quantity, 3)} | Remaining {formatNumber(item.remaining_quantity, 3)}</div>
             <div>Broker {item.broker_status || '--'} | Avg fill {formatNumber(item.average_fill_price, 4)}</div>
-            <div>{item.reason || 'Submitted through broker paper routing.'}</div>
+                    <div>{item.reason || 'Submitted through Alpaca paper routing.'}</div>
           </div>
         ))}
         {!latestExecution?.items?.length ? <div>No paper basket executions recorded yet.</div> : null}

@@ -10,7 +10,7 @@ from typing import Any
 
 _FILE_LOCKS: dict[str, threading.Lock] = {}
 _FILE_LOCKS_GUARD = threading.Lock()
-_WINDOWS_REPLACE_RETRY_DELAYS = (0.02, 0.05, 0.1, 0.2, 0.35)
+_WINDOWS_REPLACE_RETRY_DELAYS = (0.02, 0.05, 0.1, 0.2, 0.35, 0.75, 1.5, 2.5)
 
 
 def _resolve_file_lock(file_path: Path) -> threading.Lock:
@@ -24,6 +24,7 @@ def _resolve_file_lock(file_path: Path) -> threading.Lock:
 
 
 def atomic_write_text(file_path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    file_path = Path(file_path).resolve()
     file_path.parent.mkdir(parents=True, exist_ok=True)
     temp_name = ""
     file_lock = _resolve_file_lock(file_path)

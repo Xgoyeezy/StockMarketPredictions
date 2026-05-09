@@ -15,6 +15,14 @@ from scripts.manage_api_runtime import (
 )
 from scripts.backend_test_groups import unittest_names_for_group
 from scripts.print_staging_boot_command import main as print_staging_boot_command_main
+from scripts.trade_automation_readiness import (
+    DEFAULT_MAX_INLINE_BACKUP_BYTES,
+    LARGE_DB_BACKUP_PROOF_MAX_AGE_DAYS,
+    latest_backup_file,
+    resolve_max_inline_backup_bytes,
+    resolve_sqlite_database,
+    run_runtime_readiness,
+)
 from scripts.validate_staging_env import validate_env
 
 
@@ -74,6 +82,61 @@ class RuntimeToolingTests(unittest.TestCase):
         self.assertEqual(result["broker_code"], "ready")
         self.assertEqual(result["backend_code"], "backend_not_running")
         self.assertIn(".env.staging", result["next_action"])
+
+    def test_trade_automation_readiness_resolves_local_sqlite_path(self) -> None:
+        resolved = resolve_sqlite_database({"DATABASE_URL": "sqlite:///./backend-storage/app.db"})
+
+        self.assertEqual(resolved.name, "app.db")
+        self.assertIn(resolved.parent.name, {"storage", "backend-storage"})
+
+    def test_trade_automation_readiness_honors_env_file_backup_limit(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                resolve_max_inline_backup_bytes({"TRADE_AUTOMATION_BACKUP_MAX_INLINE_BYTES": "2147483648"}),
+                2147483648,
+            )
+
+    def test_trade_automation_readiness_uses_bounded_inline_backup_default(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(resolve_max_inline_backup_bytes({}), DEFAULT_MAX_INLINE_BACKUP_BYTES)
+            self.assertLessEqual(DEFAULT_MAX_INLINE_BACKUP_BYTES, 512 * 1024 * 1024)
+
+    def test_trade_automation_readiness_finds_latest_full_backup_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backup_dir = Path(tmpdir)
+            older = backup_dir / "app-20260101T000000Z.db"
+            newer = backup_dir / "app-20260102T000000Z.db"
+            older.write_bytes(b"older")
+            newer.write_bytes(b"newer")
+
+            self.assertEqual(latest_backup_file(backup_dir), newer)
+            self.assertGreaterEqual(LARGE_DB_BACKUP_PROOF_MAX_AGE_DAYS, 1)
+
+    def test_trade_automation_readiness_runtime_status_blocks_slow_route(self) -> None:
+        probes = {
+            "http://127.0.0.1:8000/api/healthz": {"ok": True, "status_code": 200, "latency_ms": 10.0, "error": None},
+            "http://127.0.0.1:8000/api/readyz": {"ok": False, "status_code": 503, "latency_ms": 10.0, "error": None},
+            "http://127.0.0.1:8000/api/orgs/trade-automation?profile_key=personal_paper": {
+                "ok": True,
+                "status_code": 200,
+                "latency_ms": 9000.0,
+                "error": None,
+            },
+            "http://localhost:5173": {"ok": True, "status_code": 200, "latency_ms": 10.0, "error": None},
+        }
+
+        with patch("scripts.trade_automation_readiness.probe_url", side_effect=lambda url, timeout: probes[url]):
+            with patch("scripts.trade_automation_readiness.write_json") as write_json:
+                result = run_runtime_readiness(
+                    "http://127.0.0.1:8000/api",
+                    "http://localhost:5173",
+                    timeout=30.0,
+                    latency_target_ms=5000.0,
+                )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertTrue(any("latency" in item.lower() for item in result["blockers"]))
+        write_json.assert_called_once()
 
     def test_validate_staging_env_rejects_sandbox_options_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

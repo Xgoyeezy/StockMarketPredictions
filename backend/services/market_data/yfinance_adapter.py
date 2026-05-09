@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from html.parser import HTMLParser
+import logging
 import math
 import re
 from typing import Any, Sequence
@@ -33,12 +34,14 @@ _GOOGLE_RSS_MAX_ITEMS = 6
 _GOOGLE_NEWS_ENDPOINT = "https://news.google.com/rss/search"
 _SOURCE_PUBLISHER_FALLBACK = "Google News"
 _HTTP_TIMEOUT_SECONDS = 2.5
+_YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 6
 _MARKET_STATE_SYMBOLS = ("SPY", "QQQ", "IWM", "DIA", "^VIX")
 _EARNINGS_UNSUPPORTED_TICKERS = {
     "SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "SLV", "XLE", "XLF", "XLK",
     "XLI", "XLY", "XLP", "XLV", "XLU", "XLB", "XLRE", "SMH", "ARKK", "VTI",
     "VOO", "VEA", "EEM", "UVXY", "SOXL", "SOXS", "TQQQ", "SQQQ",
 }
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
 def _extract_symbol_frame_from_downloaded(downloaded: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -151,6 +154,7 @@ def _safe_history(ticker: str, *, period: str, interval: str, prepost: bool = Fa
             progress=False,
             threads=False,
             prepost=prepost,
+            timeout=_YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
         )
     except Exception:
         return pd.DataFrame()
@@ -283,7 +287,16 @@ def _coerce_timestamp(value: object) -> pd.Timestamp | None:
 def _latest_close_from_frame(frame: pd.DataFrame) -> float:
     if frame.empty or "Close" not in frame.columns:
         return float("nan")
-    close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+    close_data = frame["Close"]
+    if isinstance(close_data, pd.DataFrame):
+        numeric_close = close_data.apply(pd.to_numeric, errors="coerce").dropna(how="all")
+        if numeric_close.empty:
+            return float("nan")
+        latest_row = numeric_close.iloc[-1].dropna()
+        if latest_row.empty:
+            return float("nan")
+        return float(latest_row.iloc[0])
+    close_series = pd.to_numeric(close_data, errors="coerce").dropna()
     if close_series.empty:
         return float("nan")
     return float(close_series.iloc[-1])
@@ -541,6 +554,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
             "progress": False,
             "threads": False,
             "prepost": prepost,
+            "timeout": _YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
         }
         if group_by:
             download_kwargs["group_by"] = group_by
@@ -563,6 +577,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
                 threads=False,
                 group_by="ticker",
                 prepost=prepost,
+                timeout=_YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
             )
         except Exception:
             return {}
@@ -881,7 +896,15 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         skew_score = float(np.clip((put_iv - call_iv) if not (math.isnan(put_iv) or math.isnan(call_iv)) else 0.0, -1.0, 1.0))
 
         underlying_frame = _safe_history(normalized_ticker, period="60d", interval="1d")
-        realized_returns = pd.to_numeric(underlying_frame.get("Close"), errors="coerce").pct_change().dropna() if not underlying_frame.empty else pd.Series(dtype=float)
+        close_data = underlying_frame.get("Close") if not underlying_frame.empty else None
+        if isinstance(close_data, pd.DataFrame):
+            realized_close = close_data.apply(pd.to_numeric, errors="coerce").dropna(how="all")
+            realized_series = realized_close.iloc[:, 0].dropna() if not realized_close.empty else pd.Series(dtype=float)
+        elif close_data is not None:
+            realized_series = pd.to_numeric(close_data, errors="coerce").dropna()
+        else:
+            realized_series = pd.Series(dtype=float)
+        realized_returns = realized_series.pct_change().dropna()
         realized_vol = float(realized_returns.tail(20).std() * math.sqrt(252)) if len(realized_returns) >= 5 else 0.0
         iv_realized_vol_spread = float(implied_volatility - realized_vol)
         iv_percentile = float(np.clip(0.5 + (iv_realized_vol_spread * 1.5), 0.0, 1.0))

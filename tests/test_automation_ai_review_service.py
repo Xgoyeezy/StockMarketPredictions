@@ -93,9 +93,165 @@ class AutomationAiReviewServiceTests(unittest.TestCase):
         self.assertTrue(state["settings"]["ai_auto_adjust_enabled"])
         self.assertTrue(state["settings"]["ai_adjust_live_enabled"])
         self.assertEqual(state["settings"]["ai_review_min_trades"], 3)
+        self.assertTrue(state["settings"]["ai_evidence_review_enabled"])
+        self.assertEqual(state["settings"]["ai_evidence_review_mode"], "shadow_review")
+        self.assertEqual(state["settings"]["ai_evidence_min_confidence"], 0.7)
+        self.assertEqual(state["settings"]["ai_evidence_max_candidates_per_cycle"], 12)
         self.assertEqual(state["settings"]["max_spread_bps"], 25.0)
         self.assertFalse(state["settings"]["require_edge_fields"])
         self.assertIn("ai_daily_journal", state["runtime"])
+
+    def test_ai_evidence_referee_approves_strong_confirmed_candidate(self) -> None:
+        state = self._state()
+        candidate = {
+            "ticker": "SPY",
+            "trade_decision": "VALID TRADE",
+            "ranking_tier": "opportunity_capture",
+            "opportunity_score": 91.0,
+            "opportunity_type": "opening_range_breakout",
+            "rapid_confirmed": True,
+            "relative_volume": 2.1,
+            "spread_bps": 6.0,
+            "execution_score": 86.0,
+            "portfolio_score": 84.0,
+            "deep_score": 88.0,
+            "edge_to_cost_ratio": 8.0,
+        }
+
+        review = automation_ai_review_service.review_trade_candidate_evidence(
+            candidate,
+            settings_state=state["settings"],
+            state=state,
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(review["status"], "reviewed")
+        self.assertEqual(review["verdict"], "approve_evidence")
+        self.assertGreaterEqual(review["confidence"], 0.7)
+        self.assertEqual(review["reason_codes"], [])
+        self.assertGreaterEqual(review["review_latency_ms"], 0.0)
+        self.assertFalse(review["can_override_risk_gates"])
+
+    def test_ai_evidence_referee_waits_for_missing_confirmation(self) -> None:
+        state = self._state()
+        candidate = {
+            "ticker": "QQQ",
+            "trade_decision": "VALID TRADE",
+            "ranking_tier": "opportunity_capture",
+            "opportunity_score": 88.0,
+            "relative_volume": 2.0,
+            "spread_bps": 5.0,
+            "execution_score": 80.0,
+            "portfolio_score": 82.0,
+            "deep_analysis_status": "deep_analysis_pending",
+            "deep_analysis_cache_fresh": False,
+        }
+
+        review = automation_ai_review_service.review_trade_candidate_evidence(
+            candidate,
+            settings_state=state["settings"],
+            state=state,
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(review["verdict"], "wait_for_confirmation")
+        self.assertIn("fresh_deep_or_rapid_confirmation", review["missing_evidence"])
+        self.assertIn("confirmation_incomplete", review["reason_codes"])
+
+    def test_ai_evidence_referee_rejects_hard_safety_blocker(self) -> None:
+        state = self._state()
+        state["settings"]["kill_switch"] = True
+        candidate = {
+            "ticker": "AAPL",
+            "trade_decision": "VALID TRADE",
+            "ranking_tier": "opportunity_capture",
+            "opportunity_score": 95.0,
+            "rapid_confirmed": True,
+            "relative_volume": 2.4,
+            "spread_bps": 4.0,
+            "execution_score": 90.0,
+            "portfolio_score": 90.0,
+        }
+
+        review = automation_ai_review_service.review_trade_candidate_evidence(
+            candidate,
+            settings_state=state["settings"],
+            state=state,
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(review["verdict"], "reject_evidence")
+        self.assertIn("kill_switch", review["hard_blockers"])
+        self.assertIn("hard_safety_lock", review["reason_codes"])
+
+    def test_shadow_evidence_overlay_does_not_mutate_auto_entry(self) -> None:
+        state = self._state()
+        candidate = {
+            "ticker": "MSFT",
+            "auto_entry_eligible": True,
+            "trade_decision": "VALID TRADE",
+            "ranking_tier": "opportunity_capture",
+            "opportunity_score": 88.0,
+            "relative_volume": 2.0,
+            "spread_bps": 5.0,
+            "execution_score": 80.0,
+            "portfolio_score": 82.0,
+        }
+
+        reviewed = automation_ai_review_service.apply_ai_evidence_review_candidate_overlay(
+            [candidate],
+            state=state,
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(reviewed[0]["auto_entry_eligible"])
+        self.assertIn("ai_evidence_review", reviewed[0])
+
+    def test_ai_evidence_report_aggregates_reason_codes_and_missed_reviews(self) -> None:
+        state = self._state()
+        candidates = [
+            {
+                "ticker": "SPY",
+                "eligible": False,
+                "blocker": "stale_quote",
+                "opportunity_capture": {"score": 91.0},
+                "rapid_confirmed": True,
+                "relative_volume": 2.1,
+                "spread_bps": 5.0,
+            },
+            {
+                "ticker": "QQQ",
+                "eligible": False,
+                "opportunity_capture": {"score": 40.0},
+                "spread_bps": 5.0,
+            },
+        ]
+        reviews = [
+            automation_ai_review_service.review_trade_candidate_evidence(
+                candidate,
+                settings_state=state["settings"],
+                state=state,
+                now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+            )
+            for candidate in candidates
+        ]
+
+        report = automation_ai_review_service.build_ai_evidence_review_report(
+            reviews,
+            candidates=candidates,
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+        missed = automation_ai_review_service.build_missed_trade_ai_review(
+            [{**candidate, "ai_evidence_review": review} for candidate, review in zip(candidates, reviews)],
+            now=datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(report["total_count"], 2)
+        self.assertIn("reason_code_counts", report)
+        self.assertTrue(report["paper_assist"]["dry_run_only"])
+        self.assertFalse(report["paper_assist"]["can_override_risk_gates"])
+        self.assertGreaterEqual(missed["reviewed_count"], 1)
+        self.assertIn("rows", missed)
 
     def test_daily_observation_creates_and_reuses_single_note(self) -> None:
         _, tenant = self._db()

@@ -234,6 +234,110 @@ class AutomationStateControlServiceTests(unittest.TestCase):
         audit_types = [row.event_type for row in db.query(AuditEvent).all()]
         self.assertIn("trade_automation.state_halted", audit_types)
 
+    def test_stale_loss_containment_action_does_not_rehalt_after_position_reconciles(self) -> None:
+        db, tenant = self._db()
+        state = self._state()
+        state["runtime"]["loss_containment_last_report"] = {
+            "status": "action_required",
+            "entries_blocked": True,
+            "open_position_count": 1,
+            "evaluated_at": "2026-04-24T18:55:00+00:00",
+            "defensive_actions": [
+                {
+                    "ticker": "AAPL",
+                    "action": "EXIT FULLY NOW",
+                    "auto_close_eligible": True,
+                }
+            ],
+        }
+        state["runtime"]["current_route_latest_event_at"] = "2026-04-24T18:56:00+00:00"
+        fixed_now = datetime(2026, 4, 24, 19, 1, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notes_path = Path(tmpdir) / "notes.json"
+            notes_path.write_text("[]", encoding="utf-8")
+            with (
+                patch.object(notes_service, "NOTES_PATH", notes_path),
+                patch.object(automation_state_control_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_open_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_pending_orders", return_value=pd.DataFrame()),
+            ):
+                review = automation_state_control_service.evaluate_trade_automation_state_control(
+                    db,
+                    tenant=tenant,
+                    state=state,
+                    profile_key="personal_paper",
+                    now=fixed_now,
+                )
+
+        signals = {item.get("signal") for item in review.get("triggered_signals") or []}
+        self.assertIn("stale_loss_containment_report", signals)
+        self.assertNotIn("loss_containment_breach", signals)
+        self.assertNotEqual(review["state"], "halt")
+        self.assertFalse(state["settings"]["kill_switch"])
+        self.assertTrue(state["settings"]["armed"])
+
+    def test_confirmed_route_reconciliation_orphan_halts_and_sets_kill_switch(self) -> None:
+        db, tenant = self._db()
+        state = self._state()
+        state["runtime"]["current_route_reconciliation_status"] = "orphaned"
+        state["runtime"]["current_route_orphan_order_event_count"] = 2
+        fixed_now = datetime(2026, 4, 24, 19, 10, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notes_path = Path(tmpdir) / "notes.json"
+            notes_path.write_text("[]", encoding="utf-8")
+            with (
+                patch.object(notes_service, "NOTES_PATH", notes_path),
+                patch.object(automation_state_control_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_open_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_pending_orders", return_value=pd.DataFrame()),
+            ):
+                review = automation_state_control_service.evaluate_trade_automation_state_control(
+                    db,
+                    tenant=tenant,
+                    state=state,
+                    profile_key="personal_paper",
+                    now=fixed_now,
+                )
+
+        signals = {item.get("signal") for item in review.get("triggered_signals") or []}
+        self.assertEqual(review["state"], "halt")
+        self.assertIn("route_reconciliation_failed", signals)
+        self.assertTrue(state["settings"]["kill_switch"])
+        self.assertFalse(state["settings"]["armed"])
+
+    def test_advisory_route_issues_without_orphans_do_not_auto_halt(self) -> None:
+        db, tenant = self._db()
+        state = self._state()
+        state["runtime"]["current_route_reconciliation_status"] = "issues_present"
+        state["runtime"]["current_route_orphan_order_event_count"] = 0
+        fixed_now = datetime(2026, 4, 24, 19, 12, tzinfo=timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notes_path = Path(tmpdir) / "notes.json"
+            notes_path.write_text("[]", encoding="utf-8")
+            with (
+                patch.object(notes_service, "NOTES_PATH", notes_path),
+                patch.object(automation_state_control_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_open_trades", return_value=pd.DataFrame()),
+                patch.object(automation_state_control_service.sdm, "read_pending_orders", return_value=pd.DataFrame()),
+            ):
+                review = automation_state_control_service.evaluate_trade_automation_state_control(
+                    db,
+                    tenant=tenant,
+                    state=state,
+                    profile_key="personal_paper",
+                    now=fixed_now,
+                )
+
+        signals = {item.get("signal") for item in review.get("triggered_signals") or []}
+        self.assertIn("route_reconciliation_review", signals)
+        self.assertNotIn("route_reconciliation_failed", signals)
+        self.assertNotEqual(review["state"], "halt")
+        self.assertFalse(state["settings"]["kill_switch"])
+        self.assertTrue(state["settings"]["armed"])
+
     def test_exit_watchdog_block_feeds_derisk_signal_without_live_gate_mutation(self) -> None:
         db, tenant = self._db()
         state = self._state()

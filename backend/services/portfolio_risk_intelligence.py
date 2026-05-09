@@ -1,0 +1,803 @@
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from datetime import datetime, timezone
+from statistics import median, pstdev
+from typing import Any, Iterable
+
+import pandas as pd
+
+from backend import stock_direction_model as sdm
+from backend.services import risk_control_service
+from backend.services.desk_service import filter_frame_to_current_user
+from backend.services.evidence_reward_engine import get_evidence_reward_summary
+from backend.services.serialization import serialize_value
+
+SAFETY_FLAGS: dict[str, Any] = {
+    "research_only": True,
+    "paper_only": True,
+    "paper_route_only": True,
+    "can_submit_orders": False,
+    "can_submit_live_orders": False,
+    "mutation": "none",
+    "writes_execution_config": False,
+    "writes_broker_config": False,
+    "writes_risk_config": False,
+    "writes_ranking_config": False,
+    "writes_risk_limits": False,
+}
+
+SAFETY_NOTES: tuple[str, ...] = (
+    "Research only. Does not affect trading.",
+    "Paper-route evidence only.",
+    "Risk visibility only. Does not enforce, loosen, or change risk gates.",
+    "Does not place or block orders.",
+    "Does not change broker routes.",
+    "Does not change ranking weights automatically.",
+    "Does not grant AI order authority.",
+)
+
+INVERSE_PROXY_SYMBOLS = {"SH", "PSQ", "DOG", "RWM", "VXX"}
+SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "apikey", "access_key", "private_key", "account_id")
+
+DEFAULT_ACCOUNT_SIZE = 100000.0
+DEFAULT_DAILY_RISK_BUDGET_PCT = 0.005
+
+SECTOR_BY_SYMBOL: dict[str, str] = {
+    "SPY": "broad_market",
+    "QQQ": "technology",
+    "IWM": "small_caps",
+    "DIA": "industrials",
+    "VTI": "broad_market",
+    "SH": "inverse_proxy",
+    "PSQ": "inverse_proxy",
+    "DOG": "inverse_proxy",
+    "RWM": "inverse_proxy",
+    "VXX": "volatility_proxy",
+    "XLK": "technology",
+    "XLF": "financials",
+    "XLE": "energy",
+    "XLV": "healthcare",
+    "XLI": "industrials",
+    "XLY": "consumer_discretionary",
+    "XLP": "consumer_staples",
+    "XLU": "utilities",
+    "XLC": "communications",
+    "AAPL": "technology",
+    "MSFT": "technology",
+    "NVDA": "semiconductors",
+    "AMD": "semiconductors",
+    "AVGO": "semiconductors",
+    "INTC": "semiconductors",
+    "QCOM": "semiconductors",
+    "AMZN": "consumer_discretionary",
+    "META": "communications",
+    "GOOGL": "communications",
+    "GOOG": "communications",
+    "TSLA": "consumer_discretionary",
+    "NFLX": "communications",
+    "JPM": "financials",
+    "BAC": "financials",
+    "GS": "financials",
+    "XOM": "energy",
+    "CVX": "energy",
+    "LLY": "healthcare",
+    "UNH": "healthcare",
+    "JNJ": "healthcare",
+    "PFE": "healthcare",
+    "PG": "consumer_staples",
+    "KO": "consumer_staples",
+    "PEP": "consumer_staples",
+    "WMT": "consumer_staples",
+    "COST": "consumer_staples",
+    "HD": "consumer_discretionary",
+    "MCD": "consumer_discretionary",
+    "CRM": "technology",
+    "ORCL": "technology",
+}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
+
+
+def _mean(values: Iterable[Any]) -> float | None:
+    clean = [float(value) for value in (_safe_float(item) for item in values) if value is not None]
+    return round(sum(clean) / len(clean), 6) if clean else None
+
+
+def _median(values: Iterable[Any]) -> float | None:
+    clean = [float(value) for value in (_safe_float(item) for item in values) if value is not None]
+    return round(float(median(clean)), 6) if clean else None
+
+
+def _dispersion(values: Iterable[Any]) -> float | None:
+    clean = [float(value) for value in (_safe_float(item) for item in values) if value is not None]
+    if not clean:
+        return None
+    if len(clean) == 1:
+        return 0.0
+    return round(float(pstdev(clean)), 6)
+
+
+def _ratio(numerator: float, denominator: float) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(float(numerator) / float(denominator), 6)
+
+
+def _listify(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple) or isinstance(value, set):
+        return list(value)
+    text = str(value).strip()
+    if not text:
+        return []
+    if "," in text:
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return [text]
+
+
+def _nested_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = [row]
+    for key in ("payload", "candidate", "position", "paper_trade_outcome", "execution", "risk", "forecast", "prediction_contract"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    return sources
+
+
+def _first_value(row: dict[str, Any], fields: Iterable[str]) -> Any:
+    for source in _nested_sources(row):
+        for field in fields:
+            value = source.get(field)
+            if value is not None and value != "":
+                return value
+    return None
+
+
+def _first_number(row: dict[str, Any], fields: Iterable[str]) -> float | None:
+    for field in fields:
+        value = _safe_float(_first_value(row, (field,)))
+        if value is not None:
+            return value
+    return None
+
+
+def _first_text(row: dict[str, Any], fields: Iterable[str], fallback: str = "unknown") -> str:
+    for field in fields:
+        value = _first_value(row, (field,))
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return fallback
+
+
+def _looks_like_local_path(value: str) -> bool:
+    cleaned = value.strip()
+    return (len(cleaned) >= 3 and cleaned[1:3] in {":\\", ":/"}) or cleaned.startswith("\\\\")
+
+
+def _sanitize_value(value: Any, *, key: str = "") -> Any:
+    key_lower = key.lower()
+    if any(marker in key_lower for marker in SECRET_KEY_MARKERS):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(k): _sanitize_value(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value(item, key=key) for item in value]
+    if isinstance(value, tuple) or isinstance(value, set):
+        return [_sanitize_value(item, key=key) for item in value]
+    if isinstance(value, str) and _looks_like_local_path(value):
+        return "[local_path_redacted]"
+    return value
+
+
+def _is_paper_route(row: dict[str, Any]) -> bool:
+    route_text = " ".join(
+        str(_first_value(row, fields) or "")
+        for fields in (
+            ("route", "execution_route", "route_state", "broker", "broker_route", "paper_route", "mode"),
+            ("source",),
+        )
+    ).lower()
+    if "live" in route_text and "paper" not in route_text:
+        return False
+    if "paper" in route_text or "alpaca" in route_text or "broker_paper" in route_text or "internal" in route_text:
+        return True
+    return not route_text.strip()
+
+
+def _symbol(row: dict[str, Any]) -> str:
+    return _first_text(row, ("symbol", "ticker", "underlying_symbol"), "unknown").strip().upper() or "UNKNOWN"
+
+
+def _side(row: dict[str, Any], symbol: str) -> str:
+    side = _first_text(row, ("side", "broker_side", "direction", "position_side"), "long").strip().lower()
+    if symbol in INVERSE_PROXY_SYMBOLS:
+        return "inverse_proxy"
+    if side in {"sell", "short", "put", "bearish", "inverse_proxy"}:
+        return "short_or_proxy"
+    return "long"
+
+
+def _signed_direction(side: str) -> float:
+    return -1.0 if side in {"short_or_proxy", "inverse_proxy"} else 1.0
+
+
+def _units(row: dict[str, Any]) -> float | None:
+    return _first_number(row, ("quantity", "qty", "shares", "units", "suggested_contracts", "filled_quantity", "filled_contracts", "broker_qty"))
+
+
+def _price(row: dict[str, Any]) -> float | None:
+    return _first_number(
+        row,
+        (
+            "current_price",
+            "mark_price",
+            "live_price",
+            "live_price_at_open",
+            "entry_price",
+            "actual_fill_price",
+            "fill_price",
+            "limit_price",
+            "close",
+        ),
+    )
+
+
+def compute_position_notional(row: dict[str, Any]) -> float | None:
+    explicit = _first_number(
+        row,
+        (
+            "notional",
+            "position_notional",
+            "position_cost",
+            "projected_position_cost",
+            "total_position_cost",
+            "market_value",
+            "broker_notional",
+        ),
+    )
+    if explicit is not None:
+        return round(abs(explicit), 6)
+    units = _units(row)
+    price = _price(row)
+    if units is None or price is None or units <= 0 or price <= 0:
+        return None
+    instrument_type = _first_text(row, ("instrument_type", "asset_class"), "equity").lower()
+    multiplier = 100.0 if instrument_type in {"listed_option", "option", "options"} else 1.0
+    return round(abs(units * price * multiplier), 6)
+
+
+def _sector_for(symbol: str, row: dict[str, Any]) -> tuple[str, bool]:
+    explicit = _first_text(row, ("sector", "sector_name", "sector_key"), "").strip().lower()
+    if explicit:
+        return explicit.replace(" ", "_"), True
+    mapped = SECTOR_BY_SYMBOL.get(symbol)
+    if mapped:
+        return mapped, True
+    return "unknown", False
+
+
+def _account_size(records: list[dict[str, Any]]) -> float:
+    values = [_first_number(row, ("account_size", "equity", "portfolio_value", "buying_power_base")) for row in records]
+    clean = [value for value in values if value is not None and value > 0]
+    return round(float(clean[0]), 6) if clean else DEFAULT_ACCOUNT_SIZE
+
+
+def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict[str, Any] | None:
+    if not isinstance(row, dict) or not _is_paper_route(row):
+        return None
+    symbol = _symbol(row)
+    notional = compute_position_notional(row)
+    side = _side(row, symbol)
+    signed_exposure = round((notional or 0.0) * _signed_direction(side), 6) if notional is not None else None
+    sector, sector_available = _sector_for(symbol, row)
+    engine = _first_text(row, ("engine", "desk_key", "strategy_desk_key"), "unknown")
+    setup_type = _first_text(row, ("setup_type", "opportunity_type"), "unknown")
+    strategy = _first_text(row, ("strategy", "strategy_key", "strategy_id"), engine)
+    regime = _first_text(row, ("regime", "market_regime", "regime_state"), "unknown")
+    beta_spy = _first_number(row, ("beta_to_SPY", "beta_to_spy", "spy_beta", "beta"))
+    beta_qqq = _first_number(row, ("beta_to_QQQ", "beta_to_qqq", "qqq_beta"))
+    liquidity_score = _first_number(row, ("liquidity_score",))
+    avg_dollar_volume = _first_number(row, ("average_dollar_volume", "avg_dollar_volume", "dollar_volume"))
+    spread_bps = _first_number(row, ("spread_bps", "spread_at_signal", "bid_ask_spread_bps"))
+    forecast_confidence = _first_number(row, ("forecast_confidence", "confidence", "ai_confidence"))
+    max_risk_dollars = _first_number(row, ("max_risk_dollars", "risk_dollars", "planned_risk_dollars"))
+    warnings: list[str] = []
+    missing_fields: list[str] = []
+    if notional is None:
+        missing_fields.append("notional")
+    if not sector_available:
+        missing_fields.append("sector")
+    if beta_spy is None:
+        missing_fields.append("beta_to_SPY")
+    if beta_qqq is None:
+        missing_fields.append("beta_to_QQQ")
+    if liquidity_score is None and avg_dollar_volume is None:
+        missing_fields.append("liquidity")
+    if forecast_confidence is None:
+        missing_fields.append("forecast_confidence")
+    if liquidity_score is not None and liquidity_score < 0.4:
+        warnings.append("Liquidity score is weak.")
+    if avg_dollar_volume is not None and avg_dollar_volume < 1_000_000:
+        warnings.append("Average dollar volume is below the visibility threshold.")
+    if spread_bps is not None and spread_bps > 25:
+        warnings.append("Spread is wide for portfolio-level risk visibility.")
+    normalized = {
+        "record_id": _first_text(row, ("record_id", "trade_id", "order_id", "candidate_lifecycle_id"), f"position-{index + 1}"),
+        "source_type": _first_text(row, ("source_type",), "paper_position"),
+        "symbol": symbol,
+        "timestamp": _first_text(row, ("timestamp", "created_at", "opened_at", "submitted_at"), ""),
+        "engine": engine,
+        "setup_type": setup_type,
+        "strategy": strategy,
+        "regime": regime,
+        "sector": sector,
+        "correlation_bucket": _first_text(row, ("correlation_bucket",), risk_control_service.bucket_for_symbol(symbol, None)),
+        "route": _first_text(row, ("route", "execution_route", "broker", "route_state"), "broker_paper"),
+        "paper_only": True,
+        "side": side,
+        "notional": notional,
+        "signed_exposure": signed_exposure,
+        "absolute_exposure": notional,
+        "max_risk_dollars": max_risk_dollars,
+        "liquidity_score": liquidity_score,
+        "average_dollar_volume": avg_dollar_volume,
+        "spread_bps": spread_bps,
+        "beta_to_SPY": beta_spy,
+        "beta_to_QQQ": beta_qqq,
+        "forecast_confidence": forecast_confidence,
+        "warnings": warnings,
+        "missing_fields": sorted(set(missing_fields + [str(item) for item in _listify(row.get("missing_fields"))])),
+    }
+    return _sanitize_value(normalized)
+
+
+def normalize_portfolio_risk_records(records: Iterable[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows = []
+    for index, row in enumerate(records or []):
+        normalized = normalize_portfolio_risk_record(row, index)
+        if normalized is not None:
+            rows.append(normalized)
+    return rows
+
+
+def _group_exposure(records: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in records:
+        grouped[str(row.get(key) or "unknown")].append(row)
+    items = []
+    for label, rows in grouped.items():
+        absolute = sum(float(row.get("absolute_exposure") or 0.0) for row in rows)
+        signed = sum(float(row.get("signed_exposure") or 0.0) for row in rows)
+        items.append(
+            {
+                key: label,
+                "count": len(rows),
+                "gross_exposure": round(absolute, 6),
+                "net_exposure": round(signed, 6),
+                "exposure_share": _ratio(absolute, gross),
+                "average_beta_to_SPY": _mean(row.get("beta_to_SPY") for row in rows),
+                "average_liquidity_score": _mean(row.get("liquidity_score") for row in rows),
+                "average_forecast_confidence": _mean(row.get("forecast_confidence") for row in rows),
+            }
+        )
+    return sorted(items, key=lambda item: (-float(item.get("gross_exposure") or 0.0), str(item.get(key) or "")))
+
+
+def _weighted_average(records: list[dict[str, Any]], field: str) -> float | None:
+    numerator = 0.0
+    denominator = 0.0
+    for row in records:
+        value = _safe_float(row.get(field))
+        weight = _safe_float(row.get("absolute_exposure")) or 0.0
+        if value is None or weight <= 0:
+            continue
+        numerator += value * weight
+        denominator += weight
+    return round(numerator / denominator, 6) if denominator > 0 else None
+
+
+def compute_concentration(records: list[dict[str, Any]]) -> dict[str, Any]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    symbol_items = _group_exposure(records, "symbol")
+    sector_items = _group_exposure(records, "sector")
+    max_symbol_share = max((float(item.get("exposure_share") or 0.0) for item in symbol_items), default=0.0)
+    max_sector_share = max((float(item.get("exposure_share") or 0.0) for item in sector_items), default=0.0)
+    return {
+        "symbol_concentration": round(max_symbol_share, 6) if records else None,
+        "sector_concentration": round(max_sector_share, 6) if records else None,
+        "top_symbols": symbol_items[:10],
+        "top_sectors": sector_items[:10],
+        "gross_exposure": round(gross, 6),
+    }
+
+
+def compute_correlation_heat(records: list[dict[str, Any]]) -> dict[str, Any]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    bucket_items = _group_exposure(records, "correlation_bucket")
+    max_bucket_share = max((float(item.get("exposure_share") or 0.0) for item in bucket_items), default=0.0)
+    crowded_bucket_count = sum(1 for item in bucket_items if float(item.get("exposure_share") or 0.0) >= 0.25)
+    heat_score = None
+    if records:
+        heat_score = round(min(100.0, (max_bucket_share * 100.0) + max(0, crowded_bucket_count - 1) * 5.0), 2)
+    return {
+        "correlation_heat": heat_score,
+        "max_bucket_share": round(max_bucket_share, 6) if records else None,
+        "crowded_bucket_count": crowded_bucket_count,
+        "buckets": bucket_items,
+        "gross_exposure": round(gross, 6),
+        "method": "correlation bucket concentration using configured/default symbol buckets",
+    }
+
+
+def compute_liquidity_exposure(records: list[dict[str, Any]]) -> dict[str, Any]:
+    weak_rows = [
+        row
+        for row in records
+        if (_safe_float(row.get("liquidity_score")) is not None and float(row.get("liquidity_score")) < 0.4)
+        or (_safe_float(row.get("average_dollar_volume")) is not None and float(row.get("average_dollar_volume")) < 1_000_000)
+        or (_safe_float(row.get("spread_bps")) is not None and float(row.get("spread_bps")) > 25)
+    ]
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    weak_exposure = sum(float(row.get("absolute_exposure") or 0.0) for row in weak_rows)
+    return {
+        "liquidity_exposure": round(weak_exposure, 6),
+        "liquidity_exposure_share": _ratio(weak_exposure, gross),
+        "average_liquidity_score": _mean(row.get("liquidity_score") for row in records),
+        "average_spread_bps": _mean(row.get("spread_bps") for row in records),
+        "liquidity_warning_count": len(weak_rows),
+        "warnings": [f"{row.get('symbol')} has weak liquidity/spread evidence." for row in weak_rows[:10]],
+    }
+
+
+def compute_drawdown_state(records: list[dict[str, Any]], account_size: float) -> dict[str, Any]:
+    drawdown_values = [_first_number(row, ("drawdown_pct", "current_drawdown_pct", "max_drawdown_pct")) for row in records]
+    clean = [value for value in drawdown_values if value is not None]
+    current_drawdown = max(clean) if clean else None
+    floating_pnl = sum(_first_number(row, ("unrealized_pnl", "current_unrealized_pnl", "open_pnl", "floating_pnl")) or 0.0 for row in records)
+    if current_drawdown is None and floating_pnl < 0 and account_size > 0:
+        current_drawdown = abs(floating_pnl) / account_size
+    if current_drawdown is None:
+        state = "unknown"
+    elif current_drawdown >= 0.10:
+        state = "stop_review"
+    elif current_drawdown >= 0.05:
+        state = "size_cut_review"
+    elif current_drawdown >= 0.02:
+        state = "elevated"
+    else:
+        state = "calm"
+    return {
+        "drawdown_state": state,
+        "current_drawdown_pct": round(current_drawdown, 6) if current_drawdown is not None else None,
+        "floating_pnl": round(floating_pnl, 6),
+    }
+
+
+def compute_daily_risk_budget_usage(records: list[dict[str, Any]], account_size: float) -> dict[str, Any]:
+    explicit_budget = next((_first_number(row, ("daily_risk_budget", "daily_loss_budget", "loss_budget_dollars")) for row in records if _first_number(row, ("daily_risk_budget", "daily_loss_budget", "loss_budget_dollars")) is not None), None)
+    daily_budget = explicit_budget if explicit_budget is not None and explicit_budget > 0 else account_size * DEFAULT_DAILY_RISK_BUDGET_PCT
+    open_risk = sum(_safe_float(row.get("max_risk_dollars")) or 0.0 for row in records)
+    if open_risk <= 0:
+        open_risk = sum(float(row.get("absolute_exposure") or 0.0) * 0.01 for row in records)
+    return {
+        "daily_risk_budget": round(daily_budget, 6),
+        "open_risk_estimate": round(open_risk, 6),
+        "daily_risk_budget_usage": _ratio(open_risk, daily_budget),
+    }
+
+
+def compute_open_heat(records: list[dict[str, Any]], account_size: float) -> dict[str, Any]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    heat = _ratio(gross, account_size)
+    if heat is None:
+        state = "unknown"
+    elif heat >= 1.0:
+        state = "crowded"
+    elif heat >= 0.5:
+        state = "elevated"
+    elif heat > 0:
+        state = "controlled"
+    else:
+        state = "empty"
+    return {
+        "open_heat": heat,
+        "open_heat_state": state,
+        "open_position_count": len(records),
+    }
+
+
+def compute_forecast_confidence_exposure(records: list[dict[str, Any]]) -> dict[str, Any]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    buckets = {
+        "high_confidence": [row for row in records if (_safe_float(row.get("forecast_confidence")) or 0.0) >= 0.70],
+        "medium_confidence": [row for row in records if 0.40 <= (_safe_float(row.get("forecast_confidence")) or -1.0) < 0.70],
+        "low_confidence": [row for row in records if (_safe_float(row.get("forecast_confidence")) is not None and (_safe_float(row.get("forecast_confidence")) or 0.0) < 0.40)],
+        "missing_confidence": [row for row in records if _safe_float(row.get("forecast_confidence")) is None],
+    }
+    return {
+        "average_forecast_confidence": _weighted_average(records, "forecast_confidence"),
+        "buckets": [
+            {
+                "bucket": key,
+                "count": len(rows),
+                "gross_exposure": round(sum(float(row.get("absolute_exposure") or 0.0) for row in rows), 6),
+                "exposure_share": _ratio(sum(float(row.get("absolute_exposure") or 0.0) for row in rows), gross),
+            }
+            for key, rows in buckets.items()
+        ],
+    }
+
+
+def compute_portfolio_risk_aggregations(records: list[dict[str, Any]]) -> dict[str, Any]:
+    account_size = _account_size(records)
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    net = sum(float(row.get("signed_exposure") or 0.0) for row in records)
+    long_exposure = sum(float(row.get("absolute_exposure") or 0.0) for row in records if float(row.get("signed_exposure") or 0.0) > 0)
+    short_or_proxy = sum(float(row.get("absolute_exposure") or 0.0) for row in records if float(row.get("signed_exposure") or 0.0) < 0)
+    concentration = compute_concentration(records)
+    correlation = compute_correlation_heat(records)
+    liquidity = compute_liquidity_exposure(records)
+    drawdown = compute_drawdown_state(records, account_size)
+    daily_budget = compute_daily_risk_budget_usage(records, account_size)
+    open_heat = compute_open_heat(records, account_size)
+    forecast_confidence = compute_forecast_confidence_exposure(records)
+    return {
+        "gross_exposure": round(gross, 6),
+        "net_exposure": round(net, 6),
+        "long_exposure": round(long_exposure, 6),
+        "short_or_proxy_exposure": round(short_or_proxy, 6),
+        "account_size": account_size,
+        "sector_exposure": _group_exposure(records, "sector"),
+        "engine_exposure": _group_exposure(records, "engine"),
+        "setup_exposure": _group_exposure(records, "setup_type"),
+        "strategy_exposure": _group_exposure(records, "strategy"),
+        "regime_exposure": _group_exposure(records, "regime"),
+        "symbol_concentration": concentration.get("symbol_concentration"),
+        "sector_concentration": concentration.get("sector_concentration"),
+        "concentration": concentration,
+        "correlation_heat": correlation,
+        "liquidity_exposure": liquidity,
+        "beta_to_SPY": _weighted_average(records, "beta_to_SPY"),
+        "beta_to_QQQ": _weighted_average(records, "beta_to_QQQ"),
+        "drawdown_state": drawdown,
+        "daily_risk_budget_usage": daily_budget,
+        "open_heat": open_heat,
+        "forecast_confidence_exposure": forecast_confidence,
+    }
+
+
+def _stress_market_move(records: list[dict[str, Any]], move_pct: float, label: str) -> dict[str, Any]:
+    pnl = 0.0
+    missing_beta = 0
+    for row in records:
+        beta = _safe_float(row.get("beta_to_SPY"))
+        if beta is None:
+            missing_beta += 1
+            beta = 1.0
+        direction = _signed_direction(str(row.get("side") or "long"))
+        pnl += float(row.get("absolute_exposure") or 0.0) * direction * beta * move_pct
+    return {
+        "scenario": label,
+        "estimated_pnl": round(pnl, 6),
+        "estimated_return_on_gross": _ratio(pnl, sum(float(row.get("absolute_exposure") or 0.0) for row in records)),
+        "missing_beta_count": missing_beta,
+        "analytics_only": True,
+    }
+
+
+def compute_stress_tests(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    gross = sum(float(row.get("absolute_exposure") or 0.0) for row in records)
+    largest_symbol = (compute_concentration(records).get("top_symbols") or [{}])[0]
+    largest_sector = (compute_concentration(records).get("top_sectors") or [{}])[0]
+    breakout_exposure = sum(float(row.get("absolute_exposure") or 0.0) for row in records if "breakout" in str(row.get("setup_type") or "").lower())
+    liquidity = compute_liquidity_exposure(records)
+    return [
+        _stress_market_move(records, -0.02, "market_down_2_percent"),
+        _stress_market_move(records, -0.05, "market_down_5_percent"),
+        {
+            "scenario": "volatility_expansion",
+            "estimated_pnl": round(-gross * 0.01, 6),
+            "estimated_return_on_gross": -0.01 if gross else None,
+            "reason": "Simple 1 percent gross exposure shock for volatility expansion.",
+            "analytics_only": True,
+        },
+        {
+            "scenario": "liquidity_deterioration",
+            "estimated_pnl": round(-gross * 0.0075 - float(liquidity.get("liquidity_exposure") or 0.0) * 0.01, 6),
+            "estimated_return_on_gross": _ratio(-gross * 0.0075 - float(liquidity.get("liquidity_exposure") or 0.0) * 0.01, gross),
+            "reason": "Simple spread/liquidity shock; does not change route behavior.",
+            "analytics_only": True,
+        },
+        {
+            "scenario": "sector_rotation",
+            "estimated_pnl": round(-float(largest_sector.get("gross_exposure") or 0.0) * 0.03, 6),
+            "affected_segment": largest_sector.get("sector"),
+            "analytics_only": True,
+        },
+        {
+            "scenario": "single_name_gap_down",
+            "estimated_pnl": round(-float(largest_symbol.get("gross_exposure") or 0.0) * 0.05, 6),
+            "affected_symbol": largest_symbol.get("symbol"),
+            "analytics_only": True,
+        },
+        {
+            "scenario": "failed_breakout_cluster",
+            "estimated_pnl": round(-breakout_exposure * 0.02, 6),
+            "affected_exposure": round(breakout_exposure, 6),
+            "analytics_only": True,
+        },
+        {
+            "scenario": "data_outage",
+            "estimated_pnl": None,
+            "operational_impact": "Data outage would make portfolio visibility stale; risk gates are not changed by this report.",
+            "analytics_only": True,
+        },
+        {
+            "scenario": "broker_outage",
+            "estimated_pnl": None,
+            "operational_impact": "Broker outage would require existing reconciliation/readiness checks; this report does not cancel or submit orders.",
+            "analytics_only": True,
+        },
+    ]
+
+
+def _records_from_frame(frame: pd.DataFrame, source_type: str) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+    records = []
+    for row in frame.to_dict(orient="records"):
+        if isinstance(row, dict):
+            records.append({**row, "source_type": source_type})
+    return records
+
+
+def _load_runtime_rows(db: Any = None, current_user: Any = None) -> tuple[list[dict[str, Any]], list[str]]:
+    del db
+    rows: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    try:
+        rows.extend(_records_from_frame(filter_frame_to_current_user(sdm.read_paper_open_trades(), current_user), "paper_open_trade"))
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        warnings.append(f"Paper open trade source unavailable: {exc.__class__.__name__}.")
+    try:
+        rows.extend(_records_from_frame(filter_frame_to_current_user(sdm.read_open_trades(), current_user), "open_trade"))
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        warnings.append(f"Open trade source unavailable: {exc.__class__.__name__}.")
+    try:
+        rows.extend(_records_from_frame(filter_frame_to_current_user(sdm.read_pending_orders(), current_user), "pending_order"))
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        warnings.append(f"Pending order source unavailable: {exc.__class__.__name__}.")
+    try:
+        reward_report = get_evidence_reward_summary(current_user=current_user)
+        for row in list(reward_report.get("records") or reward_report.get("candidate_rows") or []):
+            if not isinstance(row, dict):
+                continue
+            if any(_first_value(row, fields) is not None for fields in (("position_notional", "notional", "projected_position_cost"), ("paper_trade_outcome",))):
+                rows.append({**row, "source_type": "evidence_candidate"})
+    except Exception as exc:  # pragma: no cover - defensive runtime guard
+        warnings.append(f"Evidence Reward portfolio source unavailable: {exc.__class__.__name__}.")
+    return rows, warnings
+
+
+def build_portfolio_risk_report(
+    *,
+    records: Iterable[dict[str, Any]] | None = None,
+    db: Any = None,
+    current_user: Any = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    source_warnings: list[str] = []
+    if records is None:
+        records, source_warnings = _load_runtime_rows(db, current_user)
+    normalized = normalize_portfolio_risk_records(records)
+    aggregations = compute_portfolio_risk_aggregations(normalized)
+    stress_tests = compute_stress_tests(normalized)
+    missing_counter: Counter[str] = Counter()
+    for row in normalized:
+        missing_counter.update(row.get("missing_fields") or [])
+    warnings = [*source_warnings]
+    if missing_counter:
+        warnings.append("Some paper portfolio rows are missing fields required for complete portfolio risk analytics.")
+    if aggregations.get("liquidity_exposure", {}).get("liquidity_warning_count"):
+        warnings.append("Liquidity, spread, or average-dollar-volume warnings were observed.")
+    status = "ready" if normalized else "empty"
+    summary = {
+        "status": status,
+        "position_count": len(normalized),
+        "gross_exposure": aggregations.get("gross_exposure"),
+        "net_exposure": aggregations.get("net_exposure"),
+        "long_exposure": aggregations.get("long_exposure"),
+        "short_or_proxy_exposure": aggregations.get("short_or_proxy_exposure"),
+        "symbol_concentration": aggregations.get("symbol_concentration"),
+        "sector_concentration": aggregations.get("sector_concentration"),
+        "correlation_heat": aggregations.get("correlation_heat", {}).get("correlation_heat"),
+        "liquidity_exposure": aggregations.get("liquidity_exposure", {}).get("liquidity_exposure"),
+        "beta_to_SPY": aggregations.get("beta_to_SPY"),
+        "beta_to_QQQ": aggregations.get("beta_to_QQQ"),
+        "drawdown_state": aggregations.get("drawdown_state", {}).get("drawdown_state"),
+        "daily_risk_budget_usage": aggregations.get("daily_risk_budget_usage", {}).get("daily_risk_budget_usage"),
+        "open_heat": aggregations.get("open_heat", {}).get("open_heat"),
+        **SAFETY_FLAGS,
+    }
+    return serialize_value(
+        {
+            "status": status,
+            "generated_at": generated_at or _utc_now(),
+            "research_only": True,
+            "paper_only": True,
+            "summary": summary,
+            "records": normalized[:250],
+            "aggregations": aggregations,
+            "stress_tests": stress_tests,
+            "warnings": list(dict.fromkeys(warnings)),
+            "missing_fields": dict(missing_counter),
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
+def _subset(report: dict[str, Any], *, records: list[dict[str, Any]], aggregations: dict[str, Any]) -> dict[str, Any]:
+    return serialize_value({**report, "records": records, "aggregations": aggregations, "research_only": True, "paper_only": True, "safety_notes": list(SAFETY_NOTES), **SAFETY_FLAGS})
+
+
+def get_portfolio_risk_summary(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    return build_portfolio_risk_report(db=db, current_user=current_user)
+
+
+def get_portfolio_risk_exposures(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    report = build_portfolio_risk_report(db=db, current_user=current_user)
+    return _subset(
+        report,
+        records=report.get("records", []),
+        aggregations={
+            "sector_exposure": report.get("aggregations", {}).get("sector_exposure", []),
+            "engine_exposure": report.get("aggregations", {}).get("engine_exposure", []),
+            "setup_exposure": report.get("aggregations", {}).get("setup_exposure", []),
+            "strategy_exposure": report.get("aggregations", {}).get("strategy_exposure", []),
+            "regime_exposure": report.get("aggregations", {}).get("regime_exposure", []),
+            "forecast_confidence_exposure": report.get("aggregations", {}).get("forecast_confidence_exposure", {}),
+        },
+    )
+
+
+def get_portfolio_risk_concentration(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    report = build_portfolio_risk_report(db=db, current_user=current_user)
+    concentration = report.get("aggregations", {}).get("concentration", {})
+    return _subset(report, records=concentration.get("top_symbols", []), aggregations=concentration)
+
+
+def get_portfolio_risk_correlation(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    report = build_portfolio_risk_report(db=db, current_user=current_user)
+    correlation = report.get("aggregations", {}).get("correlation_heat", {})
+    return _subset(report, records=correlation.get("buckets", []), aggregations=correlation)
+
+
+def get_portfolio_risk_stress_tests(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    report = build_portfolio_risk_report(db=db, current_user=current_user)
+    return _subset(report, records=report.get("stress_tests", []), aggregations={"stress_tests": report.get("stress_tests", [])})
+
+
+def get_portfolio_risk_regimes(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
+    report = build_portfolio_risk_report(db=db, current_user=current_user)
+    regime = report.get("aggregations", {}).get("regime_exposure", [])
+    return _subset(report, records=regime, aggregations={"regime_exposure": regime})

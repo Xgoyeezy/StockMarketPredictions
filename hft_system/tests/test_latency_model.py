@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import random
-import tempfile
 from pathlib import Path
 import unittest
 
 from hft.latency.model import LatencyModel, LatencyProfile
+from tests._workspace_tmp import reset_tmp_dir
 
 
 class LatencyModelTest(unittest.TestCase):
@@ -32,18 +32,18 @@ class LatencyModelTest(unittest.TestCase):
         self.assertGreaterEqual(model.sample_ns("fill_ns"), 0)
 
     def test_historical_profile_replays_from_sample_file(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="hft_latency_") as tmpdir:
-            sample_file = Path(tmpdir) / "samples.txt"
-            sample_file.write_text("10\n20\n30\n", encoding="utf-8")
-            left = LatencyModel(
-                profile=LatencyProfile("historical", {"sample_file": str(sample_file)}),
-                rng=random.Random(7),
-            )
-            right = LatencyModel(
-                profile=LatencyProfile("historical", {"sample_file": str(sample_file)}),
-                rng=random.Random(7),
-            )
-            self.assertEqual(left.sample_ns("fill_ns"), right.sample_ns("fill_ns"))
+        tmpdir = reset_tmp_dir("latency_model")
+        sample_file = Path(tmpdir) / "samples.txt"
+        sample_file.write_text("10\n20\n30\n", encoding="utf-8")
+        left = LatencyModel(
+            profile=LatencyProfile("historical", {"sample_file": str(sample_file)}),
+            rng=random.Random(7),
+        )
+        right = LatencyModel(
+            profile=LatencyProfile("historical", {"sample_file": str(sample_file)}),
+            rng=random.Random(7),
+        )
+        self.assertEqual(left.sample_ns("fill_ns"), right.sample_ns("fill_ns"))
 
 
 if __name__ == "__main__":

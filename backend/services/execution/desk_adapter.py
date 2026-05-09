@@ -79,6 +79,48 @@ class DeskExecutionAdapter(ExecutionAdapter):
             pending_order=record,
         )
 
+    def submit_equity_order(
+        self,
+        *,
+        request: OpenTradeRequest,
+        report: dict[str, Any],
+        live_price: float,
+        position: dict[str, Any],
+        trade_id: str,
+        order_id: str,
+        order_ticket: dict[str, Any],
+    ) -> SubmitOrderResult:
+        return self.submit_order(
+            request=request,
+            report=report,
+            live_price=live_price,
+            position=position,
+            trade_id=trade_id,
+            order_id=order_id,
+            order_ticket=order_ticket,
+        )
+
+    def submit_option_order(
+        self,
+        *,
+        request: OpenTradeRequest,
+        report: dict[str, Any],
+        live_price: float,
+        position: dict[str, Any],
+        trade_id: str,
+        order_id: str,
+        order_ticket: dict[str, Any],
+    ) -> SubmitOrderResult:
+        return self.submit_order(
+            request=request,
+            report=report,
+            live_price=live_price,
+            position=position,
+            trade_id=trade_id,
+            order_id=order_id,
+            order_ticket=order_ticket,
+        )
+
     def close_position(
         self,
         *,

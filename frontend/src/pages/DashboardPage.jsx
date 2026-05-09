@@ -26,6 +26,7 @@ import {
   fillPendingOrder,
   getChart,
   getDashboard,
+  getInternalBrokerRouter,
   getLinkedBrokerageAccounts,
   getLiveBatch,
   getNotes,
@@ -69,8 +70,10 @@ import { isTickerValid } from '../utils/validators'
 
 const defaultForm = { ticker: 'SPY', interval: '5m', horizon: 5 }
 const INITIAL_CHART_HYDRATION_WAIT_MS = 1200
+const TRADE_TICKET_MAX_HORIZON = 50
+const TRADE_PREVIEW_MIN_REFRESH_MS = 1500
 const defaultTradeTicket = {
-  accountSize: 1000,
+  accountSize: 100000,
   riskPercent: 0.5,
   instrumentType: 'equity',
   optionStrategy: 'long_option',
@@ -102,6 +105,12 @@ const timeInForceOptions = [
   { key: 'day_ext', label: 'Day + AH' },
   { key: 'gtc_90d', label: 'GTC 90D' },
 ]
+
+function normalizeTradeTicketHorizon(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return defaultForm.horizon
+  return Math.max(1, Math.min(TRADE_TICKET_MAX_HORIZON, Math.round(parsed)))
+}
 
 function initialChartPointsForInterval(interval) {
   const normalized = String(interval || '').trim().toLowerCase()
@@ -342,7 +351,7 @@ function buildLiveBrokerDeskStatus(snapshot) {
   if (!paperRoute && !liveRoute) {
     return {
       tone: 'info',
-      label: 'Live broker',
+      label: 'Alpaca live',
       value: 'Route sync pending',
       detail: 'Automation route inventory is still loading for this desk session.',
     }
@@ -351,30 +360,30 @@ function buildLiveBrokerDeskStatus(snapshot) {
   if (liveRoute?.active) {
     return {
       tone: 'warning',
-      label: 'Live broker',
+      label: 'Alpaca live',
       value: liveRoute?.value || 'Live active',
-      detail: 'Live broker routing is currently active. Tighten oversight before leaving the desk unattended.',
+      detail: 'Alpaca live routing is currently active. Tighten oversight before leaving the desk unattended.',
     }
   }
 
   if (liveRoute?.connected || liveRoute?.enabled) {
     return {
       tone: 'info',
-      label: 'Live broker',
+      label: 'Alpaca live',
       value: liveRoute?.value || 'Standby',
       detail: paperRoute?.active
-        ? 'Paper route is active. Live broker is configured and visible, but it is not routing yet.'
-        : String(liveRoute?.detail || '').trim() || 'Live broker is configured and waiting behind the rollout gate.',
+        ? 'Alpaca paper is active. Alpaca live is configured and visible, but it is not routing yet.'
+        : String(liveRoute?.detail || '').trim() || 'Alpaca live is configured and waiting behind the rollout gate.',
     }
   }
 
   return {
     tone: liveRoute?.status === 'unavailable' ? 'negative' : 'warning',
-    label: 'Live broker',
+    label: 'Alpaca live',
     value: liveRoute?.value || 'Not configured',
     detail:
       String(liveRoute?.detail || '').trim() ||
-      'Live broker credentials are not loaded yet, so only desk and paper routes are available.',
+      'Alpaca live credentials are not loaded yet, so only desk and Alpaca paper routes are available.',
   }
 }
 
@@ -1833,7 +1842,7 @@ function buildExecutionRouteSummary({
   const gateDetail =
     promotionGateSummary?.detail ||
     promotionGateSummary?.action ||
-    'Paper stability still needs review before live broker routing.'
+    'Paper stability still needs review before Alpaca live routing.'
 
   if (intradayExecutionPlan && intradayExecutionPlan.allowsNewEntries === false) {
     return {
@@ -1851,39 +1860,39 @@ function buildExecutionRouteSummary({
     if (promotionGateSummary?.allowsPromotion === false) {
       return {
         tone: 'negative',
-        label: 'Broker live locked',
-        detail: `${gateDetail} Switch to broker paper or desk routing until ${gateLabel} clears.`,
+        label: 'Alpaca live locked',
+        detail: `${gateDetail} Switch to Alpaca paper or desk routing until ${gateLabel} clears.`,
         locked: true,
-        sendLabel: 'broker live order',
+        sendLabel: 'Alpaca live order',
         badgeLabel: 'Locked',
-        pathLabel: 'Live adapter',
+        pathLabel: 'Alpaca live',
       }
     }
 
     return {
       tone: 'positive',
-      label: 'Broker live',
+      label: 'Alpaca live',
       detail: intradayExecutionPlan
-        ? `The ticket will route through the live broker adapter because the paper gate is clear. ${intradayExecutionPlan.routeDetail}`
-        : 'The ticket will route through the live broker adapter because the paper gate is clear.',
+        ? `The ticket will route through Alpaca live because the paper gate is clear and approval gates remain visible. ${intradayExecutionPlan.routeDetail}`
+        : 'The ticket will route through Alpaca live because the paper gate is clear and approval gates remain visible.',
       locked: false,
-      sendLabel: 'broker live order',
+      sendLabel: 'Alpaca live order',
       badgeLabel: 'Live',
-      pathLabel: 'Live adapter',
+      pathLabel: 'Alpaca live',
     }
   }
 
   if (normalizedIntent === 'broker_paper') {
     return {
       tone: 'positive',
-      label: 'Broker paper',
+      label: 'Alpaca paper',
       detail: intradayExecutionPlan
-        ? `The ticket will route through the broker paper adapter so fills and lifecycle can be reconciled before live capital. ${intradayExecutionPlan.routeDetail}`
-        : 'The ticket will route through the broker paper adapter so fills and lifecycle can be reconciled before live capital.',
+        ? `The ticket will route through Alpaca paper execution so fills and lifecycle can be reconciled before live capital. ${intradayExecutionPlan.routeDetail}`
+        : 'The ticket will route through Alpaca paper execution so fills and lifecycle can be reconciled before live capital.',
       locked: false,
-      sendLabel: 'broker paper order',
+      sendLabel: 'Alpaca paper order',
       badgeLabel: 'Paper',
-      pathLabel: 'Paper adapter',
+      pathLabel: 'Alpaca paper',
     }
   }
 
@@ -1891,8 +1900,8 @@ function buildExecutionRouteSummary({
     tone: 'info',
     label: 'Desk route',
     detail: intradayExecutionPlan
-      ? `The ticket will stay on the local desk ledger without broker API routing. ${intradayExecutionPlan.routeDetail}`
-      : 'The ticket will stay on the local desk ledger without broker API routing. Use this when you want the setup tracked locally before broker execution.',
+      ? `The ticket will stay on the local desk ledger without connected-account routing. ${intradayExecutionPlan.routeDetail}`
+      : 'The ticket will stay on the local desk ledger without connected-account routing. Use this when you want the setup tracked locally before route handling.',
     locked: false,
     sendLabel: 'desk order',
     badgeLabel: 'Desk',
@@ -6197,6 +6206,46 @@ function deriveLiveAlerts(report, livePrice) {
   return alerts
 }
 
+function describeFeedPill(label) {
+  switch (String(label || '').trim().toLowerCase()) {
+    case 'loading desk':
+      return 'The dashboard is loading the latest saved desk state.'
+    case 'realtime feed':
+      return 'Live market updates are connected for this chart.'
+    case 'internal api feed':
+      return 'The owned API is polling free delayed data for paper-only desk updates.'
+    case 'feed delayed':
+      return 'The live stream is unavailable, so the chart is using the latest stable data.'
+    case 'feed standby':
+      return 'The feed connection is idle or still connecting.'
+    case 'background sync':
+      return 'The chart is refreshing in the background instead of streaming live ticks.'
+    case 'manual mode':
+      return 'The chart updates only when you manually refresh or change inputs.'
+    default:
+      return ''
+  }
+}
+
+function describeLiveAlert(alert) {
+  switch (String(alert || '').trim().toUpperCase()) {
+    case 'EVENT RISK':
+      return 'A nearby event may distort the setup, so entries need extra caution.'
+    case 'ENTRY ZONE':
+      return 'Current price is inside the model preferred entry range.'
+    case 'HIGH SCORE SETUP':
+      return 'The setup score is high enough to flag stronger model alignment.'
+    case 'A-GRADE SETUP':
+      return 'The model grade is in the top setup bucket.'
+    case 'TARGET TOUCHED':
+      return 'Current price has reached the model target level.'
+    case 'INVALIDATION HIT':
+      return 'Current price has reached the model invalidation level.'
+    default:
+      return ''
+  }
+}
+
 function describeEntryAlignment(report, referencePrice) {
   const price = toNumber(referencePrice)
   if (!report) return 'Run analysis to map the model levels onto the chart.'
@@ -8187,6 +8236,7 @@ export default function DashboardPage({ bootstrap }) {
   const [dashboard, setDashboard] = useState(() => initialDeskDashboard)
   const [portfolioFallback, setPortfolioFallback] = useState(null)
   const [automationSnapshot, setAutomationSnapshot] = useState(null)
+  const [internalBrokerRouter, setInternalBrokerRouter] = useState(null)
   const [chartPayload, setChartPayload] = useState(() => initialDeskSnapshot?.chartPayload || null)
   const [analysis, setAnalysis] = useState(() => initialDeskSnapshot?.analysis || null)
   const [optionAnalysis, setOptionAnalysis] = useState(() => initialDeskSnapshot?.optionAnalysis || null)
@@ -8264,6 +8314,9 @@ export default function DashboardPage({ bootstrap }) {
   const workspaceRefreshInFlight = useRef(false)
   const analysisRefreshInFlight = useRef(false)
   const boardRefreshInFlight = useRef(false)
+  const liveBatchRefreshInFlight = useRef(false)
+  const tradePreviewInFlightRef = useRef(false)
+  const lastTradePreviewAtRef = useRef(0)
   const workspaceLoadRequestRef = useRef({ key: '', mode: '', startedAt: 0, promise: null })
   const lastSilentWorkspaceLoadRef = useRef({ key: '', at: 0 })
   const hasBootstrapped = useRef(false)
@@ -8482,6 +8535,24 @@ export default function DashboardPage({ bootstrap }) {
       cancelled = true
     }
   }, [automationScopeOptions])
+
+  useEffect(() => {
+    let cancelled = false
+
+    getInternalBrokerRouter()
+      .then((payload) => {
+        if (!cancelled) {
+          setInternalBrokerRouter(payload)
+        }
+      })
+      .catch(() => {
+        // keep the desk usable when Alpaca paper status is unavailable
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const nextSignature = [
@@ -8913,7 +8984,7 @@ export default function DashboardPage({ bootstrap }) {
       ? Number(brokerAccount.equity) - Number(brokerAccount.cash)
       : null
   const brokerAccountLabel = activeAccountProfile === 'brokerage'
-    ? 'Brokerage equity'
+    ? 'Linked-account equity'
     : activeAccountProfile === 'personal_live'
       ? 'Live equity'
       : 'Paper equity'
@@ -8931,6 +9002,104 @@ export default function DashboardPage({ bootstrap }) {
         },
       ]
     : []
+  const internalRouterBalances =
+    internalBrokerRouter?.balances && typeof internalBrokerRouter.balances === 'object'
+      ? internalBrokerRouter.balances
+      : {}
+  const internalRouterHealth =
+    internalBrokerRouter?.health && typeof internalBrokerRouter.health === 'object'
+      ? internalBrokerRouter.health
+      : {}
+  const internalRouterRouting =
+    internalBrokerRouter?.routing && typeof internalBrokerRouter.routing === 'object'
+      ? internalBrokerRouter.routing
+      : {}
+  const internalRouterOrders =
+    internalBrokerRouter?.orders && typeof internalBrokerRouter.orders === 'object'
+      ? internalBrokerRouter.orders
+      : {}
+  const internalRouterOpenOrders = Array.isArray(internalRouterOrders.open) ? internalRouterOrders.open : []
+  const internalRouterRecentFills = Array.isArray(internalRouterOrders.recent_fills)
+    ? internalRouterOrders.recent_fills
+    : []
+  const internalRouterRejectedOrders = Array.isArray(internalRouterOrders.rejected)
+    ? internalRouterOrders.rejected
+    : []
+  const internalRouterPositions = Array.isArray(internalBrokerRouter?.positions)
+    ? internalBrokerRouter.positions
+    : []
+  const internalRouterAudit =
+    internalBrokerRouter?.audit && typeof internalBrokerRouter.audit === 'object'
+      ? internalBrokerRouter.audit
+      : {}
+  const internalRouterStatus = String(
+    internalRouterHealth.status || internalBrokerRouter?.status || 'degraded',
+  ).trim().toLowerCase()
+  const internalRouterTone =
+    internalRouterStatus === 'failed'
+      ? 'negative'
+      : internalRouterStatus === 'healthy' || internalRouterStatus === 'ready'
+        ? 'positive'
+        : 'warning'
+  const internalRouterBalanceCards = [
+    {
+      key: 'internal',
+      label: 'Alpaca paper equity',
+      value: formatPrice(internalRouterBalances.internal_simulated?.equity),
+      detail: `Cash ${formatPrice(internalRouterBalances.internal_simulated?.cash)} | BP ${formatPrice(internalRouterBalances.internal_simulated?.buying_power)}`,
+    },
+    {
+      key: 'buying-power',
+      label: 'Buying power',
+      value: formatPrice(internalRouterBalances.internal_simulated?.buying_power),
+      detail: `Options BP ${formatPrice(internalRouterBalances.internal_simulated?.option_buying_power)}`,
+    },
+    {
+      key: 'combined',
+      label: 'Alpaca paper total',
+      value: formatPrice(internalRouterBalances.combined_paper?.equity),
+      detail: 'Paper route total | Not withdrawable cash',
+    },
+  ]
+  const internalRouterActivityCards = [
+    {
+      key: 'route',
+      label: 'Alpaca paper mode',
+      value: 'Alpaca paper',
+      detail: 'Equities and listed options stay on Alpaca paper until live gates clear.',
+    },
+    {
+      key: 'orders',
+      label: 'Open paper orders',
+      value: formatNumber(internalRouterOpenOrders.length, 0),
+      detail: internalRouterOpenOrders[0]
+        ? `${internalRouterOpenOrders[0].symbol} | ${formatLabel(internalRouterOpenOrders[0].state)}`
+        : 'No Alpaca paper orders are working.',
+    },
+    {
+      key: 'fills',
+      label: 'Recent fills',
+      value: formatNumber(internalRouterRecentFills.length, 0),
+      detail: internalRouterRecentFills[0]
+        ? `${internalRouterRecentFills[0].symbol} | ${formatPrice(internalRouterRecentFills[0].price)}`
+        : 'Simulated fills will appear here.',
+    },
+    {
+      key: 'safety',
+      label: 'Safety state',
+      value: internalRouterRouting.live_routing_enabled ? 'Live enabled' : 'Paper only',
+      detail:
+        internalRouterRejectedOrders.length > 0
+          ? `${internalRouterRejectedOrders.length} rejected paper intent${internalRouterRejectedOrders.length === 1 ? '' : 's'} recorded.`
+          : `${internalRouterPositions.length} simulated position${internalRouterPositions.length === 1 ? '' : 's'} tracked.`,
+    },
+    {
+      key: 'audit',
+      label: 'Audit chain',
+      value: internalRouterAudit.hash_chain_valid === false ? 'Needs review' : 'Valid',
+      detail: `${Array.isArray(internalRouterAudit.latest_events) ? internalRouterAudit.latest_events.length : 0} recent audit events loaded.`,
+    },
+  ]
   const portfolioValidationSnapshot =
     dashboard?.portfolio?.validation_snapshot && typeof dashboard.portfolio.validation_snapshot === 'object'
       ? dashboard.portfolio.validation_snapshot
@@ -9760,7 +9929,7 @@ export default function DashboardPage({ bootstrap }) {
     return {
       ticker: report.ticker,
       interval: form.interval,
-      horizon: form.horizon,
+      horizon: normalizeTradeTicketHorizon(form.horizon),
       account_target_type: profileTradingContext.effectiveAccountTargetType,
       linked_account_id:
         profileTradingContext.effectiveAccountTargetType === 'linked_client'
@@ -9853,8 +10022,17 @@ export default function DashboardPage({ bootstrap }) {
       setTradePreviewLoading(false)
       return undefined
     }
+    const now = Date.now()
+    if (
+      tradePreviewInFlightRef.current ||
+      now - lastTradePreviewAtRef.current < TRADE_PREVIEW_MIN_REFRESH_MS
+    ) {
+      return undefined
+    }
     let active = true
     const timeout = window.setTimeout(() => {
+      tradePreviewInFlightRef.current = true
+      lastTradePreviewAtRef.current = Date.now()
       setTradePreviewLoading(true)
       previewTrade(tradePreviewPayload)
         .then((payload) => {
@@ -9868,6 +10046,7 @@ export default function DashboardPage({ bootstrap }) {
           setTradePreviewError(previewError?.message || 'Pre-trade preview is unavailable.')
         })
         .finally(() => {
+          tradePreviewInFlightRef.current = false
           if (active) setTradePreviewLoading(false)
         })
     }, 350)
@@ -10097,11 +10276,11 @@ export default function DashboardPage({ bootstrap }) {
             : `${executionRouteSummary?.pathLabel || 'Route'} active`,
         },
         {
-          key: 'live-broker',
+          key: 'connected-live',
           tone: liveBrokerDeskStatus?.tone || 'info',
-          label: liveBrokerDeskStatus?.label || 'Live broker',
+          label: liveBrokerDeskStatus?.label || 'Alpaca live',
           value: liveBrokerDeskStatus?.value || 'Standby',
-          detail: liveBrokerDeskStatus?.detail || 'Live broker state is not available yet.',
+          detail: liveBrokerDeskStatus?.detail || 'Alpaca live state is not available yet.',
         },
       ],
     }
@@ -10492,9 +10671,12 @@ export default function DashboardPage({ bootstrap }) {
       }
 
       const shouldHydrateOptionAnalysis =
-        !optionAnalysis ||
-        !isUsableAnalysisPayload(optionAnalysis) ||
-        String(formRef.current?.ticker || '').trim().toUpperCase() !== normalizedTicker
+        normalizedInstrumentType === 'listed_option' &&
+        (
+          !optionAnalysis ||
+          !isUsableAnalysisPayload(optionAnalysis) ||
+          String(formRef.current?.ticker || '').trim().toUpperCase() !== normalizedTicker
+        )
 
       if (shouldHydrateOptionAnalysis) {
         const optionRequestSequence = ++optionHydrationSequence.current
@@ -11294,6 +11476,20 @@ export default function DashboardPage({ bootstrap }) {
     autoRefresh,
   )
 
+  usePolling(
+    () => {
+      getInternalBrokerRouter()
+        .then((payload) => {
+          setInternalBrokerRouter(payload)
+        })
+        .catch(() => {
+          // keep the current broker/router panel on transient failures
+        })
+    },
+    Math.max(pollMs * 2, 30000),
+    autoRefresh,
+  )
+
   useEffect(() => {
     loadOperatorMemoryNotes().catch(() => {
       // keep the current operator memory lane on transient failures
@@ -11615,10 +11811,11 @@ export default function DashboardPage({ bootstrap }) {
   )
   usePolling(
     () => {
-      if (loading || !autoRefresh || !tickerStrip.length) {
+      if (liveBatchRefreshInFlight.current || loading || !autoRefresh || !tickerStrip.length) {
         return
       }
 
+      liveBatchRefreshInFlight.current = true
       getLiveBatch(tickerStrip)
         .then((payload) => {
           const incomingRows = Array.isArray(payload?.rows) ? payload.rows : []
@@ -11740,6 +11937,9 @@ export default function DashboardPage({ bootstrap }) {
         .catch(() => {
           // keep the last good live batch if the quote endpoint blips
         })
+        .finally(() => {
+          liveBatchRefreshInFlight.current = false
+        })
     },
     1000,
     autoRefresh,
@@ -11768,8 +11968,14 @@ export default function DashboardPage({ bootstrap }) {
     workspaceSyncMode === 'initial'
       ? 'Loading desk'
       : ''
-  const streamBadgeLabel = streamIsLive
-    ? 'Realtime feed'
+  const internalApiStreamActive =
+    streamStatus === 'internal_polling' ||
+    streamMeta?.connection_mode === 'internal_polling' ||
+    streamMeta?.provider === 'internal_owned_api'
+  const streamBadgeLabel = internalApiStreamActive
+    ? 'Internal API feed'
+    : streamIsLive
+      ? 'Realtime feed'
     : streamStatus === 'fallback' || streamError
       ? 'Feed delayed'
       : streamStatus === 'connecting' || streamStatus === 'connected'
@@ -11779,6 +11985,8 @@ export default function DashboardPage({ bootstrap }) {
           : 'Manual mode'
   const streamSupportLine = streamStatus === 'fallback' || streamError
     ? 'Live ticks are delayed, so the desk is holding on the latest stable saved board.'
+    : internalApiStreamActive
+      ? 'INTERNAL API | FREE DELAYED | PAPER ONLY'
     : streamMeta?.provider
       ? `${String(streamMeta.provider).toUpperCase()} ${streamMeta?.feed ? `| ${String(streamMeta.feed).toUpperCase()}` : ''}`
       : 'Chart-first layout with quiet background sync.'
@@ -13575,7 +13783,7 @@ export default function DashboardPage({ bootstrap }) {
         state: 'rejected',
         ticker: report.ticker,
         label: 'Profile locked',
-        routeLabel: 'Brokerage binding required',
+        routeLabel: 'Linked account required',
         bookState: 'blocked',
         bookLabel: 'Blocked',
         detail: profileTradingContext.profileTradingLockedReason,
@@ -13610,13 +13818,13 @@ export default function DashboardPage({ bootstrap }) {
         ticker: report.ticker,
         detail:
           profileTradingContext.effectiveAccountTargetType === 'linked_client'
-            ? `Creating a brokerage approval request for ${profileTradingContext.accountTargetLabel}.`
+            ? `Creating a linked-account approval request for ${profileTradingContext.accountTargetLabel}.`
             : `Submitting ${formatInstrumentTypeLabel(tradeTicket.instrumentType)} ${formatOrderTypeLabel(tradeTicket.orderType)} for ${formatTimeInForceLabel(tradeTicket.timeInForce)}.`,
       })
       const response = await openTrade({
         ticker: report.ticker,
         interval: form.interval,
-        horizon: form.horizon,
+        horizon: normalizeTradeTicketHorizon(form.horizon),
         account_target_type: profileTradingContext.effectiveAccountTargetType,
         linked_account_id:
           profileTradingContext.effectiveAccountTargetType === 'linked_client'
@@ -13677,26 +13885,26 @@ export default function DashboardPage({ bootstrap }) {
 
       if (response.intent_created) {
         pushToast(
-          `Created approval request for ${response?.trade_intent?.account_label || profileTradingContext.accountTargetLabel || 'the bound broker account'}.`,
+          `Created approval request for ${response?.trade_intent?.account_label || profileTradingContext.accountTargetLabel || 'the bound linked account'}.`,
           'success',
         )
         setLastOrderEvent({
           state: 'working',
           ticker: report.ticker,
           label: 'Approval required',
-          routeLabel: 'Brokerage approval queue',
+          routeLabel: 'Linked-account approval queue',
           bookState: 'pending_approval',
           bookLabel: 'Pending approval',
-          detail: `Ticket staged for ${response?.trade_intent?.account_label || profileTradingContext.accountTargetLabel || 'the bound broker account'}. It will not submit until an operator approves it from the trades page.`,
+          detail: `Ticket staged for ${response?.trade_intent?.account_label || profileTradingContext.accountTargetLabel || 'the bound linked account'}. It will not submit until an operator approves it from the trades page.`,
         })
         return
       }
 
       pushToast(
         response.position_opened
-          ? `Trade opened at ${formatPrice(activeExecutionPrice)} via ${response?.execution?.intent === 'broker_live' ? 'broker live' : response?.execution?.intent === 'broker_paper' ? 'broker paper' : 'desk'} routing.`
+          ? `Trade opened at ${formatPrice(activeExecutionPrice)} via ${response?.execution?.intent === 'broker_live' ? 'Alpaca live' : response?.execution?.intent === 'broker_paper' ? 'Alpaca paper' : 'desk'} routing.`
           : response.pending_order
-            ? `${formatInstrumentTypeLabel(tradeTicket.instrumentType)} ${formatOrderTypeLabel(tradeTicket.orderType)} is now working via ${response?.execution?.intent === 'broker_live' ? 'broker live' : response?.execution?.intent === 'broker_paper' ? 'broker paper' : 'desk'} routing.`
+            ? `${formatInstrumentTypeLabel(tradeTicket.instrumentType)} ${formatOrderTypeLabel(tradeTicket.orderType)} is now working via ${response?.execution?.intent === 'broker_live' ? 'Alpaca live' : response?.execution?.intent === 'broker_paper' ? 'Alpaca paper' : 'desk'} routing.`
             : 'Trade was not opened.',
         response.opened ? 'success' : 'info',
       )
@@ -14283,6 +14491,16 @@ export default function DashboardPage({ bootstrap }) {
                   </div>
                 ))}
               </div>
+              <div className="trade-ticket__lifecycle" aria-label="Current blocker and next safe action">
+                <div className="trade-ticket__lifecycle-chip">
+                  <span>Current blocker</span>
+                  <strong>{blockingTicketReasons[0]?.message || profileTradingContext.profileTradingLockedReason || 'No blocker on the active ticket'}</strong>
+                </div>
+                <div className="trade-ticket__lifecycle-chip">
+                  <span>Next safe action</span>
+                  <strong>{blockingTicketReasons[0]?.actionLabel || (canOpenTrade ? 'Review and send with gates visible' : 'Complete ticket validation')}</strong>
+                </div>
+              </div>
             </div>
 
             <div className="trade-ticket__form trade-ticket__form--execution">
@@ -14356,7 +14574,7 @@ export default function DashboardPage({ bootstrap }) {
             <div className="ticket-field" ref={registerTicketTarget('account-target')}>
               <TicketFieldLabel
                 label="Account target"
-                tooltip="The global profile controls the active money lane. Brokerage stays bound to one linked broker account, and personal profiles stay on the personal env-backed lane."
+                tooltip="The global profile controls the active money lane. Linked Accounts stays bound to one connected account, and personal profiles stay on the personal env-backed lane."
               />
               <SelectField
                 value={profileTradingContext.accountTargetValue}
@@ -16363,7 +16581,7 @@ export default function DashboardPage({ bootstrap }) {
               tone: capitalPreservationSummary?.tone || 'warning',
             },
             {
-              label: liveRouteSelected ? 'Next promotion test' : 'Live broker',
+              label: liveRouteSelected ? 'Next promotion test' : 'Alpaca live',
               value: liveRouteSelected
                 ? promotionGateSummary?.allowsPromotion ? 'Tiny live still applies' : 'Keep it in replay or paper'
                 : liveBrokerDeskStatus?.value || 'Standby',
@@ -16371,7 +16589,7 @@ export default function DashboardPage({ bootstrap }) {
                 ? promotionGateSummary?.allowsPromotion
                   ? 'Even when the gate clears, first capital should stay intentionally small until live slippage and order-state behavior match the model.'
                   : 'Clear the paper sample, slippage drift, and order lifecycle mismatches before any new live routing.'
-                : liveBrokerDeskStatus?.detail || 'Live broker should stay visible and inactive while paper mode builds the sample.',
+                : liveBrokerDeskStatus?.detail || 'Alpaca live should stay visible and inactive while paper mode builds the sample.',
               tone: liveRouteSelected ? (promotionGateSummary?.allowsPromotion ? 'positive' : 'warning') : liveBrokerDeskStatus?.tone || 'info',
             },
           ]}
@@ -17741,6 +17959,45 @@ export default function DashboardPage({ bootstrap }) {
                 ))}
               </div>
             ) : null}
+            <div className="chart-headbar-group chart-headbar-group--broker-router">
+              <div className="chart-headbar-group__title">Alpaca paper route</div>
+              <div className="chart-headbar chart-headbar--broker-router">
+                <div className="chart-console__metric chart-console__metric--router chart-console__metric--router-status">
+                  <span>Router health</span>
+                  <strong>
+                    <StatusBadge tone={internalRouterTone}>
+                      {formatLabel(internalRouterStatus, 'Loading')}
+                    </StatusBadge>
+                  </strong>
+                  <div className="chart-console__detail">
+                    {String(internalRouterHealth.detail || 'Alpaca paper route is loading.')
+                      .replace(new RegExp(`internal ${'paper execution'} router`, 'ig'), 'Alpaca paper route')
+                      .replace(new RegExp(`${'paper execution'} router`, 'ig'), 'Alpaca paper route')}
+                  </div>
+                  <div className="chart-console__meta">
+                    {internalBrokerRouter?.paper_only === false
+                      ? 'Alpaca live route selected'
+                      : 'Paper-only | Live controls off'}
+                  </div>
+                </div>
+                {internalRouterBalanceCards.map((item) => (
+                  <div key={item.key} className="chart-console__metric chart-console__metric--router">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                    <div className="chart-console__detail">{item.detail}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="chart-headbar chart-headbar--broker-router chart-headbar--broker-router-activity">
+                {internalRouterActivityCards.map((item) => (
+                  <div key={item.key} className="chart-console__metric chart-console__metric--router">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                    <div className="chart-console__detail">{item.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="chart-headbar-group chart-headbar-group--options">
               <div className="chart-headbar-group__title">Options on desk</div>
               <div className="chart-headbar chart-headbar--options">
@@ -17894,14 +18151,31 @@ export default function DashboardPage({ bootstrap }) {
                 ) : null}
                 <StatusBadge value={liveExecutionDecision || liveTradeStatus || 'Monitoring'} />
                 {syncBadgeLabel ? (
-                  <span className="feed-pill feed-pill--syncing">{syncBadgeLabel}</span>
+                  <Chip
+                    tone="neutral"
+                    className="feed-pill feed-pill--syncing"
+                    tooltip={describeFeedPill(syncBadgeLabel)}
+                  >
+                    {syncBadgeLabel}
+                  </Chip>
                 ) : null}
-                <span className={`feed-pill ${streamIsLive ? 'feed-pill--live' : ''}`}>
+                <Chip
+                  tone="neutral"
+                  className={`feed-pill ${streamIsLive && !internalApiStreamActive ? 'feed-pill--live' : ''}`}
+                  tooltip={describeFeedPill(streamBadgeLabel)}
+                >
                   {streamBadgeLabel}
-                </span>
-                {chartPayload?.extended_hours ? <Chip tone="neutral">Extended hours</Chip> : null}
+                </Chip>
+                {chartPayload?.extended_hours ? (
+                  <Chip
+                    tone="neutral"
+                    tooltip="The chart includes pre-market or after-hours bars; extended-session orders stay limit-only."
+                  >
+                    Extended hours
+                  </Chip>
+                ) : null}
                 {liveAlerts.map((alert) => (
-                  <Chip tone="warning" key={alert}>
+                  <Chip tone="warning" key={alert} tooltip={describeLiveAlert(alert)}>
                     {alert}
                   </Chip>
                 ))}

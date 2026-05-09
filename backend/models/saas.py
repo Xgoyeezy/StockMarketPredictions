@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.core.database import Base
@@ -52,6 +52,24 @@ class Tenant(Base):
     backtest_runs: Mapped[list["BacktestRun"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     domain_events: Mapped[list["DomainEventLog"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     desk_pnl_snapshots: Mapped[list["DeskPnlSnapshot"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    strategy_versions: Mapped[list["StrategyVersion"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    strategy_deployments: Mapped[list["StrategyDeployment"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    strategy_promotion_gates: Mapped[list["StrategyPromotionGate"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    trade_decisions: Mapped[list["TradeDecision"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    decision_replay_events: Mapped[list["DecisionReplayEvent"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    readiness_snapshots: Mapped[list["ReadinessSnapshot"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    readiness_blockers: Mapped[list["ReadinessBlocker"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    risk_policies: Mapped[list["RiskPolicy"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    risk_events: Mapped[list["RiskEvent"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    execution_quality_snapshots: Mapped[list["ExecutionQualitySnapshot"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    audit_exports: Mapped[list["AuditExport"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    entitlement_usage: Mapped[list["EntitlementUsage"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    live_trading_authorizations: Mapped[list["LiveTradingAuthorization"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    live_trading_sessions: Mapped[list["LiveTradingSession"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    live_order_intents: Mapped[list["LiveOrderIntent"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    live_risk_checks: Mapped[list["LiveRiskCheck"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    broker_execution_receipts: Mapped[list["BrokerExecutionReceipt"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    live_kill_switch_events: Mapped[list["LiveKillSwitchEvent"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -89,6 +107,34 @@ class User(Base):
         back_populates="approver_user",
         cascade="all, delete-orphan",
         foreign_keys="TradeApprovalIntent.approver_user_id",
+    )
+    created_strategy_versions: Mapped[list["StrategyVersion"]] = relationship(
+        back_populates="created_by_user",
+        foreign_keys="StrategyVersion.created_by_user_id",
+    )
+    approved_strategy_promotion_gates: Mapped[list["StrategyPromotionGate"]] = relationship(
+        back_populates="approved_by_user",
+        foreign_keys="StrategyPromotionGate.approved_by_user_id",
+    )
+    requested_audit_exports: Mapped[list["AuditExport"]] = relationship(
+        back_populates="requested_by_user",
+        foreign_keys="AuditExport.requested_by_user_id",
+    )
+    live_trading_authorizations: Mapped[list["LiveTradingAuthorization"]] = relationship(
+        back_populates="user",
+        foreign_keys="LiveTradingAuthorization.user_id",
+    )
+    approved_live_order_intents: Mapped[list["LiveOrderIntent"]] = relationship(
+        back_populates="approved_by_user",
+        foreign_keys="LiveOrderIntent.approved_by_user_id",
+    )
+    triggered_live_kill_switch_events: Mapped[list["LiveKillSwitchEvent"]] = relationship(
+        back_populates="triggered_by_user",
+        foreign_keys="LiveKillSwitchEvent.triggered_by_user_id",
+    )
+    cleared_live_kill_switch_events: Mapped[list["LiveKillSwitchEvent"]] = relationship(
+        back_populates="cleared_by_user",
+        foreign_keys="LiveKillSwitchEvent.cleared_by_user_id",
     )
 
 
@@ -215,6 +261,8 @@ class OrderEventRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     tenant: Mapped["Tenant | None"] = relationship(back_populates="order_events")
+    trade_decisions: Mapped[list["TradeDecision"]] = relationship(back_populates="order_event")
+    execution_quality_snapshots: Mapped[list["ExecutionQualitySnapshot"]] = relationship(back_populates="order_event")
 
 
 class AuditEvent(Base):
@@ -280,6 +328,9 @@ class BrokerageLinkedAccount(Base):
         back_populates="linked_account",
         cascade="all, delete-orphan",
     )
+    strategy_deployments: Mapped[list["StrategyDeployment"]] = relationship(back_populates="linked_account")
+    live_trading_authorizations: Mapped[list["LiveTradingAuthorization"]] = relationship(back_populates="linked_account")
+    live_trading_sessions: Mapped[list["LiveTradingSession"]] = relationship(back_populates="linked_account")
 
 
 class TradeApprovalIntent(Base):
@@ -328,6 +379,7 @@ class TradeApprovalIntent(Base):
         foreign_keys=[approver_user_id],
     )
     linked_account: Mapped["BrokerageLinkedAccount"] = relationship(back_populates="trade_intents")
+    trade_decisions: Mapped[list["TradeDecision"]] = relationship(back_populates="trade_approval_intent")
 
 
 class AsyncJob(Base):
@@ -377,6 +429,20 @@ class StrategyDesk(Base):
     target_publications: Mapped[list["StrategyTargetPublication"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
     backtest_runs: Mapped[list["BacktestRun"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
     desk_pnl_snapshots: Mapped[list["DeskPnlSnapshot"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
+    strategy_versions: Mapped[list["StrategyVersion"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
+    strategy_deployments: Mapped[list["StrategyDeployment"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
+    strategy_promotion_gates: Mapped[list["StrategyPromotionGate"]] = relationship(back_populates="strategy_desk", cascade="all, delete-orphan")
+    trade_decisions: Mapped[list["TradeDecision"]] = relationship(back_populates="strategy_desk")
+    readiness_snapshots: Mapped[list["ReadinessSnapshot"]] = relationship(back_populates="strategy_desk")
+    readiness_blockers: Mapped[list["ReadinessBlocker"]] = relationship(back_populates="strategy_desk")
+    risk_policies: Mapped[list["RiskPolicy"]] = relationship(back_populates="strategy_desk")
+    risk_events: Mapped[list["RiskEvent"]] = relationship(back_populates="strategy_desk")
+    execution_quality_snapshots: Mapped[list["ExecutionQualitySnapshot"]] = relationship(back_populates="strategy_desk")
+    live_trading_authorizations: Mapped[list["LiveTradingAuthorization"]] = relationship(back_populates="strategy_desk")
+    live_trading_sessions: Mapped[list["LiveTradingSession"]] = relationship(back_populates="strategy_desk")
+    live_order_intents: Mapped[list["LiveOrderIntent"]] = relationship(back_populates="strategy_desk")
+    live_risk_checks: Mapped[list["LiveRiskCheck"]] = relationship(back_populates="strategy_desk")
+    live_kill_switch_events: Mapped[list["LiveKillSwitchEvent"]] = relationship(back_populates="strategy_desk")
 
 
 class StrategyRun(Base):
@@ -406,6 +472,8 @@ class StrategyRun(Base):
     tenant: Mapped["Tenant"] = relationship(back_populates="strategy_runs")
     strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="strategy_runs")
     target_publications: Mapped[list["StrategyTargetPublication"]] = relationship(back_populates="strategy_run", cascade="all, delete-orphan")
+    trade_decisions: Mapped[list["TradeDecision"]] = relationship(back_populates="strategy_run")
+    readiness_snapshots: Mapped[list["ReadinessSnapshot"]] = relationship(back_populates="strategy_run")
 
 
 class StrategyTargetPublication(Base):
@@ -600,3 +668,450 @@ class DeskPnlSnapshot(Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="desk_pnl_snapshots")
     strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="desk_pnl_snapshots")
+
+
+class StrategyVersion(Base):
+    __tablename__ = "strategy_versions"
+    __table_args__ = (UniqueConstraint("tenant_id", "strategy_desk_id", "version_number", name="uq_strategy_version_number"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="internal")
+    source_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    config_json: Mapped[dict] = mapped_column("config", JSON, default=dict)
+    risk_profile_json: Mapped[dict] = mapped_column("risk_profile", JSON, default=dict)
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="strategy_versions")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="strategy_versions")
+    created_by_user: Mapped["User | None"] = relationship(back_populates="created_strategy_versions", foreign_keys=[created_by_user_id])
+    deployments: Mapped[list["StrategyDeployment"]] = relationship(back_populates="strategy_version", cascade="all, delete-orphan")
+    live_trading_authorizations: Mapped[list["LiveTradingAuthorization"]] = relationship(back_populates="strategy_version")
+    live_trading_sessions: Mapped[list["LiveTradingSession"]] = relationship(back_populates="strategy_version")
+
+
+class StrategyDeployment(Base):
+    __tablename__ = "strategy_deployments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    strategy_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_versions.id", ondelete="CASCADE"), index=True)
+    linked_account_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("brokerage_linked_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
+    mode: Mapped[str] = mapped_column(String(24), default="paper", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="stopped", index=True)
+    allocation_cap: Mapped[float] = mapped_column(Float, default=0.0)
+    max_order_notional: Mapped[float] = mapped_column(Float, default=0.0)
+    max_daily_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="strategy_deployments")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="strategy_deployments")
+    strategy_version: Mapped["StrategyVersion"] = relationship(back_populates="deployments")
+    linked_account: Mapped["BrokerageLinkedAccount | None"] = relationship(back_populates="strategy_deployments")
+
+
+class StrategyPromotionGate(Base):
+    __tablename__ = "strategy_promotion_gates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    from_stage: Mapped[str] = mapped_column(String(32))
+    to_stage: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    required_score: Mapped[int] = mapped_column(Integer)
+    actual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requirements_json: Mapped[dict] = mapped_column("requirements", JSON, default=dict)
+    blockers_json: Mapped[dict] = mapped_column("blockers", JSON, default=dict)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="strategy_promotion_gates")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="strategy_promotion_gates")
+    approved_by_user: Mapped["User | None"] = relationship(back_populates="approved_strategy_promotion_gates", foreign_keys=[approved_by_user_id])
+
+
+class TradeDecision(Base):
+    __tablename__ = "trade_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    strategy_run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    trade_approval_intent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("trade_approval_intents.id", ondelete="SET NULL"), nullable=True, index=True)
+    order_event_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("order_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(24), index=True)
+    instrument_type: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(16))
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    decision_status: Mapped[str] = mapped_column(String(32), default="recorded", index=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signal_snapshot_json: Mapped[dict] = mapped_column("signal_snapshot", JSON, default=dict)
+    risk_snapshot_json: Mapped[dict] = mapped_column("risk_snapshot", JSON, default=dict)
+    readiness_snapshot_json: Mapped[dict] = mapped_column("readiness_snapshot", JSON, default=dict)
+    market_snapshot_json: Mapped[dict] = mapped_column("market_snapshot", JSON, default=dict)
+    broker_snapshot_json: Mapped[dict] = mapped_column("broker_snapshot", JSON, default=dict)
+    decision_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="trade_decisions")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="trade_decisions")
+    strategy_run: Mapped["StrategyRun | None"] = relationship(back_populates="trade_decisions")
+    trade_approval_intent: Mapped["TradeApprovalIntent | None"] = relationship(back_populates="trade_decisions")
+    order_event: Mapped["OrderEventRecord | None"] = relationship(back_populates="trade_decisions")
+    replay_events: Mapped[list["DecisionReplayEvent"]] = relationship(back_populates="trade_decision", cascade="all, delete-orphan")
+    risk_events: Mapped[list["RiskEvent"]] = relationship(back_populates="trade_decision")
+    live_order_intents: Mapped[list["LiveOrderIntent"]] = relationship(back_populates="trade_decision")
+
+
+class DecisionReplayEvent(Base):
+    __tablename__ = "decision_replay_events"
+    __table_args__ = (UniqueConstraint("trade_decision_id", "sequence_number", name="uq_decision_replay_seq"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    trade_decision_id: Mapped[str] = mapped_column(String(36), ForeignKey("trade_decisions.id", ondelete="CASCADE"), index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    payload_json: Mapped[dict] = mapped_column("payload", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="decision_replay_events")
+    trade_decision: Mapped["TradeDecision"] = relationship(back_populates="replay_events")
+
+
+class ReadinessSnapshot(Base):
+    __tablename__ = "readiness_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    strategy_run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    components_json: Mapped[dict] = mapped_column("components", JSON, default=dict)
+    hard_blockers_json: Mapped[dict] = mapped_column("hard_blockers", JSON, default=dict)
+    warnings_json: Mapped[dict] = mapped_column("warnings", JSON, default=dict)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="readiness_snapshots")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="readiness_snapshots")
+    strategy_run: Mapped["StrategyRun | None"] = relationship(back_populates="readiness_snapshots")
+    blockers: Mapped[list["ReadinessBlocker"]] = relationship(back_populates="snapshot", cascade="all, delete-orphan")
+
+
+class ReadinessBlocker(Base):
+    __tablename__ = "readiness_blockers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    readiness_snapshot_id: Mapped[str] = mapped_column(String(36), ForeignKey("readiness_snapshots.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    blocker_key: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(24), index=True)
+    source: Mapped[str] = mapped_column(String(64))
+    message: Mapped[str] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="readiness_blockers")
+    snapshot: Mapped["ReadinessSnapshot"] = relationship(back_populates="blockers")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="readiness_blockers")
+
+
+class RiskPolicy(Base):
+    __tablename__ = "risk_policies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    max_daily_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    max_weekly_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    max_position_notional: Mapped[float] = mapped_column(Float, default=0.0)
+    max_order_notional: Mapped[float] = mapped_column(Float, default=0.0)
+    max_open_positions: Mapped[int] = mapped_column(Integer, default=0)
+    allowed_symbols_json: Mapped[dict] = mapped_column("allowed_symbols", JSON, default=dict)
+    blocked_symbols_json: Mapped[dict] = mapped_column("blocked_symbols", JSON, default=dict)
+    allowed_instruments_json: Mapped[dict] = mapped_column("allowed_instruments", JSON, default=dict)
+    requires_approval_above: Mapped[float | None] = mapped_column(Float, nullable=True)
+    config_json: Mapped[dict] = mapped_column("config", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="risk_policies")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="risk_policies")
+    live_risk_checks: Mapped[list["LiveRiskCheck"]] = relationship(back_populates="risk_policy")
+
+
+class RiskEvent(Base):
+    __tablename__ = "risk_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    trade_decision_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("trade_decisions.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    severity: Mapped[str] = mapped_column(String(24), index=True)
+    breached_rule: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action_taken: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict] = mapped_column("payload", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="risk_events")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="risk_events")
+    trade_decision: Mapped["TradeDecision | None"] = relationship(back_populates="risk_events")
+
+
+class ExecutionQualitySnapshot(Base):
+    __tablename__ = "execution_quality_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    order_event_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("order_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    trade_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(24), index=True)
+    broker: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    route_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expected_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    submitted_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    filled_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    slippage_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_cost_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    liquidity_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    execution_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    payload_json: Mapped[dict] = mapped_column("payload", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="execution_quality_snapshots")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="execution_quality_snapshots")
+    order_event: Mapped["OrderEventRecord | None"] = relationship(back_populates="execution_quality_snapshots")
+
+
+class AuditExport(Base):
+    __tablename__ = "audit_exports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    requested_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    date_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    date_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    export_type: Mapped[str] = mapped_column(String(32), default="audit_bundle")
+    file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="audit_exports")
+    requested_by_user: Mapped["User | None"] = relationship(back_populates="requested_audit_exports", foreign_keys=[requested_by_user_id])
+
+
+class EntitlementUsage(Base):
+    __tablename__ = "entitlement_usage"
+    __table_args__ = (UniqueConstraint("tenant_id", "period_key", "metric_key", name="uq_entitlement_usage_metric"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    period_key: Mapped[str] = mapped_column(String(32), index=True)
+    metric_key: Mapped[str] = mapped_column(String(64), index=True)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    limit_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="entitlement_usage")
+
+
+class LiveTradingAuthorization(Base):
+    __tablename__ = "live_trading_authorizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    strategy_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_versions.id", ondelete="CASCADE"), index=True)
+    linked_account_id: Mapped[str] = mapped_column(String(36), ForeignKey("brokerage_linked_accounts.id", ondelete="CASCADE"), index=True)
+    authorization_type: Mapped[str] = mapped_column(String(32), default="supervised_live")
+    authorized_mode: Mapped[str] = mapped_column(String(32), default="approval_required")
+    max_capital_allocation: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    max_daily_loss: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    max_order_notional: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    allowed_symbols_json: Mapped[dict] = mapped_column("allowed_symbols", JSON, default=list)
+    allowed_instruments_json: Mapped[dict] = mapped_column("allowed_instruments", JSON, default=list)
+    risk_acknowledgement_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending_signature", index=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="live_trading_authorizations")
+    user: Mapped["User"] = relationship(back_populates="live_trading_authorizations", foreign_keys=[user_id])
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="live_trading_authorizations")
+    strategy_version: Mapped["StrategyVersion"] = relationship(back_populates="live_trading_authorizations")
+    linked_account: Mapped["BrokerageLinkedAccount"] = relationship(back_populates="live_trading_authorizations")
+    live_trading_sessions: Mapped[list["LiveTradingSession"]] = relationship(back_populates="authorization")
+
+
+class LiveTradingSession(Base):
+    __tablename__ = "live_trading_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    strategy_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_versions.id", ondelete="CASCADE"), index=True)
+    linked_account_id: Mapped[str] = mapped_column(String(36), ForeignKey("brokerage_linked_accounts.id", ondelete="CASCADE"), index=True)
+    authorization_id: Mapped[str] = mapped_column(String(36), ForeignKey("live_trading_authorizations.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="armed", index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    killed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    realized_pnl: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    unrealized_pnl: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    max_drawdown: Mapped[float] = mapped_column(Numeric(10, 4), default=0)
+    order_count: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_order_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="live_trading_sessions")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="live_trading_sessions")
+    strategy_version: Mapped["StrategyVersion"] = relationship(back_populates="live_trading_sessions")
+    linked_account: Mapped["BrokerageLinkedAccount"] = relationship(back_populates="live_trading_sessions")
+    authorization: Mapped["LiveTradingAuthorization"] = relationship(back_populates="live_trading_sessions")
+    order_intents: Mapped[list["LiveOrderIntent"]] = relationship(back_populates="live_trading_session", cascade="all, delete-orphan")
+    kill_switch_events: Mapped[list["LiveKillSwitchEvent"]] = relationship(back_populates="live_trading_session")
+
+
+class LiveOrderIntent(Base):
+    __tablename__ = "live_order_intents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    live_trading_session_id: Mapped[str] = mapped_column(String(36), ForeignKey("live_trading_sessions.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    trade_decision_id: Mapped[str] = mapped_column(String(36), ForeignKey("trade_decisions.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str] = mapped_column(String(24), index=True)
+    instrument_type: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(16))
+    quantity: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    order_type: Mapped[str] = mapped_column(String(16), default="market")
+    limit_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    stop_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    time_in_force: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    notional_value: Mapped[float] = mapped_column(Numeric(18, 6), default=0)
+    status: Mapped[str] = mapped_column(String(32), default="pending_approval", index=True)
+    requires_user_approval: Mapped[bool] = mapped_column(Boolean, default=True)
+    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duplicate_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="live_order_intents")
+    live_trading_session: Mapped["LiveTradingSession"] = relationship(back_populates="order_intents")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="live_order_intents")
+    trade_decision: Mapped["TradeDecision"] = relationship(back_populates="live_order_intents")
+    approved_by_user: Mapped["User | None"] = relationship(back_populates="approved_live_order_intents", foreign_keys=[approved_by_user_id])
+    risk_checks: Mapped[list["LiveRiskCheck"]] = relationship(back_populates="live_order_intent", cascade="all, delete-orphan")
+    broker_execution_receipts: Mapped[list["BrokerExecutionReceipt"]] = relationship(back_populates="live_order_intent", cascade="all, delete-orphan")
+
+
+class LiveRiskCheck(Base):
+    __tablename__ = "live_risk_checks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    live_order_intent_id: Mapped[str] = mapped_column(String(36), ForeignKey("live_order_intents.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="CASCADE"), index=True)
+    risk_policy_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("risk_policies.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="blocked", index=True)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    checks_json: Mapped[dict] = mapped_column("checks", JSON, default=dict)
+    blockers_json: Mapped[dict] = mapped_column("blockers", JSON, default=list)
+    warnings_json: Mapped[dict] = mapped_column("warnings", JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="live_risk_checks")
+    live_order_intent: Mapped["LiveOrderIntent"] = relationship(back_populates="risk_checks")
+    strategy_desk: Mapped["StrategyDesk"] = relationship(back_populates="live_risk_checks")
+    risk_policy: Mapped["RiskPolicy | None"] = relationship(back_populates="live_risk_checks")
+
+
+class BrokerExecutionReceipt(Base):
+    __tablename__ = "broker_execution_receipts"
+    __table_args__ = (UniqueConstraint("broker", "broker_order_id", name="uq_broker_execution_receipt_order"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    live_order_intent_id: Mapped[str] = mapped_column(String(36), ForeignKey("live_order_intents.id", ondelete="CASCADE"), index=True)
+    broker: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    broker_account_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    broker_order_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="not_submitted", index=True)
+    submitted_payload_json: Mapped[dict] = mapped_column("submitted_payload", JSON, default=dict)
+    response_payload_json: Mapped[dict] = mapped_column("response_payload", JSON, default=dict)
+    filled_quantity: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    average_fill_price: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    fees: Mapped[float | None] = mapped_column(Numeric(18, 6), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="broker_execution_receipts")
+    live_order_intent: Mapped["LiveOrderIntent"] = relationship(back_populates="broker_execution_receipts")
+
+
+class LiveKillSwitchEvent(Base):
+    __tablename__ = "live_kill_switch_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    strategy_desk_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("strategy_desks.id", ondelete="SET NULL"), nullable=True, index=True)
+    live_trading_session_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("live_trading_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(24), default="tenant", index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    triggered_by: Mapped[str] = mapped_column(String(24), default="user")
+    triggered_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    cleared_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="live_kill_switch_events")
+    strategy_desk: Mapped["StrategyDesk | None"] = relationship(back_populates="live_kill_switch_events")
+    live_trading_session: Mapped["LiveTradingSession | None"] = relationship(back_populates="kill_switch_events")
+    triggered_by_user: Mapped["User | None"] = relationship(back_populates="triggered_live_kill_switch_events", foreign_keys=[triggered_by_user_id])
+    cleared_by_user: Mapped["User | None"] = relationship(back_populates="cleared_live_kill_switch_events", foreign_keys=[cleared_by_user_id])

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Lock, Thread
 from time import perf_counter, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -44,6 +43,7 @@ _ADVANCED_SIGNAL_FIELDS = {"setup_grade", "conviction_label", "alignment_label"}
 _EXECUTION_SIGNAL_FIELDS = {"entry_low_price", "entry_high_price", "target_price", "stop_loss", "contract_symbol"}
 _market_cache_lock = Lock()
 _market_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
+_market_cache_refresh_inflight: set[tuple[Any, ...]] = set()
 
 
 def _freeze_cache_key(value: Any) -> Any:
@@ -57,9 +57,17 @@ def _freeze_cache_key(value: Any) -> Any:
 def clear_market_response_cache() -> None:
     with _market_cache_lock:
         _market_cache.clear()
+        _market_cache_refresh_inflight.clear()
 
 
-def _get_cached_market_payload(cache_key: tuple[Any, ...]) -> Any | None:
+def _market_cache_stale_seconds() -> int:
+    ttl_seconds = max(0, int(settings.market_response_cache_ttl_seconds))
+    if ttl_seconds <= 0:
+        return 0
+    return min(max(ttl_seconds * 6, 60), 180)
+
+
+def _get_cached_market_payload(cache_key: tuple[Any, ...], *, allow_stale: bool = False) -> Any | None:
     ttl_seconds = max(0, int(settings.market_response_cache_ttl_seconds))
     if ttl_seconds <= 0:
         return None
@@ -70,9 +78,13 @@ def _get_cached_market_payload(cache_key: tuple[Any, ...]) -> Any | None:
             return None
         expires_at, payload = cached
         if expires_at <= now:
-            _market_cache.pop(cache_key, None)
+            stale_until = expires_at + _market_cache_stale_seconds()
+            if allow_stale and stale_until > now:
+                return payload
+            if stale_until <= now:
+                _market_cache.pop(cache_key, None)
             return None
-        return deepcopy(payload)
+        return payload
 
 
 def _store_cached_market_payload(cache_key: tuple[Any, ...], payload: Any) -> None:
@@ -82,10 +94,56 @@ def _store_cached_market_payload(cache_key: tuple[Any, ...], payload: Any) -> No
     now = time()
     expires_at = now + ttl_seconds
     with _market_cache_lock:
-        expired_keys = [key for key, (expiry, _) in _market_cache.items() if expiry <= now]
+        stale_seconds = _market_cache_stale_seconds()
+        expired_keys = [key for key, (expiry, _) in _market_cache.items() if expiry + stale_seconds <= now]
         for key in expired_keys:
             _market_cache.pop(key, None)
-        _market_cache[cache_key] = (expires_at, deepcopy(payload))
+        _market_cache[cache_key] = (expires_at, payload)
+
+
+def _claim_market_cache_refresh(cache_key: tuple[Any, ...]) -> bool:
+    with _market_cache_lock:
+        if cache_key in _market_cache_refresh_inflight:
+            return False
+        _market_cache_refresh_inflight.add(cache_key)
+        return True
+
+
+def _release_market_cache_refresh(cache_key: tuple[Any, ...]) -> None:
+    with _market_cache_lock:
+        _market_cache_refresh_inflight.discard(cache_key)
+
+
+def _refresh_market_cache_async(
+    *,
+    name: str,
+    cache_key: tuple[Any, ...],
+    context: dict[str, Any] | None,
+    builder,
+) -> None:
+    def _run() -> None:
+        started_at = perf_counter()
+        try:
+            payload = builder()
+            _store_cached_market_payload(cache_key, payload)
+            record_operation(
+                name=name,
+                duration_seconds=perf_counter() - started_at,
+                cache_status="refresh",
+                context=context,
+            )
+        except Exception as exc:
+            record_operation(
+                name=name,
+                duration_seconds=perf_counter() - started_at,
+                status=_operation_status_for_exception(exc),
+                cache_status="refresh",
+                context=context,
+            )
+        finally:
+            _release_market_cache_refresh(cache_key)
+
+    Thread(target=_run, name=f"{name.replace('.', '-')}-refresh", daemon=True).start()
 
 
 def _is_timeout_exception(exc: Exception) -> bool:
@@ -171,6 +229,22 @@ def _run_market_operation(
                 context=context,
             )
             return cached_payload
+        stale_payload = _get_cached_market_payload(cache_key, allow_stale=True)
+        if stale_payload is not None:
+            if _claim_market_cache_refresh(cache_key):
+                _refresh_market_cache_async(
+                    name=name,
+                    cache_key=cache_key,
+                    context=context,
+                    builder=builder,
+                )
+            record_operation(
+                name=name,
+                duration_seconds=perf_counter() - started_at,
+                cache_status="hit",
+                context={**(context or {}), "stale": True},
+            )
+            return stale_payload
     try:
         payload = builder()
     except Exception as exc:
@@ -1438,7 +1512,10 @@ def get_chart_payload(request: ChartRequest) -> dict[str, Any]:
         for column in indicators:
             overlays[column] = [serialize_value(v) for v in chart_df[column].tolist()]
         for name, series in (strategy_snapshot.get("overlays") or {}).items():
-            overlays[name] = [serialize_value(value) for value in series]
+            series_values = list(series)
+            if len(chart_df) and len(series_values) > len(chart_df):
+                series_values = series_values[-len(chart_df):]
+            overlays[name] = [serialize_value(value) for value in series_values]
             if name not in indicators:
                 indicators.append(name)
 

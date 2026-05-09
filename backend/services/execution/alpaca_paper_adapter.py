@@ -44,6 +44,48 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
     def adapter_name(self) -> str:
         return "alpaca_paper"
 
+    def submit_equity_order(
+        self,
+        *,
+        request: OpenTradeRequest,
+        report: dict[str, Any],
+        live_price: float,
+        position: dict[str, Any],
+        trade_id: str,
+        order_id: str,
+        order_ticket: dict[str, Any],
+    ) -> SubmitOrderResult:
+        return self.submit_order(
+            request=request,
+            report=report,
+            live_price=live_price,
+            position=position,
+            trade_id=trade_id,
+            order_id=order_id,
+            order_ticket=order_ticket,
+        )
+
+    def submit_option_order(
+        self,
+        *,
+        request: OpenTradeRequest,
+        report: dict[str, Any],
+        live_price: float,
+        position: dict[str, Any],
+        trade_id: str,
+        order_id: str,
+        order_ticket: dict[str, Any],
+    ) -> SubmitOrderResult:
+        return self.submit_order(
+            request=request,
+            report=report,
+            live_price=live_price,
+            position=position,
+            trade_id=trade_id,
+            order_id=order_id,
+            order_ticket=order_ticket,
+        )
+
     def _ensure_credentials(self) -> None:
         if not settings.alpaca_api_key_id or not settings.alpaca_api_secret_key:
             raise ValidationServiceError("Alpaca paper execution requires APCA_API_KEY_ID and APCA_API_SECRET_KEY.")
@@ -173,6 +215,18 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
         except (TypeError, ValueError):
             return None
         return normalized if pd.notna(normalized) else None
+
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool = False) -> bool:
+        if value is None or value == "":
+            return bool(default)
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned in {"1", "true", "yes", "on"}:
+                return True
+            if cleaned in {"0", "false", "no", "off"}:
+                return False
+        return bool(value)
 
     @staticmethod
     def _resolve_close_quantity(quantity: float, close_fraction: float) -> float:
@@ -445,12 +499,15 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
                     )
                 )
             else:
-                if close_quantity < 1 and target_trade.get("broker_fractionable") is False:
+                broker_fractionable = self._coerce_bool(target_trade.get("broker_fractionable"), default=False)
+                if close_quantity < 1 and position_quantity >= 1:
+                    close_quantity = min(position_quantity, 1.0)
+                if close_quantity < 1 and not broker_fractionable:
                     raise ValidationServiceError(
                         f"{target_trade.get('ticker') or 'This symbol'} is not marked as fractionable for partial broker-paper closes."
                     )
                 ticker = str(target_trade.get("ticker") or "").strip().upper()
-                if close_fraction >= 1.0 and hasattr(self.client, "close_position"):
+                if close_quantity >= position_quantity and hasattr(self.client, "close_position"):
                     broker_response = self.client.close_position(ticker)
                 else:
                     broker_response = self.client.submit_order(
@@ -472,6 +529,46 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
                 details={"broker": self.adapter_name, "payload": exc.payload, "status_code": exc.status_code},
             ) from exc
 
+        broker_status = normalize_alpaca_status(broker_response.get("status")) or str(
+            broker_response.get("status") or ""
+        ).strip().lower()
+        broker_close_order_id = str(broker_response.get("id") or "").strip() or None
+        close_updates = {
+            "broker_name": self.adapter_name,
+            "broker_close_order_id": broker_close_order_id,
+            "broker_close_status": broker_status or None,
+        }
+        if not is_filled_alpaca_status(broker_status):
+            updated_trade = sdm.update_open_trade(
+                {
+                    **close_updates,
+                    "pending_close_quantity": close_quantity,
+                    "pending_close_fraction": close_quantity / position_quantity if position_quantity > 0 else 1.0,
+                    "route_state": "close_working",
+                    "book_state": "open",
+                    "status": "OPEN",
+                },
+                trade_id=trade_id or None,
+                order_id=order_id or None,
+            )
+            pending_close_trade = dict(updated_trade or target_trade)
+            pending_close_trade.update(
+                {
+                    **close_updates,
+                    "remaining_contracts_after_close": position_quantity,
+                    "close_fraction": 0.0,
+                    "pending_close_quantity": close_quantity,
+                    "pending_close_fraction": close_quantity / position_quantity if position_quantity > 0 else 1.0,
+                }
+            )
+            return ClosePositionResult(
+                closed_trade=pending_close_trade,
+                broker_name=self.adapter_name,
+                broker_order_id=broker_close_order_id,
+                broker_status=broker_status or None,
+                broker_response=broker_response,
+            )
+
         broker_filled_avg_price = self._coerce_number(broker_response.get("filled_avg_price"))
         close_underlying_price = float(request.close_underlying_price)
         close_contract_mid = float(request.close_contract_mid)
@@ -487,11 +584,7 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
             close_underlying_price=close_underlying_price,
             close_contract_mid=close_contract_mid,
             close_fraction=close_quantity / position_quantity if position_quantity > 0 else 1.0,
-            close_updates={
-                "broker_name": self.adapter_name,
-                "broker_close_order_id": broker_response.get("id"),
-                "broker_close_status": str(broker_response.get("status") or "").strip().lower() or None,
-            },
+            close_updates=close_updates,
         )
         if closed_trade is None:
             raise PaperLedgerPersistenceError(
@@ -525,8 +618,8 @@ class AlpacaPaperExecutionAdapter(ExecutionAdapter):
         return ClosePositionResult(
             closed_trade=enriched_trade,
             broker_name=self.adapter_name,
-            broker_order_id=str(broker_response.get("id") or "").strip() or None,
-            broker_status=str(broker_response.get("status") or "").strip().lower() or None,
+            broker_order_id=broker_close_order_id,
+            broker_status=broker_status or None,
             broker_response=broker_response,
         )
 

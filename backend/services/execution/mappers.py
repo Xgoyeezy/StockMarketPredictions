@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from backend.schemas import OpenTradeRequest, ReplaceOrderRequest
@@ -62,6 +63,21 @@ def _coerce_fractional_number(value: Any) -> float | None:
         return None
 
 
+def format_alpaca_limit_price(value: Any, *, instrument_type: str) -> str | None:
+    if value in (None, "", "nan"):
+        return None
+    try:
+        price = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if price <= 0:
+        return None
+    normalized_instrument = str(instrument_type or "equity").strip().lower()
+    increment = Decimal("0.01") if normalized_instrument == "listed_option" or price >= Decimal("1") else Decimal("0.0001")
+    rounded = price.quantize(increment, rounding=ROUND_HALF_UP)
+    return format(rounded.normalize(), "f")
+
+
 def map_time_in_force_to_alpaca(time_in_force: str) -> str:
     normalized = str(time_in_force or "").strip().lower()
     if normalized in {"day", "day_ext"}:
@@ -107,10 +123,10 @@ def build_alpaca_equity_order_payload(
         payload["client_order_id"] = client_order_id
 
     if normalized_order_type == "limit":
-        limit_price = _coerce_fractional_number(getattr(request, "limit_price", None))
-        if limit_price is None or limit_price <= 0:
+        limit_price = format_alpaca_limit_price(getattr(request, "limit_price", None), instrument_type="equity")
+        if limit_price is None:
             raise ValidationServiceError("A positive limit price is required for Alpaca paper limit orders.")
-        payload["limit_price"] = f"{limit_price:.4f}".rstrip("0").rstrip(".")
+        payload["limit_price"] = limit_price
 
     return payload
 
@@ -179,10 +195,13 @@ def build_alpaca_option_order_payload(
         payload["client_order_id"] = client_order_id
 
     if normalized_order_type == "limit":
-        limit_price = _coerce_fractional_number(getattr(request, "limit_price", None))
-        if limit_price is None or limit_price <= 0:
+        limit_price = format_alpaca_limit_price(
+            getattr(request, "limit_price", None),
+            instrument_type="listed_option",
+        )
+        if limit_price is None:
             raise ValidationServiceError("A positive limit price is required for Alpaca option limit orders.")
-        payload["limit_price"] = f"{limit_price:.4f}".rstrip("0").rstrip(".")
+        payload["limit_price"] = limit_price
 
     return payload
 

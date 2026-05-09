@@ -723,7 +723,7 @@ const lockedBrokerageContext = resolveAccountProfileTradingContext({
 })
 
 assert.equal(lockedBrokerageContext.effectiveAccountTargetType, 'linked_client')
-assert.equal(lockedBrokerageContext.profileTradingLockedReason.includes('Bind a primary brokerage account'), true)
+assert.equal(lockedBrokerageContext.profileTradingLockedReason.includes('Bind a primary linked account'), true)
 assert.equal(lockedBrokerageContext.executionRouteOverride.locked, true)
 
 const boundBrokerageContext = resolveAccountProfileTradingContext({
@@ -733,7 +733,7 @@ const boundBrokerageContext = resolveAccountProfileTradingContext({
   linkedAccounts: [
     {
       id: 'acct-1',
-      label: 'Brokerage Main',
+      label: 'Linked Main',
       connection_status: 'connected',
       token_health: 'healthy',
       relink_required: false,
@@ -746,24 +746,27 @@ assert.equal(boundBrokerageContext.effectiveAccountTargetType, 'linked_client')
 assert.equal(boundBrokerageContext.effectiveLinkedAccountId, 'acct-1')
 assert.equal(boundBrokerageContext.accountTargetLocked, true)
 assert.equal(boundBrokerageContext.profileTradingLockedReason, '')
-assert.equal(boundBrokerageContext.executionRouteOverride.label, 'Brokerage account')
+assert.equal(boundBrokerageContext.executionRouteOverride.label, 'Linked account')
 assert.equal(extendedHoursFreshness.status, 'stale')
 
 const publicConnectPage = getPublicSitePage('/connect')
 assert.equal(publicConnectPage.key, 'connect')
-assert.equal(publicConnectPage.title, 'Personal Connection Notes')
+assert.equal(publicConnectPage.title, 'Customer Access')
 
 const publicTermsPage = getPublicSitePage('/terms')
 assert.equal(publicTermsPage.key, 'terms')
+assert.equal(publicTermsPage.eyebrow, 'Customer terms')
 
 const publicPrivacyPage = getPublicSitePage('/privacy')
 assert.equal(publicPrivacyPage.key, 'privacy')
+assert.equal(publicPrivacyPage.eyebrow, 'Customer privacy')
 
 const publicBranding = getPublicSiteBranding()
-assert.equal(publicBranding.name, 'Personal Trading Research Desk')
+assert.equal(publicBranding.name, 'Quant Evidence OS')
 
 const publicContact = getPublicSiteContact()
 assert.equal(publicContact.type, 'placeholder')
+assert.equal(publicContact.description, 'Customer support')
 
 const weekendFreshness = buildSessionAwareFreshness({
   freshness: {

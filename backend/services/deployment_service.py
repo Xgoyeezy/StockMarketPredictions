@@ -29,6 +29,8 @@ RUNBOOK_FILES: tuple[tuple[str, str], ...] = (
 )
 
 BACKUP_STATUS_PATH = Path("runtime-logs/backup-status.json")
+TRADE_AUTOMATION_READINESS_STATUS_PATH = Path("runtime-logs/trade-automation-readiness.json")
+TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS = 5000.0
 BACKUP_MANIFEST_REQUIRED_FIELDS: tuple[tuple[str, str], ...] = (
     ("provider", "Backup provider"),
     ("schedule", "Backup schedule"),
@@ -118,7 +120,7 @@ def _build_environment_snapshot() -> dict[str, Any]:
     auth_session_secret = str(getattr(settings, "auth_session_secret", _DEFAULT_AUTH_SESSION_SECRET) or "").strip()
     auth_state_secret = str(getattr(settings, "auth_state_secret", _DEFAULT_AUTH_STATE_SECRET) or "").strip()
     api_token_salt = str(getattr(settings, "api_token_salt", _DEFAULT_API_TOKEN_SALT) or "").strip()
-    market_data_provider = str(getattr(settings, "market_data_provider", "alpaca") or "alpaca").strip().lower()
+    market_data_provider = str(getattr(settings, "market_data_provider", "free_delayed") or "free_delayed").strip().lower()
     alpaca_api_key_id = str(getattr(settings, "alpaca_api_key_id", "") or "").strip()
     alpaca_api_secret_key = str(getattr(settings, "alpaca_api_secret_key", "") or "").strip()
     stripe_publishable_key = str(getattr(settings, "stripe_publishable_key", "") or "").strip()
@@ -222,14 +224,17 @@ def _build_environment_snapshot() -> dict[str, Any]:
             blocking=not (api_token_salt and api_token_salt != _DEFAULT_API_TOKEN_SALT),
         )
     )
-    market_ready = market_data_provider != "alpaca" or (alpaca_api_key_id and alpaca_api_secret_key)
+    free_delayed_market_data = market_data_provider in {"free_delayed", "yfinance", "delayed"}
+    market_ready = free_delayed_market_data or market_data_provider != "alpaca" or (alpaca_api_key_id and alpaca_api_secret_key)
     checks.append(
         _environment_check(
             "market_data",
             "Market-data credentials",
             status="ready" if market_ready else "blocked",
             message=(
-                f"{market_data_provider} credentials are configured."
+                "Free/delayed market data is the active internal-paper research lane."
+                if free_delayed_market_data
+                else f"{market_data_provider} credentials are configured."
                 if market_ready
                 else "Alpaca API credentials are not configured."
             ),
@@ -400,30 +405,115 @@ def _load_backup_status(project_root: Path) -> tuple[dict[str, Any], bool]:
     return status, True
 
 
+def _load_trade_automation_route_status(project_root: Path) -> dict[str, Any]:
+    status_path = project_root / TRADE_AUTOMATION_READINESS_STATUS_PATH
+    if not status_path.exists():
+        return {
+            "status": "missing",
+            "ready": False,
+            "checked_at": None,
+            "status_path": str(TRADE_AUTOMATION_READINESS_STATUS_PATH).replace("\\", "/"),
+            "latency_ms": None,
+            "target_latency_ms": TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS,
+            "blockers": ["Trade Automation readiness smoke has not been recorded."],
+            "warnings": [],
+            "checklist": [
+                {"key": "runtime_status_recorded", "label": "Runtime readiness status recorded", "ready": False},
+                {"key": "trade_automation_route", "label": "Trade Automation route loads", "ready": False},
+                {"key": "trade_automation_latency", "label": "Trade Automation route inside latency target", "ready": False},
+            ],
+        }
+    try:
+        raw = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "status": "error",
+            "ready": False,
+            "checked_at": None,
+            "status_path": str(TRADE_AUTOMATION_READINESS_STATUS_PATH).replace("\\", "/"),
+            "latency_ms": None,
+            "target_latency_ms": TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS,
+            "blockers": ["Trade Automation readiness smoke status could not be parsed."],
+            "warnings": [],
+            "checklist": [
+                {"key": "runtime_status_recorded", "label": "Runtime readiness status recorded", "ready": False},
+                {"key": "trade_automation_route", "label": "Trade Automation route loads", "ready": False},
+                {"key": "trade_automation_latency", "label": "Trade Automation route inside latency target", "ready": False},
+            ],
+        }
+
+    status = dict(raw)
+    blockers = [str(item) for item in list(status.get("blockers") or []) if str(item).strip()]
+    warnings = [str(item) for item in list(status.get("warnings") or []) if str(item).strip()]
+    route_ok = bool(status.get("trade_automation_ready")) and int(status.get("trade_automation_status_code") or 0) < 400
+    latency_ms = status.get("trade_automation_latency_ms")
+    try:
+        latency_value = float(latency_ms)
+    except (TypeError, ValueError):
+        latency_value = None
+    latency_ok = latency_value is not None and latency_value <= TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS
+    backend_ok = bool(status.get("backend_health_ok"))
+    frontend_ok = bool(status.get("frontend_health_ok", True))
+
+    if not backend_ok:
+        blockers.append("Backend health check failed during readiness smoke.")
+    if not route_ok:
+        blockers.append("Trade Automation route failed during readiness smoke.")
+    if latency_value is None:
+        blockers.append("Trade Automation route latency was not measured.")
+    elif not latency_ok:
+        blockers.append(
+            f"Trade Automation route latency {latency_value:.0f}ms exceeds target {TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS:.0f}ms."
+        )
+    if not frontend_ok:
+        warnings.append("Frontend health check failed or was unreachable during readiness smoke.")
+
+    status["status_path"] = str(TRADE_AUTOMATION_READINESS_STATUS_PATH).replace("\\", "/")
+    status["target_latency_ms"] = TRADE_AUTOMATION_ROUTE_LATENCY_TARGET_MS
+    status["latency_ms"] = latency_value
+    status["ready"] = not blockers
+    status["status"] = "ready" if not blockers and not warnings else "warning" if not blockers else "blocked"
+    status["blockers"] = blockers
+    status["warnings"] = warnings
+    status["checklist"] = [
+        {"key": "runtime_status_recorded", "label": "Runtime readiness status recorded", "ready": True},
+        {"key": "backend_health", "label": "Backend health is OK", "ready": backend_ok},
+        {"key": "frontend_health", "label": "Frontend health is reachable", "ready": frontend_ok},
+        {"key": "trade_automation_route", "label": "Trade Automation route loads", "ready": route_ok},
+        {"key": "trade_automation_latency", "label": "Trade Automation route inside latency target", "ready": latency_ok},
+    ]
+    return status
+
+
 def get_deployment_readiness_snapshot(project_root: Path | None = None) -> dict[str, Any]:
     root = project_root or PROJECT_ROOT
     deployment_items = [_build_file_snapshot(root, path, label) for path, label in DEPLOYMENT_ARTIFACTS]
     runbook_items = [_build_file_snapshot(root, path, label) for path, label in RUNBOOK_FILES]
     backup_status, backup_manifest_exists = _load_backup_status(root)
+    trade_automation_route_status = _load_trade_automation_route_status(root)
     environment_snapshot = _build_environment_snapshot()
 
     backup_checks = backup_status.get("checklist", [])
+    trade_automation_checks = trade_automation_route_status.get("checklist", [])
     environment_checks = list(environment_snapshot.get("checks") or [])
-    total_checks = len(deployment_items) + len(runbook_items) + len(backup_checks) + len(environment_checks)
+    total_checks = (
+        len(deployment_items)
+        + len(runbook_items)
+        + len(backup_checks)
+        + len(trade_automation_checks)
+        + len(environment_checks)
+    )
     ready_checks = sum(1 for item in deployment_items if item["exists"])
     ready_checks += sum(1 for item in runbook_items if item["exists"])
     ready_checks += sum(1 for item in backup_checks if item["ready"])
+    ready_checks += sum(1 for item in trade_automation_checks if item["ready"])
     ready_checks += sum(1 for item in environment_checks if item.get("ready"))
 
     blockers: list[str] = []
     warnings: list[str] = list(backup_status.get("warnings") or [])
-    operator_local_mode = _is_operator_local_profile()
 
     def add_backup_issue(message: str) -> None:
-        if operator_local_mode:
-            warnings.append(message)
-        else:
-            blockers.append(message)
+        blockers.append(message)
 
     if any(not item["exists"] for item in deployment_items):
         blockers.append("Deployment artifacts are incomplete.")
@@ -437,6 +527,8 @@ def get_deployment_readiness_snapshot(project_root: Path | None = None) -> dict[
         add_backup_issue("No successful backup has been recorded yet.")
     if not backup_status.get("restore_tested_at"):
         add_backup_issue("Restore drill has not been recorded yet.")
+    blockers.extend(trade_automation_route_status.get("blockers", []))
+    warnings.extend(trade_automation_route_status.get("warnings", []))
     blockers.extend(environment_snapshot.get("summary", {}).get("blockers", []))
     warnings.extend(environment_snapshot.get("summary", {}).get("warnings", []))
 
@@ -463,6 +555,7 @@ def get_deployment_readiness_snapshot(project_root: Path | None = None) -> dict[
         },
         "backups": backup_status,
         "environment": environment_snapshot,
+        "trade_automation_route_status": trade_automation_route_status,
         "runbooks": {
             "items": runbook_items,
             "count": len(runbook_items),

@@ -978,7 +978,7 @@ export default function WatchlistPage() {
             label: 'Best next move',
             value: tradingStyle === 'intraday' ? 'Promote only the names that still fit the live tape into compare or the desk.' : 'Promote only the clearest rows into compare or the desk.',
             detail: tradingStyle === 'intraday'
-              ? `Start with the ${intradayPresetProfile.shortLabel.toLowerCase()} queue, then confirm the leaders still survive catalyst pressure, fill quality, and same-session route pressure.`
+              ? `Start with the ${intradayPresetProfile.shortLabel.toLowerCase()} queue, then confirm the leaders still survive catalyst pressure, fill quality, and same-session execution evidence.`
               : 'Start with "Promote first" names, then confirm they still survive calendar pressure and fill quality.',
             tone: 'positive',
             actionLabel: 'Open top board in compare',
@@ -1032,7 +1032,7 @@ export default function WatchlistPage() {
           title={tradingStyle === 'intraday' ? 'Stock snapshot board' : 'Stock snapshot board'}
           subtitle={
             tradingStyle === 'intraday'
-              ? 'A faster research view for the top ranked names, with score pillars, route pressure, and target/stop path in one card.'
+              ? 'A faster research view for the top ranked names, with score pillars, execution evidence, and target/stop path in one card.'
               : 'A faster research view for the top ranked names, with score pillars, event pressure, and target/stop path in one card.'
           }
         >

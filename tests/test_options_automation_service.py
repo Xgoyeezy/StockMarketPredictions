@@ -38,11 +38,17 @@ def _test_settings(**overrides):
         "options_scan_candidate_limit": 30,
         "options_max_premium_risk_pct": 1.0,
         "options_max_open_positions": 4,
+        "options_broker_provider": "alpaca",
+        "options_data_provider": "alpaca",
         "alpaca_api_key_id": "paper-key",
         "alpaca_api_secret_key": "paper-secret",
         "alpaca_use_sandbox": False,
         "alpaca_stock_feed": "iex",
         "alpaca_market_data_request_timeout_seconds": 10,
+        "tradier_paper_token": "",
+        "tradier_paper_account_id": "",
+        "tradier_live_token": "",
+        "tradier_live_account_id": "",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -52,6 +58,7 @@ class OptionsAutomationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         import backend.models.saas  # noqa: F401
         from backend.core.database import Base
+        from backend.services import options_automation_service
         from backend.services import tenant_service
 
         self.engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -62,6 +69,9 @@ class OptionsAutomationServiceTests(unittest.TestCase):
         self.addCleanup(self.engine.dispose)
         self.addCleanup(self.db.close)
         self.addCleanup(self._export_tmpdir.cleanup)
+        self._settings_patcher = patch.object(options_automation_service, "settings", _test_settings())
+        self._settings_patcher.start()
+        self.addCleanup(self._settings_patcher.stop)
 
         fake_settings = SimpleNamespace(
             demo_tenant_slug="alpha-desk",
@@ -425,6 +435,51 @@ class OptionsAutomationServiceTests(unittest.TestCase):
             snapshot["validation_artifact"]["next_step"],
             "Keep collecting unchanged until 5 clean scheduled paper-option lifecycles are recorded.",
         )
+
+    def test_snapshot_ignores_previous_alpaca_scan_when_tradier_is_active(self) -> None:
+        from backend.services import options_automation_service as service
+
+        self.db.add(
+            service.OptionAutomationScanRun(
+                tenant_id=self.tenant.id,
+                status="blocked",
+                feed="opra",
+                scan_interval_seconds=30,
+                ticker_count=1,
+                candidate_count=12,
+                ready_candidate_count=0,
+                blocked_reason="No option contracts passed the current price, liquidity, entitlement, and risk gates.",
+                requested_tickers_json={"tickers": ["SPY"]},
+                candidates_json={"items": []},
+                summary_json={
+                    "data_source": "alpaca_options_chain",
+                    "feed": "opra",
+                    "options_data_provider": "alpaca",
+                    "options_broker_provider": "alpaca",
+                },
+            )
+        )
+        self.db.commit()
+
+        tradier_settings = _test_settings(
+            options_broker_provider="tradier",
+            options_data_provider="tradier",
+            tradier_live_token="",
+            tradier_live_account_id="",
+            tradier_paper_token="",
+            tradier_paper_account_id="",
+        )
+        with patch.object(service, "settings", tradier_settings):
+            snapshot = service.get_options_automation_snapshot(self.db, current_user=self.current_user)
+
+        self.assertEqual(snapshot["feed"], "tradier_realtime")
+        self.assertEqual(snapshot["data_source"], "tradier_options_chain")
+        self.assertEqual(snapshot["summary"]["options_data_provider"], "tradier")
+        self.assertEqual(snapshot["summary"]["options_broker_provider"], "tradier")
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertEqual(snapshot["validation_artifact"]["options_data_status"], "credentials_missing")
+        self.assertEqual(snapshot["validation_artifact"]["options_data_provider"], "tradier")
+        self.assertEqual(snapshot["previous_scan"]["feed"], "opra")
 
     def test_refresh_positions_persists_sell_ready_snapshot(self) -> None:
         from backend.services import options_automation_service as service

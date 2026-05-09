@@ -214,7 +214,7 @@ def health() -> ApiEnvelope:
 
 
 @router.get("/healthz", include_in_schema=False)
-def healthz() -> JSONResponse:
+async def healthz() -> JSONResponse:
     try:
         health_snapshot = get_health()
     except Exception as exc:  # pragma: no cover - defensive guard for deployment probes
@@ -241,7 +241,7 @@ def healthz() -> JSONResponse:
 
 
 @router.get("/readyz", include_in_schema=False)
-def readyz() -> JSONResponse:
+async def readyz() -> JSONResponse:
     try:
         readiness_snapshot = _get_cached_readiness_snapshot()
     except Exception as exc:  # pragma: no cover - defensive guard for deployment probes

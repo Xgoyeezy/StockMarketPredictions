@@ -24,9 +24,9 @@ export function buildTradeAutomationForm(snapshot) {
     interval: settings.interval || '5m',
     horizon: String(settings.horizon ?? 5),
     cycleIntervalSeconds: String(settings.cycle_interval_seconds ?? 60),
-    cooldownMinutes: String(settings.cooldown_minutes ?? 20),
-    accountSize: String(snapshot?.effective_funds ?? settings.account_size ?? 10000),
-    actualFunds: String(snapshot?.actual_funds ?? settings.account_size ?? 10000),
+    cooldownMinutes: String(settings.cooldown_minutes ?? 5),
+    accountSize: String(snapshot?.effective_funds ?? settings.account_size ?? 100000),
+    actualFunds: String(snapshot?.actual_funds ?? settings.account_size ?? 100000),
     effectiveFundsMultiplier: String(settings.effective_funds_multiplier ?? snapshot?.effective_funds_multiplier ?? 1.0),
     riskPercent: String(settings.risk_percent ?? 0.50),
     autoTradeEquities: settings.auto_trade_equities !== false,
@@ -73,6 +73,27 @@ export function buildTradeAutomationForm(snapshot) {
     dailyProfitTargetDollars: String(settings.daily_profit_target_dollars ?? 1000),
     dailyLossBudgetPct: String(settings.daily_loss_budget_pct ?? 0.5),
     dailyObjectiveApplyToLive: Boolean(settings.daily_objective_apply_to_live),
+    objectiveTimeframe: settings.objective_timeframe || 'weekly',
+    weeklyProfitTargetMinPct: String(settings.weekly_profit_target_min_pct ?? 1.0),
+    weeklyProfitTargetMaxPct: String(settings.weekly_profit_target_max_pct ?? 2.0),
+    weeklyProfitTargetMinDollars: String(settings.weekly_profit_target_min_dollars ?? 1000),
+    weeklyProfitTargetMaxDollars: String(settings.weekly_profit_target_max_dollars ?? 2000),
+    paperEvidenceCollectionEnabled: settings.paper_evidence_collection_enabled !== false,
+    paperEvidenceAutoReviewEnabled: settings.paper_evidence_auto_review_enabled !== false,
+    paperEvidenceRequireEdgeTelemetry: settings.paper_evidence_require_edge_telemetry !== false,
+    paperEvidenceRequireSpreadTelemetry: settings.paper_evidence_require_spread_telemetry !== false,
+    replayLabEnabled: settings.replay_lab_enabled !== false,
+    replayLabAutoReviewEnabled: settings.replay_lab_auto_review_enabled !== false,
+    replayLabWindowSessions: String(settings.replay_lab_window_sessions ?? 20),
+    replayLabMinTrades: String(settings.replay_lab_min_trades ?? 10),
+    replayLabApplyToLive: Boolean(settings.replay_lab_apply_to_live),
+    replayLabMaxRecommendedSettingChanges: String(settings.replay_lab_max_recommended_setting_changes ?? 3),
+    transactionCostCalibrationEnabled: settings.transaction_cost_calibration_enabled !== false,
+    transactionCostCalibrationAutoReviewEnabled: settings.transaction_cost_calibration_auto_review_enabled !== false,
+    transactionCostCalibrationApplyToLive: Boolean(settings.transaction_cost_calibration_apply_to_live),
+    transactionCostCalibrationMinSamples: String(settings.transaction_cost_calibration_min_samples ?? 20),
+    transactionCostCalibrationStaleAfterSessions: String(settings.transaction_cost_calibration_stale_after_sessions ?? 5),
+    transactionCostCalibrationMaxCandidatePenalty: String(settings.transaction_cost_calibration_max_candidate_penalty ?? 20),
     lossContainmentEnabled: settings.loss_containment_enabled !== false,
     lossContainmentApplyToLive: Boolean(settings.loss_containment_apply_to_live),
     lossContainmentAutoClosePaper: settings.loss_containment_auto_close_paper !== false,
@@ -250,6 +271,27 @@ export function buildTradeAutomationPayload(form) {
     daily_profit_target_dollars: Number(form.dailyProfitTargetDollars || 1000),
     daily_loss_budget_pct: Number(form.dailyLossBudgetPct || 0.5),
     daily_objective_apply_to_live: Boolean(form.dailyObjectiveApplyToLive),
+    objective_timeframe: String(form.objectiveTimeframe || 'weekly').trim().toLowerCase(),
+    weekly_profit_target_min_pct: Number(form.weeklyProfitTargetMinPct || 1.0),
+    weekly_profit_target_max_pct: Number(form.weeklyProfitTargetMaxPct || 2.0),
+    weekly_profit_target_min_dollars: Number(form.weeklyProfitTargetMinDollars || 1000),
+    weekly_profit_target_max_dollars: Number(form.weeklyProfitTargetMaxDollars || 2000),
+    paper_evidence_collection_enabled: Boolean(form.paperEvidenceCollectionEnabled),
+    paper_evidence_auto_review_enabled: Boolean(form.paperEvidenceAutoReviewEnabled),
+    paper_evidence_require_edge_telemetry: Boolean(form.paperEvidenceRequireEdgeTelemetry),
+    paper_evidence_require_spread_telemetry: Boolean(form.paperEvidenceRequireSpreadTelemetry),
+    replay_lab_enabled: Boolean(form.replayLabEnabled),
+    replay_lab_auto_review_enabled: Boolean(form.replayLabAutoReviewEnabled),
+    replay_lab_window_sessions: Number(form.replayLabWindowSessions || 20),
+    replay_lab_min_trades: Number(form.replayLabMinTrades || 10),
+    replay_lab_apply_to_live: Boolean(form.replayLabApplyToLive),
+    replay_lab_max_recommended_setting_changes: Number(form.replayLabMaxRecommendedSettingChanges || 3),
+    transaction_cost_calibration_enabled: Boolean(form.transactionCostCalibrationEnabled),
+    transaction_cost_calibration_auto_review_enabled: Boolean(form.transactionCostCalibrationAutoReviewEnabled),
+    transaction_cost_calibration_apply_to_live: Boolean(form.transactionCostCalibrationApplyToLive),
+    transaction_cost_calibration_min_samples: Number(form.transactionCostCalibrationMinSamples || 20),
+    transaction_cost_calibration_stale_after_sessions: Number(form.transactionCostCalibrationStaleAfterSessions || 5),
+    transaction_cost_calibration_max_candidate_penalty: Number(form.transactionCostCalibrationMaxCandidatePenalty || 20),
     loss_containment_enabled: Boolean(form.lossContainmentEnabled),
     loss_containment_apply_to_live: Boolean(form.lossContainmentApplyToLive),
     loss_containment_auto_close_paper: Boolean(form.lossContainmentAutoClosePaper),
@@ -377,7 +419,7 @@ export function buildTradeAutomationPresetPayload(key, snapshot) {
     interval: '5m',
     horizon: 5,
     cycle_interval_seconds: 60,
-    cooldown_minutes: 20,
+    cooldown_minutes: 5,
     effective_funds_multiplier: toNumber(snapshot?.settings?.effective_funds_multiplier, 1.0),
     risk_percent: 0.50,
     auto_trade_equities: true,
@@ -419,11 +461,22 @@ export function buildTradeAutomationPresetPayload(key, snapshot) {
     accuracy_calibration_min_samples: Number(currentSettings.accuracy_calibration_min_samples ?? 20),
     accuracy_calibration_stale_after_sessions: Number(currentSettings.accuracy_calibration_stale_after_sessions ?? 5),
     accuracy_calibration_max_candidate_penalty: Number(currentSettings.accuracy_calibration_max_candidate_penalty ?? 25),
+    transaction_cost_calibration_enabled: currentSettings.transaction_cost_calibration_enabled !== false,
+    transaction_cost_calibration_auto_review_enabled: currentSettings.transaction_cost_calibration_auto_review_enabled !== false,
+    transaction_cost_calibration_apply_to_live: Boolean(currentSettings.transaction_cost_calibration_apply_to_live),
+    transaction_cost_calibration_min_samples: Number(currentSettings.transaction_cost_calibration_min_samples ?? 20),
+    transaction_cost_calibration_stale_after_sessions: Number(currentSettings.transaction_cost_calibration_stale_after_sessions ?? 5),
+    transaction_cost_calibration_max_candidate_penalty: Number(currentSettings.transaction_cost_calibration_max_candidate_penalty ?? 20),
     daily_objective_enabled: currentSettings.daily_objective_enabled !== false,
     daily_profit_target_pct: Number(currentSettings.daily_profit_target_pct ?? 1.0),
     daily_profit_target_dollars: Number(currentSettings.daily_profit_target_dollars ?? 1000),
     daily_loss_budget_pct: Number(currentSettings.daily_loss_budget_pct ?? 0.5),
     daily_objective_apply_to_live: Boolean(currentSettings.daily_objective_apply_to_live),
+    objective_timeframe: currentSettings.objective_timeframe || 'weekly',
+    weekly_profit_target_min_pct: Number(currentSettings.weekly_profit_target_min_pct ?? 1.0),
+    weekly_profit_target_max_pct: Number(currentSettings.weekly_profit_target_max_pct ?? 2.0),
+    weekly_profit_target_min_dollars: Number(currentSettings.weekly_profit_target_min_dollars ?? 1000),
+    weekly_profit_target_max_dollars: Number(currentSettings.weekly_profit_target_max_dollars ?? 2000),
     loss_containment_enabled: currentSettings.loss_containment_enabled !== false,
     loss_containment_apply_to_live: Boolean(currentSettings.loss_containment_apply_to_live),
     loss_containment_auto_close_paper: currentSettings.loss_containment_auto_close_paper !== false,
@@ -518,7 +571,7 @@ export function buildTradeAutomationPresetPayload(key, snapshot) {
     return {
       ...base,
       execution_intent: 'broker_paper',
-      cooldown_minutes: 45,
+      cooldown_minutes: 5,
       risk_percent: 0.25,
       max_open_positions: 2,
       max_notional_per_trade: Math.max(effectiveFunds * 0.06, 100.0),
@@ -535,7 +588,7 @@ export function buildTradeAutomationPresetPayload(key, snapshot) {
     return {
       ...base,
       execution_intent: 'broker_paper',
-      cooldown_minutes: 60,
+      cooldown_minutes: 5,
       risk_percent: 0.15,
       max_open_positions: 1,
       max_notional_per_trade: Math.max(effectiveFunds * 0.04, 100.0),
@@ -607,7 +660,7 @@ export function buildValidationSampleModel(snapshot = {}) {
     return {
       tone: 'warning',
       title: 'Validation sample: Collecting sample',
-      description: `Current-route evidence is still thin at ${fillCount} directional fills and ${closeCount} closed trades. Keep broker-live locked while paper collection runs.`,
+      description: `Current-route evidence is still thin at ${fillCount} directional fills and ${closeCount} closed trades. Keep Alpaca live locked while paper collection runs.`,
       metrics: [
         { label: 'Current-route fills', value: String(fillCount) },
         { label: 'Current-route closes', value: String(closeCount) },
@@ -1077,7 +1130,7 @@ export function buildPaperCanaryModel(snapshot = {}) {
           : 'warning'
   const description =
     status === 'ready'
-      ? `${cleanCount}/${requiredClean} clean paper sessions are ready for broker-live review.`
+      ? `${cleanCount}/${requiredClean} clean paper sessions are ready for Alpaca live review.`
       : status === 'blocked'
         ? `${blockers.length} blocker${blockers.length === 1 ? '' : 's'} must clear before promotion review.`
         : status === 'collecting'
@@ -1124,6 +1177,124 @@ export function buildPaperCanaryModel(snapshot = {}) {
       { label: 'Last scheduled', value: lastScheduledRunAt ? new Date(lastScheduledRunAt).toLocaleString() : '--' },
       { label: 'Note', value: canary.related_note_id || canary.note_id ? 'Linked' : '--' },
       { label: 'Manual action', value: canary.manual_action_required ? 'Required' : 'No' },
+    ],
+  }
+}
+
+export function buildReplayLabModel(snapshot = {}) {
+  const replay = snapshot?.replay_lab || {}
+  const status = String(replay.status || 'not_run').trim().toLowerCase()
+  const blockers = Array.isArray(replay.blockers) ? replay.blockers : []
+  const warnings = Array.isArray(replay.warnings) ? replay.warnings : []
+  const recommendations = Array.isArray(replay.recommendations) ? replay.recommendations : []
+  const stressResults = Array.isArray(replay.stress_results) ? replay.stress_results : []
+  const sensitivity = Array.isArray(replay.settings_sensitivity) ? replay.settings_sensitivity : []
+  const tone =
+    replay.enabled === false
+      ? 'neutral'
+      : status === 'clean'
+        ? 'positive'
+        : status === 'blocked'
+          ? 'negative'
+          : status === 'warning' || status === 'collecting'
+            ? 'warning'
+            : 'neutral'
+  const description =
+    status === 'clean'
+      ? `Replay is clean on ${toNumber(replay.sample_count, 0)} paper trade(s); recommendations remain advisory.`
+      : status === 'blocked'
+        ? `${blockers.length} replay blocker${blockers.length === 1 ? '' : 's'} prevent capacity recommendations.`
+        : status === 'collecting'
+          ? `${toNumber(replay.sample_count, 0)}/${toNumber(replay.min_trades, 10)} trades collected for what-if replay.`
+          : 'Run the replay lab after paper sessions create closed-trade and candidate history.'
+  return {
+    status,
+    tone,
+    title: replay.enabled === false ? 'Replay lab disabled' : `Replay lab: ${humanizeStatus(status, 'Not run')}`,
+    description,
+    enabled: replay.enabled !== false,
+    autoReviewEnabled: replay.auto_review_enabled !== false,
+    nextEligibleRunAt: replay.next_eligible_run_at || null,
+    relatedNoteId: replay.related_note_id || replay.note_id || null,
+    lastRunAt: replay.evaluated_at || replay.last_run_at || null,
+    blockers,
+    warnings,
+    recommendations,
+    stressResults,
+    sensitivity,
+    bestPatterns: Array.isArray(replay.best_patterns) ? replay.best_patterns : [],
+    weakPatterns: Array.isArray(replay.weak_patterns) ? replay.weak_patterns : [],
+    metrics: [
+      { label: 'Status', value: humanizeStatus(status, 'Not run'), tone },
+      { label: 'Sample', value: `${toNumber(replay.sample_count, 0)}/${toNumber(replay.min_trades, 10)}`, tone: toNumber(replay.sample_count, 0) >= toNumber(replay.min_trades, 10) ? 'positive' : 'warning' },
+      { label: 'Baseline PnL', value: `$${toNumber(replay.baseline_pnl, 0).toFixed(2)}`, tone: toNumber(replay.baseline_pnl, 0) >= 0 ? 'positive' : 'negative' },
+      { label: 'Replay PnL', value: `$${toNumber(replay.replay_pnl, 0).toFixed(2)}`, tone: toNumber(replay.replay_pnl, 0) >= toNumber(replay.baseline_pnl, 0) ? 'positive' : 'warning' },
+      { label: 'Target hit', value: `${(toNumber(replay.target_hit_rate, 0) * 100).toFixed(0)}%` },
+      { label: 'Max drawdown', value: `$${toNumber(replay.max_drawdown, 0).toFixed(2)}`, tone: toNumber(replay.max_drawdown, 0) > 0 ? 'warning' : 'neutral' },
+      { label: 'Loss breaches', value: String(toNumber(replay.loss_budget_breaches, 0)), tone: toNumber(replay.loss_budget_breaches, 0) ? 'negative' : 'positive' },
+      { label: 'Stress failures', value: String(stressResults.filter((item) => String(item?.status || '').toLowerCase() === 'failed').length), tone: stressResults.some((item) => String(item?.status || '').toLowerCase() === 'failed') ? 'negative' : 'positive' },
+      { label: 'Recommendations', value: String(recommendations.length), tone: recommendations.length ? 'warning' : 'neutral' },
+      { label: 'Note', value: replay.related_note_id || replay.note_id ? 'Linked' : '--' },
+    ],
+  }
+}
+
+export function buildTransactionCostCalibrationModel(snapshot = {}) {
+  const cost = snapshot?.transaction_cost_calibration || {}
+  const status = String(cost.status || 'not_run').trim().toLowerCase()
+  const blockers = Array.isArray(cost.blockers) ? cost.blockers : []
+  const warnings = Array.isArray(cost.warnings) ? cost.warnings : []
+  const recommendations = Array.isArray(cost.recommendations) ? cost.recommendations : []
+  const weakSymbols = Array.isArray(cost.weak_symbols) ? cost.weak_symbols : []
+  const weakSetups = Array.isArray(cost.weak_setups) ? cost.weak_setups : []
+  const liquidityBuckets = Array.isArray(cost.liquidity_bucket_reliability) ? cost.liquidity_bucket_reliability : []
+  const tone =
+    cost.enabled === false
+      ? 'neutral'
+      : status === 'calibrated'
+        ? 'positive'
+        : status === 'blocked'
+          ? 'negative'
+          : status === 'warning' || status === 'collecting'
+            ? 'warning'
+            : 'neutral'
+  const description =
+    status === 'calibrated'
+      ? `Cost model is calibrated on ${toNumber(cost.sample_count, 0)} paper fill(s).`
+      : status === 'blocked'
+        ? `${blockers.length || 1} cost blocker prevents safer capacity recommendations.`
+        : status === 'warning'
+          ? 'Observed costs are drifting above estimates; ranking penalties are active.'
+          : status === 'collecting'
+            ? `${toNumber(cost.sample_count, 0)}/${toNumber(cost.min_samples, 20)} fill samples collected.`
+            : 'Run cost calibration after paper fills record spread, slippage, and cost fields.'
+  return {
+    status,
+    tone,
+    title: cost.enabled === false ? 'Cost calibration disabled' : `Cost calibration: ${humanizeStatus(status, 'Not run')}`,
+    description,
+    enabled: cost.enabled !== false,
+    autoReviewEnabled: cost.auto_review_enabled !== false,
+    nextEligibleRunAt: cost.next_eligible_run_at || null,
+    relatedNoteId: cost.related_note_id || cost.note_id || null,
+    lastRunAt: cost.evaluated_at || cost.last_run_at || null,
+    blockers,
+    warnings,
+    recommendations,
+    weakSymbols,
+    weakSetups,
+    liquidityBuckets,
+    metrics: [
+      { label: 'Status', value: humanizeStatus(status, 'Not run'), tone },
+      { label: 'Sample', value: `${toNumber(cost.sample_count, 0)}/${toNumber(cost.min_samples, 20)}`, tone: toNumber(cost.sample_count, 0) >= toNumber(cost.min_samples, 20) ? 'positive' : 'warning' },
+      { label: 'Cost error', value: cost.estimated_vs_realized_cost_error_bps == null ? '--' : `${toNumber(cost.estimated_vs_realized_cost_error_bps, 0).toFixed(1)} bps`, tone: toNumber(cost.estimated_vs_realized_cost_error_bps, 0) > 25 ? 'negative' : toNumber(cost.estimated_vs_realized_cost_error_bps, 0) > 10 ? 'warning' : 'positive' },
+      { label: 'Slippage', value: cost.slippage_error_bps == null ? '--' : `${toNumber(cost.slippage_error_bps, 0).toFixed(1)} bps`, tone: toNumber(cost.slippage_error_bps, 0) > 25 ? 'negative' : toNumber(cost.slippage_error_bps, 0) > 10 ? 'warning' : 'positive' },
+      { label: 'Spread coverage', value: cost.spread_coverage?.pct == null ? '--' : `${toNumber(cost.spread_coverage.pct, 0).toFixed(0)}%`, tone: toNumber(cost.spread_coverage?.pct, 0) >= 90 ? 'positive' : 'warning' },
+      { label: 'Fill quality', value: humanizeStatus(cost.fill_quality, 'Unknown'), tone: String(cost.fill_quality || '').toLowerCase() === 'weak' ? 'negative' : String(cost.fill_quality || '').toLowerCase() === 'clean' ? 'positive' : 'warning' },
+      { label: 'Weak symbols', value: String(weakSymbols.length), tone: weakSymbols.length ? 'warning' : 'positive' },
+      { label: 'Weak setups', value: String(weakSetups.length), tone: weakSetups.length ? 'warning' : 'positive' },
+      { label: 'Recommendations', value: String(recommendations.length), tone: recommendations.length ? 'warning' : 'neutral' },
+      { label: 'Note', value: cost.related_note_id || cost.note_id ? 'Linked' : '--' },
     ],
   }
 }
@@ -1218,7 +1389,7 @@ export function buildLivePilotSoakModel(snapshot = {}) {
     status === 'approved'
       ? `Approval is fresh until ${soak.approval_expires_at ? new Date(soak.approval_expires_at).toLocaleString() : 'expiry'}. Run remains a separate manual action.`
       : status === 'completed'
-        ? 'One tiny broker-live limit order was submitted, canceled or closed, and local reconciliation was recorded.'
+      ? 'One tiny Alpaca live limit order was submitted, canceled or closed, and local reconciliation was recorded.'
         : status === 'blocked'
           ? `${blockers.length || 1} live pilot blocker${blockers.length === 1 ? '' : 's'} require manual review before any live order test.`
           : status === 'warning'
@@ -2541,6 +2712,8 @@ export function buildOptionAutomationDiagnostics(snapshot = {}, optionsSnapshot 
   const scheduledBlocker = String(snapshot?.last_options_blocker || runtime?.last_options_blocker || '').trim()
   const readinessState = String(optionsSnapshot?.readiness_state || validation?.readiness_state || '').trim()
   const readinessLabel = String(optionsSnapshot?.readiness_label || validation?.readiness_label || '').trim()
+  const optionsDataProvider = String(optionsSnapshot?.options_data_provider || validation?.options_data_provider || optionsSnapshot?.lifecycle?.options_data_provider || '').trim()
+  const optionsBrokerProvider = String(optionsSnapshot?.options_broker_provider || validation?.options_broker_provider || optionsSnapshot?.lifecycle?.options_broker_provider || '').trim()
   const status = String(snapshot?.option_scan_status || optionExecution.option_scan_status || '').trim()
   const blockReason = String(snapshot?.option_block_reason || optionExecution.option_block_reason || '').trim()
   const selectedContract = String(optionExecution.selected_contract || '').trim()
@@ -2554,6 +2727,8 @@ export function buildOptionAutomationDiagnostics(snapshot = {}, optionsSnapshot 
     !scanStatus &&
     !scheduledBlocker &&
     !readinessState &&
+    !optionsDataProvider &&
+    !optionsBrokerProvider &&
     !lastOptionEntry &&
     !lastOptionExit &&
     !lastOptionsCycleAt &&
@@ -2599,6 +2774,8 @@ export function buildOptionAutomationDiagnostics(snapshot = {}, optionsSnapshot 
               : 'Latest option automation quote diagnostics are available.'),
     metrics: [
       { label: 'Readiness', value: readinessLabel || humanizeStatus(readinessState, '--') },
+      { label: 'Options data', value: humanizeStatus(optionsDataProvider, '--') },
+      { label: 'Options broker', value: humanizeStatus(optionsBrokerProvider, '--') },
       { label: 'Clean cycles', value: `${cleanCycleCount}/${requiredCleanCycles || 5}` },
       { label: 'Contract', value: selectedContract || lastOptionEntry?.contract_symbol || '--' },
       { label: 'Scan', value: humanizeStatus(scanStatus || status, '--') },

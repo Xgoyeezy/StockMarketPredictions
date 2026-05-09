@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from
 import { FALLBACK_BOOTSTRAP, getBootstrap } from './api/client'
 import { appConfig } from './config/appConfig'
 import AppShell from './components/AppShell'
+import AdminAccessGate from './components/AdminAccessGate'
 import LoadingBlock from './components/LoadingBlock'
 import WorkflowStatusStrip from './components/WorkflowStatusStrip'
 import { ToastProvider } from './context/ToastContext'
@@ -35,12 +36,35 @@ const ReleasePage = lazy(() => import('./pages/ReleasePage'))
 const EducationPage = lazy(() => import('./pages/EducationPage'))
 const StrategyDesksPage = lazy(() => import('./pages/StrategyDesksPage'))
 const SystematicDeskPage = lazy(() => import('./pages/SystematicDeskPage'))
+const StrategiesPage = lazy(() => import('./pages/StrategiesPage'))
+const StrategyDetailPage = lazy(() => import('./pages/StrategyDetailPage'))
+const RiskCenterPage = lazy(() => import('./pages/RiskCenterPage'))
+const PortfolioRiskPage = lazy(() => import('./pages/PortfolioRiskPage'))
+const AuditReplayPage = lazy(() => import('./pages/AuditReplayPage'))
+const ExecutionQualityPage = lazy(() => import('./pages/ExecutionQualityPage'))
+const EvidenceEdgePage = lazy(() => import('./pages/EvidenceEdgePage'))
+const EvidenceOutcomesPage = lazy(() => import('./pages/EvidenceOutcomesPage'))
+const ForecastValidationPage = lazy(() => import('./pages/ForecastValidationPage'))
+const EvidenceRewardPage = lazy(() => import('./pages/EvidenceRewardPage'))
+const ProfessionalBenchmarkPage = lazy(() => import('./pages/ProfessionalBenchmarkPage'))
+const DataCompletenessPage = lazy(() => import('./pages/DataCompletenessPage'))
+const WalkForwardExperimentsPage = lazy(() => import('./pages/WalkForwardExperimentsPage'))
+const ResearchPromotionPage = lazy(() => import('./pages/ResearchPromotionPage'))
+const ScoreCalibrationPage = lazy(() => import('./pages/ScoreCalibrationPage'))
+const ShadowModePage = lazy(() => import('./pages/ShadowModePage'))
+const AICommitteePage = lazy(() => import('./pages/AICommitteePage'))
+const LiveTradingConsolePage = lazy(() => import('./pages/LiveTradingConsolePage'))
+const LiveStrategyControlPage = lazy(() => import('./pages/LiveStrategyControlPage'))
+const LiveOrderApprovalPage = lazy(() => import('./pages/LiveOrderApprovalPage'))
+const PricingPage = lazy(() => import('./pages/PricingPage'))
 const PublicInfoPage = lazy(() => import('./pages/PublicInfoPage'))
+const MarketingHomePage = lazy(() => import('./pages/MarketingHomePage'))
 
 function buildDocumentTitle(pathname, activeAccountProfile = 'personal_paper') {
   const titleMap = appConfig.personalMode
     ? {
         '/': 'Desk',
+        '/app': 'Desk',
         '/watchlist': 'Watchlist',
         '/compare': 'Compare',
         '/trades': 'Trades',
@@ -49,42 +73,83 @@ function buildDocumentTitle(pathname, activeAccountProfile = 'personal_paper') {
         '/alerts': 'Alerts',
         '/notes': 'Notes',
         '/education': 'Playbook',
+        '/strategies': 'Strategies',
+        '/risk': 'Risk Center',
+        '/portfolio-risk': 'Portfolio Risk',
+        '/audit': 'Audit Replay',
+        '/execution-quality': 'Execution Quality',
+        '/evidence-edge': 'Evidence Edge',
+        '/evidence-outcomes': 'Evidence Outcomes',
+        '/forecast-validation': 'Forecast Validation',
+        '/evidence-reward': 'Evidence Reward',
+        '/professional-benchmark': 'Professional Benchmark',
+        '/data-completeness': 'Data Completeness',
+        '/walk-forward': 'Walk-Forward Experiments',
+        '/research-promotion': 'Research Promotion',
+        '/score-calibration': 'Score Calibration',
+        '/shadow-mode': 'Human vs System Shadow',
+        '/ai-committee': 'AI Committee',
+        '/live': 'Live Console',
+        '/live/approvals': 'Live Approvals',
+        '/pricing': 'Pricing',
+        '/admin': 'Admin / Advanced',
         '/strategy-desks': 'Strategy desks',
         '/strategy-desks/systematic-equities': 'Systematic Equities',
-        '/settings': 'Desk setup',
+        '/settings': 'Settings',
         '/activity': 'Activity',
         '/workspaces': 'Workspaces',
         '/release': 'Release',
         '/login': 'Sign in',
       }
     : {
-        '/': 'Operations',
-        '/watchlist': 'Market watch',
-        '/compare': 'Analysis',
-        '/trades': 'Execution ops',
-        '/portfolio': 'Exposure',
+        '/': 'Desk',
+        '/app': 'Desk',
+        '/watchlist': 'Research',
+        '/compare': 'Compare',
+        '/trades': 'Trades',
+        '/portfolio': 'Portfolio',
         '/journal': 'Audit log',
         '/alerts': 'Alerts',
         '/notes': 'Runbook',
         '/education': 'Operator guide',
+        '/strategies': 'Strategies',
+        '/risk': 'Risk Center',
+        '/portfolio-risk': 'Portfolio Risk',
+        '/audit': 'Audit Replay',
+        '/execution-quality': 'Execution Quality',
+        '/evidence-edge': 'Evidence Edge',
+        '/evidence-outcomes': 'Evidence Outcomes',
+        '/forecast-validation': 'Forecast Validation',
+        '/evidence-reward': 'Evidence Reward',
+        '/professional-benchmark': 'Professional Benchmark',
+        '/data-completeness': 'Data Completeness',
+        '/walk-forward': 'Walk-Forward Experiments',
+        '/research-promotion': 'Research Promotion',
+        '/score-calibration': 'Score Calibration',
+        '/shadow-mode': 'Human vs System Shadow',
+        '/ai-committee': 'AI Committee',
+        '/live': 'Live Console',
+        '/live/approvals': 'Live Approvals',
+        '/pricing': 'Pricing',
+        '/admin': 'Admin / Advanced',
         '/strategy-desks': 'Strategy desks',
         '/strategy-desks/systematic-equities': 'Systematic Equities',
-        '/settings': 'Platform ops',
+        '/settings': 'Settings',
         '/activity': 'Activity',
         '/workspaces': 'Organizations',
         '/release': 'Release',
         '/login': 'Organization sign in',
       }
 
-  const normalizedAccountProfile = normalizeAccountProfile(activeAccountProfile)
   const pageName =
     pathname === '/settings'
-      ? normalizedAccountProfile === 'brokerage'
-        ? 'Brokerage account'
-        : normalizedAccountProfile === 'personal_live'
-          ? 'Personal live'
-          : 'Personal paper'
-      : titleMap[pathname] || (appConfig.personalMode ? 'Desk' : 'Operations')
+      ? 'Settings'
+      : titleMap[pathname] ||
+        (pathname.startsWith('/strategies/') && pathname.endsWith('/live')
+          ? 'Live Strategy Control'
+          : pathname.startsWith('/strategies/')
+            ? 'Strategy Detail'
+            : 'Desk')
   return `${pageName} | ${appConfig.appName}`
 }
 
@@ -116,6 +181,8 @@ function buildReadinessNotice({ authConfig, session, authError, bootstrapError, 
     }
   }
 
+  if (appConfig.customerReadyMode) return null
+
   if (personalMode) return null
 
   const environment = authConfig?.environment || 'unknown'
@@ -133,7 +200,7 @@ function buildReadinessNotice({ authConfig, session, authError, bootstrapError, 
       tone: 'info',
       message: personalMode
         ? `Environment: ${environment}. This desk is running in a non-production environment.`
-        : `Environment: ${environment}. Platform operations are running in a non-production environment.`,
+        : `Environment: ${environment}. The trading desk is running in a non-production environment.`,
     }
   }
 
@@ -154,6 +221,9 @@ function AppFrame() {
   const activeAccountProfile = normalizeAccountProfile(preferences?.activeAccountProfile)
   const publicInfoPage = getPublicSitePage(location.pathname)
   const isPublicInfoRoute = Boolean(publicInfoPage)
+  const isPricingRoute = location.pathname === '/pricing'
+  const isMarketingHomeRoute = location.pathname === '/'
+  const isPublicSurfaceRoute = isPublicInfoRoute || isPricingRoute || isMarketingHomeRoute
   const startupSurface = resolveStartupSurface(tradingStyle, preferences?.startupSurface)
   const reviewSurface = resolveReviewSurface(tradingStyle, preferences?.defaultReviewSurface)
   const rememberLastWorkflowSurface = Boolean(preferences?.rememberLastWorkflowSurface)
@@ -182,7 +252,7 @@ function AppFrame() {
   }
 
   useEffect(() => {
-    if (isPublicInfoRoute) return
+    if (isPublicSurfaceRoute) return
     if (authLoading || !session?.authenticated) return
     const params = new URLSearchParams(location.search)
     let nextPathname = location.pathname
@@ -209,7 +279,7 @@ function AppFrame() {
           changed = true
         }
       })
-    } else if (nextPathname === '/' && session?.active_tenant?.slug && !params.get('tenant')) {
+    } else if (nextPathname === '/app' && session?.active_tenant?.slug && !params.get('tenant')) {
       params.set('tenant', session.active_tenant.slug)
       changed = true
     }
@@ -223,7 +293,7 @@ function AppFrame() {
       { replace: true },
     )
   }, [
-    isPublicInfoRoute,
+    isPublicSurfaceRoute,
     authLoading,
     location.pathname,
     location.search,
@@ -236,24 +306,24 @@ function AppFrame() {
   ])
 
   useEffect(() => {
-    if (isPublicInfoRoute) return
+    if (isPublicSurfaceRoute) return
     if (authLoading || !session?.authenticated) return
     if (!isWorkflowSurfacePath(location.pathname)) return
     if (typeof window === 'undefined') return
     window.localStorage.setItem('sos-last-workflow-surface', location.pathname)
-  }, [authLoading, isPublicInfoRoute, location.pathname, session?.authenticated])
+  }, [authLoading, isPublicSurfaceRoute, location.pathname, session?.authenticated])
 
   useEffect(() => {
-    if (isPublicInfoRoute) return
+    if (isPublicSurfaceRoute) return
     if (authLoading || !session?.authenticated) return
     if (startupRouteHandledRef.current) return
     startupRouteHandledRef.current = true
-    if (location.pathname !== '/' || location.search) return
+    if (location.pathname !== '/app' || location.search) return
     const preferredStartupSurface = resolvePreferredStartupSurface()
     if (preferredStartupSurface === '/') return
     navigate({ pathname: preferredStartupSurface, search: '' }, { replace: true })
   }, [
-    isPublicInfoRoute,
+    isPublicSurfaceRoute,
     authLoading,
     location.pathname,
     location.search,
@@ -266,7 +336,7 @@ function AppFrame() {
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
     if (typeof document !== 'undefined') {
-      if (isPublicInfoRoute) return
+      if (isPublicSurfaceRoute) return
       document.title = buildDocumentTitle(location.pathname, activeAccountProfile)
       window.requestAnimationFrame(() => {
         const main = document.querySelector('.ui-shell__body')
@@ -275,10 +345,10 @@ function AppFrame() {
         }
       })
     }
-  }, [activeAccountProfile, isPublicInfoRoute, location.pathname])
+  }, [activeAccountProfile, isPublicSurfaceRoute, location.pathname])
 
   useEffect(() => {
-    if (isPublicInfoRoute) return
+    if (isPublicSurfaceRoute) return
     if (authLoading) return
     if (!session?.authenticated) {
       startupRouteHandledRef.current = false
@@ -294,7 +364,7 @@ function AppFrame() {
       .catch((err) => {
         setError(err?.response?.data?.detail || err.message || 'Failed to load application bootstrap.')
       })
-  }, [authLoading, isPublicInfoRoute, session?.authenticated, session?.active_tenant?.slug])
+  }, [authLoading, isPublicSurfaceRoute, session?.authenticated, session?.active_tenant?.slug])
 
   if (isPublicInfoRoute) {
     return (
@@ -304,12 +374,28 @@ function AppFrame() {
     )
   }
 
+  if (isPricingRoute) {
+    return (
+      <Suspense fallback={<div className="ui-shell__page"><LoadingBlock label="Loading pricing..." /></div>}>
+        <PricingPage />
+      </Suspense>
+    )
+  }
+
+  if (isMarketingHomeRoute) {
+    return (
+      <Suspense fallback={<div className="ui-shell__page"><LoadingBlock label="Loading..." /></div>}>
+        <MarketingHomePage />
+      </Suspense>
+    )
+  }
+
   if (authLoading) {
     return <div className="ui-shell__page"><LoadingBlock label="Loading application..." /></div>
   }
 
   if (session?.authenticated && location.pathname.startsWith('/login')) {
-    return <div className="ui-shell__page"><LoadingBlock label={personalMode ? 'Opening desk...' : 'Opening platform operations...'} /></div>
+    return <div className="ui-shell__page"><LoadingBlock label={personalMode ? 'Opening desk...' : 'Opening trading desk...'} /></div>
   }
 
   return (
@@ -319,10 +405,11 @@ function AppFrame() {
       </div>
       {readinessNotice ? <div className={readinessNotice.tone === 'error' ? 'error-banner' : 'info-banner'}>{readinessNotice.message}</div> : null}
       {showBootstrapError ? <div className="error-banner">{error}</div> : null}
-      <WorkflowStatusStrip />
+      {preferences?.showWorkflowStatusStrip === false ? null : <WorkflowStatusStrip />}
       <Suspense fallback={<LoadingBlock label="Loading page..." />}>
         <Routes>
-          <Route path="/" element={<DashboardPage bootstrap={bootstrap} />} />
+          <Route path="/" element={<Navigate to="/app" replace />} />
+          <Route path="/app" element={<DashboardPage bootstrap={bootstrap} />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/watchlist" element={<WatchlistPage />} />
           <Route path="/trades" element={<TradesPage />} />
@@ -330,17 +417,35 @@ function AppFrame() {
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/notes" element={<NotesPage />} />
-          <Route path="/education" element={<EducationPage />} />
-          <Route path="/strategy-desks/systematic-equities" element={<SystematicDeskPage />} />
-          <Route path="/strategy-desks" element={<StrategyDesksPage />} />
-          <Route
-            path="/settings"
-            element={activeAccountProfile === 'brokerage' ? <SettingsPage /> : <OwnAccountSettingsPage />}
-          />
-          {!personalMode ? <Route path="/activity" element={<ActivityPage />} /> : null}
-          {!personalMode ? <Route path="/workspaces" element={<WorkspacesPage />} /> : null}
-          <Route path="/release" element={<ReleasePage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/education" element={<AdminAccessGate><EducationPage /></AdminAccessGate>} />
+          <Route path="/strategies/:strategyId" element={<StrategyDetailPage />} />
+          <Route path="/strategies/:strategyId/live" element={<LiveStrategyControlPage />} />
+          <Route path="/strategies" element={<StrategiesPage />} />
+          <Route path="/risk" element={<RiskCenterPage />} />
+          <Route path="/portfolio-risk" element={<PortfolioRiskPage />} />
+          <Route path="/audit" element={<AuditReplayPage />} />
+          <Route path="/execution-quality" element={<ExecutionQualityPage />} />
+          <Route path="/evidence-edge" element={<EvidenceEdgePage />} />
+          <Route path="/evidence-outcomes" element={<EvidenceOutcomesPage />} />
+          <Route path="/forecast-validation" element={<ForecastValidationPage />} />
+          <Route path="/evidence-reward" element={<EvidenceRewardPage />} />
+          <Route path="/professional-benchmark" element={<ProfessionalBenchmarkPage />} />
+          <Route path="/data-completeness" element={<DataCompletenessPage />} />
+          <Route path="/walk-forward" element={<WalkForwardExperimentsPage />} />
+          <Route path="/research-promotion" element={<ResearchPromotionPage />} />
+          <Route path="/score-calibration" element={<ScoreCalibrationPage />} />
+          <Route path="/shadow-mode" element={<ShadowModePage />} />
+          <Route path="/ai-committee" element={<AICommitteePage />} />
+          <Route path="/live" element={<LiveTradingConsolePage />} />
+          <Route path="/live/approvals" element={<LiveOrderApprovalPage />} />
+          <Route path="/strategy-desks/systematic-equities" element={<AdminAccessGate><SystematicDeskPage /></AdminAccessGate>} />
+          <Route path="/strategy-desks" element={<AdminAccessGate><StrategyDesksPage /></AdminAccessGate>} />
+          <Route path="/settings" element={<OwnAccountSettingsPage />} />
+          <Route path="/admin" element={<AdminAccessGate><SettingsPage /></AdminAccessGate>} />
+          {!personalMode ? <Route path="/activity" element={<AdminAccessGate><ActivityPage /></AdminAccessGate>} /> : null}
+          {!personalMode ? <Route path="/workspaces" element={<AdminAccessGate><WorkspacesPage /></AdminAccessGate>} /> : null}
+          <Route path="/release" element={<AdminAccessGate><ReleasePage /></AdminAccessGate>} />
+          <Route path="*" element={<Navigate to="/app" replace />} />
         </Routes>
       </Suspense>
     </AppShell>

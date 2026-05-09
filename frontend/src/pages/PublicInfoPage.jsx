@@ -1,16 +1,13 @@
 import { useEffect, useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import { appConfig } from '../config/appConfig'
+import MarketingTopNav from '../components/MarketingTopNav'
 import {
   getPublicSiteBranding,
   getPublicSiteContact,
   getPublicSitePage,
   getPublicSitePages,
 } from '../utils/publicSiteModel'
-
-function joinClasses(...values) {
-  return values.filter(Boolean).join(' ')
-}
 
 export default function PublicInfoPage({ pathname }) {
   const page = useMemo(() => getPublicSitePage(pathname), [pathname])
@@ -26,7 +23,8 @@ export default function PublicInfoPage({ pathname }) {
   if (!page) return null
 
   return (
-    <div className="public-site">
+    <div className="marketing-home marketing-home--public">
+      <MarketingTopNav branding={branding} pages={navItems} mode="public" />
       <div className="public-site__shell">
         <header className="public-site__hero">
           <div className="public-site__brand">
@@ -46,20 +44,6 @@ export default function PublicInfoPage({ pathname }) {
               </p>
             </div>
           </div>
-
-          <nav className="public-site__nav" aria-label="Public information pages">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.key}
-                to={item.path}
-                className={({ isActive }) =>
-                  joinClasses('public-site__nav-link', isActive && 'public-site__nav-link--active')
-                }
-              >
-                {item.navLabel}
-              </NavLink>
-            ))}
-          </nav>
         </header>
 
         <main className="public-site__content">
@@ -91,7 +75,7 @@ export default function PublicInfoPage({ pathname }) {
 
           <section className="public-site__panel public-site__panel--meta">
             <h2 className="public-site__panel-title">
-              {page.key === 'connect' ? (appConfig.personalMode ? 'Local notes and policies' : 'Pilot support and policies') : 'Contact'}
+              {page.key === 'connect' ? (appConfig.personalMode ? 'Local notes and policies' : 'Customer support and policies') : 'Contact'}
             </h2>
             <div className="public-site__copy">
               {page.key === 'connect' ? (
@@ -108,18 +92,18 @@ export default function PublicInfoPage({ pathname }) {
                   ) : (
                     <>
                       <p>
-                        This private pilot uses Alpaca OAuth to connect authorized accounts while keeping
-                        brokerage-linked routing separate from the personal env-backed trading lane.
+                        This customer workspace connects authorized Alpaca accounts while keeping linked-account
+                        routing behind readiness, risk, approval, and reconciliation controls.
                       </p>
                       <p>
-                        Review the pilot policies here before submitting the app to Alpaca Connect.
+                        Review the customer policies here before activating account setup and paper execution.
                       </p>
                     </>
                   )}
                 </>
               ) : (
                 <p>
-                  Questions about this private pilot, linked accounts, or account-routing behavior
+                  Questions about this customer workspace, linked accounts, or account-routing behavior
                   should use the contact details below.
                 </p>
               )}
@@ -149,7 +133,7 @@ export default function PublicInfoPage({ pathname }) {
 
         <footer className="public-site__footer">
           <span>{branding.name}</span>
-          <span>{appConfig.personalMode ? 'Private own-account workflow' : 'Private pilot operations workflow'}</span>
+          <span>{appConfig.personalMode ? 'Private own-account workflow' : 'Customer control-plane workflow'}</span>
         </footer>
       </div>
     </div>

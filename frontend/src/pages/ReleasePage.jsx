@@ -609,7 +609,7 @@ export default function ReleasePage() {
               <li>Last recovery status | {ops?.billing?.recovery?.last_recovery_status || 'None'}</li>
               <li>Latest failed event | {ops?.billing?.recovery?.latest_failed_event_id || 'None'}</li>
             </ul>
-            <p>{ops?.billing?.recovery?.last_recovery_error || 'No billing recovery errors recorded.'}</p>
+            <p>{ops?.billing?.recovery?.last_recovery_error || 'No billing sync errors recorded.'}</p>
           </div>
         </div>
 

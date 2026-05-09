@@ -41,6 +41,7 @@ const PANE_MIN_HEIGHTS = {
   rsi: 88,
   macd: 96,
 }
+const TRADABLE_DIRECTION_OVERLAY_KEY = 'tradable_direction_overlay'
 const OVERLAY_ACCENT_PALETTE = ['#22c55e', '#f4b942', '#7a7a7a', '#ff6b6b', '#b388ff', '#ffd43b', '#7a7a7a', '#ff8fab']
 const NAMED_OVERLAY_PALETTE = {
   ema_9: '#22c55e',
@@ -55,6 +56,7 @@ const NAMED_OVERLAY_PALETTE = {
   idm_lower_band: '#ff6b6b',
   idm_vwap: '#ffd43b',
   idm_trailing_stop: '#7a7a7a',
+  [TRADABLE_DIRECTION_OVERLAY_KEY]: '#38bdf8',
 }
 const NAMED_OVERLAY_LABELS = {
   ema_9: 'EMA 9',
@@ -69,6 +71,7 @@ const NAMED_OVERLAY_LABELS = {
   idm_lower_band: 'Breakout lower',
   idm_vwap: 'Session VWAP',
   idm_trailing_stop: 'Trail stop',
+  [TRADABLE_DIRECTION_OVERLAY_KEY]: 'New direction',
 }
 const COMPACT_OVERLAY_LABELS = {
   ema_9: 'E9',
@@ -83,6 +86,7 @@ const COMPACT_OVERLAY_LABELS = {
   idm_lower_band: 'Lower',
   idm_vwap: 'VWAP',
   idm_trailing_stop: 'Trail',
+  [TRADABLE_DIRECTION_OVERLAY_KEY]: 'New dir',
 }
 const LOWER_PANE_OVERLAYS = new Set(['rsi_14', 'macd', 'macd_signal', 'macd_hist', 'atr_14', 'volume_ratio'])
 const RECOVERY_POINTS = {
@@ -220,16 +224,95 @@ function buildLinePath(rows, xForIndex, yForPrice) {
 }
 
 function buildMetricPath(rows, xForIndex, valueAccessor, yForValue) {
+  let commandIndex = 0
   return rows
     .map((row, index) => {
       const value = valueAccessor(row)
       if (!Number.isFinite(value)) return null
       const x = xForIndex(index)
       const y = yForValue(value)
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
+      const command = commandIndex === 0 ? 'M' : 'L'
+      commandIndex += 1
+      return `${command} ${x.toFixed(2)} ${y.toFixed(2)}`
     })
     .filter(Boolean)
     .join(' ')
+}
+
+function buildPointPath(points) {
+  let commandIndex = 0
+  return points
+    .map((point) => {
+      if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return null
+      const command = commandIndex === 0 ? 'M' : 'L'
+      commandIndex += 1
+      return `${command} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`
+    })
+    .filter(Boolean)
+    .join(' ')
+}
+
+function buildBandPath(upperPoints, lowerPoints) {
+  const upperPath = buildPointPath(upperPoints)
+  const lowerPath = buildPointPath([...lowerPoints].reverse())
+  if (!upperPath || !lowerPath) return ''
+  return `${upperPath} ${lowerPath.replace(/^M/, 'L')} Z`
+}
+
+function normalizeTradableDirectionOverlay(payload, hiddenOverlays) {
+  if (hiddenOverlays?.[TRADABLE_DIRECTION_OVERLAY_KEY]) return null
+  const overlay = payload?.forecast?.tradable_direction?.overlay
+  if (!overlay || typeof overlay !== 'object') return null
+  const status = String(overlay.status || '').trim().toLowerCase()
+  if (status === 'unsupported_interval') return null
+  const rawPoints = Array.isArray(overlay.points) ? overlay.points : []
+  const points = rawPoints.flatMap((point) => {
+    const linePrice = toNumber(point?.line_price)
+    const upperBand = toNumber(point?.upper_band)
+    const lowerBand = toNumber(point?.lower_band)
+    if (linePrice === null) return []
+    return [{
+      datetime: point?.datetime || '',
+      linePrice,
+      upperBand,
+      lowerBand,
+    }]
+  })
+  if (!points.length) return null
+  const marker = overlay.marker && typeof overlay.marker === 'object' ? overlay.marker : {}
+  const decision = String(marker.decision || payload?.forecast?.tradable_direction?.decision || 'no_trade').trim().toLowerCase()
+  return {
+    ...overlay,
+    status,
+    decision,
+    points,
+    marker,
+  }
+}
+
+function tradableOverlayAccent(decision) {
+  switch (String(decision || '').trim().toLowerCase()) {
+    case 'up':
+      return '#22c55e'
+    case 'down':
+      return '#ff6b6b'
+    case 'no_trade':
+      return '#ffd43b'
+    default:
+      return '#38bdf8'
+  }
+}
+
+function tradableOverlayPrices(payload, hiddenOverlays) {
+  const overlay = normalizeTradableDirectionOverlay(payload, hiddenOverlays)
+  if (!overlay) return []
+  return toFinitePriceValues(
+    overlay.points.flatMap((point) => [
+      point.linePrice,
+      point.upperBand,
+      point.lowerBand,
+    ]),
+  )
 }
 
 function compactOrderType(value) {
@@ -446,8 +529,12 @@ function toFinitePriceValues(values) {
   return values.filter((value) => value !== null && Number.isFinite(value))
 }
 
-function buildViewportExtras(markers, liveValue) {
-  return toFinitePriceValues([...markers.map((marker) => marker.price), toNumber(liveValue)])
+function buildViewportExtras(markers, liveValue, extraPrices = []) {
+  return toFinitePriceValues([
+    ...markers.map((marker) => marker.price),
+    toNumber(liveValue),
+    ...extraPrices,
+  ])
 }
 
 function hashLabel(value) {
@@ -1051,6 +1138,14 @@ export default function CustomMarketChart({
     () => buildMarkers({ selectedPrice, pendingGuidePoint, workingOrder, positionMarkers, customGuides }),
     [selectedPrice, pendingGuidePoint, workingOrder, positionMarkers, customGuides],
   )
+  const tradableDirectionOverlay = useMemo(
+    () => normalizeTradableDirectionOverlay(activePayload, hiddenOverlays),
+    [activePayload, hiddenOverlays],
+  )
+  const tradableDirectionOverlayPrices = useMemo(
+    () => tradableOverlayPrices(activePayload, hiddenOverlays),
+    [activePayload, hiddenOverlays],
+  )
 
   const effectiveHeight = Math.max(Number(height) || 0, MIN_HEIGHT)
   const plotWidth = SVG_WIDTH - PLOT_PADDING.left - PLOT_PADDING.right
@@ -1086,7 +1181,10 @@ export default function CustomMarketChart({
   const sessionLabel = sessionLabelForPayload(activePayload)
   const liveLabel = liveLabelForPayload(activePayload)
   const freshnessMessage = String(activePayload?.freshness?.message || '').trim()
-  const viewportExtras = useMemo(() => buildViewportExtras(markers, liveValue), [markers, liveValue])
+  const viewportExtras = useMemo(
+    () => buildViewportExtras(markers, liveValue, tradableDirectionOverlayPrices),
+    [markers, liveValue, tradableDirectionOverlayPrices],
+  )
 
   useEffect(() => {
     if (!rows.length) {
@@ -1437,6 +1535,61 @@ export default function CustomMarketChart({
   const hoverX = activeRow ? xForIndex(activeIndex) : null
   const hoverY = activeRow ? yForPrice(activeRow.close) : null
   const liveY = liveValue !== null ? yForPrice(liveValue) : null
+  const tradableDirectionGeometry = useMemo(() => {
+    if (!tradableDirectionOverlay || !rows.length || !viewport) return null
+    const anchorRow = rows.at(-1)
+    if (!anchorRow) return null
+    const rightX = PLOT_PADDING.left + plotWidth
+    const anchorX = xForIndex(anchorRow.sourceIndex)
+    const reservedWidth = Math.max(92, Math.min(160, plotWidth * 0.16))
+    const startX = Math.max(PLOT_PADDING.left, Math.min(anchorX, rightX - reservedWidth))
+    const endX = rightX - 10
+    const span = Math.max(endX - startX, 48)
+    const accent = tradableOverlayAccent(tradableDirectionOverlay.decision)
+    const linePoints = [
+      {
+        x: startX,
+        y: yForPrice(anchorRow.close),
+        price: anchorRow.close,
+      },
+      ...tradableDirectionOverlay.points.map((point, index) => {
+        const x = startX + (span * (index + 1)) / Math.max(tradableDirectionOverlay.points.length, 1)
+        return {
+          x,
+          y: yForPrice(point.linePrice),
+          price: point.linePrice,
+          datetime: point.datetime,
+        }
+      }),
+    ]
+    const upperPoints = tradableDirectionOverlay.points.flatMap((point, index) => {
+      if (!Number.isFinite(point.upperBand)) return []
+      const x = startX + (span * (index + 1)) / Math.max(tradableDirectionOverlay.points.length, 1)
+      return [{ x, y: yForPrice(point.upperBand), price: point.upperBand }]
+    })
+    const lowerPoints = tradableDirectionOverlay.points.flatMap((point, index) => {
+      if (!Number.isFinite(point.lowerBand)) return []
+      const x = startX + (span * (index + 1)) / Math.max(tradableDirectionOverlay.points.length, 1)
+      return [{ x, y: yForPrice(point.lowerBand), price: point.lowerBand }]
+    })
+    const endpoint = linePoints.at(-1)
+    const rawLabel = String(tradableDirectionOverlay.marker?.label || `Shadow ${tradableDirectionOverlay.decision || 'no trade'}`).trim()
+    const label = rawLabel.length > 28 ? `${rawLabel.slice(0, 25)}...` : rawLabel
+    const labelWidth = rightEdgeLabelWidth(label, { minWidth: 112, maxWidth: 156 })
+    const labelX = Math.max(PLOT_PADDING.left + 4, Math.min((endpoint?.x ?? rightX) - labelWidth - 8, rightX - labelWidth))
+    const labelY = Math.max(pricePaneTop + 18, Math.min(endpoint?.y ?? pricePaneTop, pricePaneBottom - 12))
+    return {
+      accent,
+      bandPath: upperPoints.length && lowerPoints.length ? buildBandPath(upperPoints, lowerPoints) : '',
+      linePath: buildPointPath(linePoints),
+      endpoint,
+      label,
+      labelX,
+      labelY,
+      labelWidth,
+      blockedByBuffer: tradableDirectionOverlay.marker?.blocked_by_buffer === true,
+    }
+  }, [tradableDirectionOverlay, rows, viewport, plotWidth, pricePaneTop, pricePaneBottom])
   const showHoverPriceLabel =
     hoverY !== null && !(liveY !== null && Math.abs((activeRow?.close ?? 0) - (liveValue ?? 0)) < 1e-6)
   const activeBarDelta =
@@ -2281,6 +2434,63 @@ export default function CustomMarketChart({
               />
             )
           })}
+
+          {tradableDirectionGeometry?.bandPath ? (
+            <path
+              d={tradableDirectionGeometry.bandPath}
+              fill={tradableDirectionGeometry.accent}
+              opacity="0.12"
+              stroke="none"
+            />
+          ) : null}
+
+          {tradableDirectionGeometry?.linePath ? (
+            <g>
+              <path
+                d={tradableDirectionGeometry.linePath}
+                fill="none"
+                stroke={tradableDirectionGeometry.accent}
+                strokeWidth="2.15"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                strokeDasharray={tradableDirectionGeometry.blockedByBuffer ? '4 5' : undefined}
+                opacity={tradableDirectionGeometry.blockedByBuffer ? '0.78' : '0.96'}
+              />
+              {tradableDirectionGeometry.endpoint ? (
+                <circle
+                  cx={tradableDirectionGeometry.endpoint.x}
+                  cy={tradableDirectionGeometry.endpoint.y}
+                  r="4.2"
+                  fill={tradableDirectionGeometry.accent}
+                  stroke="rgba(10, 10, 10, 0.88)"
+                  strokeWidth="1.2"
+                />
+              ) : null}
+              <g>
+                <rect
+                  x={tradableDirectionGeometry.labelX}
+                  y={tradableDirectionGeometry.labelY - 15}
+                  width={tradableDirectionGeometry.labelWidth}
+                  height="22"
+                  rx="5"
+                  fill="rgba(18, 18, 18, 0.94)"
+                  stroke={tradableDirectionGeometry.accent}
+                  strokeWidth="1"
+                  opacity="0.96"
+                />
+                <text
+                  x={tradableDirectionGeometry.labelX + tradableDirectionGeometry.labelWidth / 2}
+                  y={tradableDirectionGeometry.labelY}
+                  fill="#f8fafc"
+                  fontSize="10.5"
+                  fontWeight="700"
+                  textAnchor="middle"
+                >
+                  {tradableDirectionGeometry.label}
+                </text>
+              </g>
+            </g>
+          ) : null}
 
           {markers.map((marker, index) => {
             const y = yForPrice(marker.price)

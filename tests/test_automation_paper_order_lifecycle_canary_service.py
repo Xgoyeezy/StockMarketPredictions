@@ -229,6 +229,7 @@ class AutomationPaperOrderLifecycleCanaryServiceTests(unittest.TestCase):
             notes_path.write_text("[]", encoding="utf-8")
             with (
                 patch.object(notes_service, "NOTES_PATH", notes_path),
+                patch.object(automation_paper_order_lifecycle_canary_service, "_utc_now", return_value=FIXED_NOW),
                 patch.object(trade_automation_service, "_resolve_tenant_for_current_user", return_value=tenant),
                 patch.object(trade_automation_service, "_resolve_user_for_current_user", return_value=None),
                 patch.object(trade_automation_service, "get_trade_summary", return_value={"rollout_readiness": {}}),

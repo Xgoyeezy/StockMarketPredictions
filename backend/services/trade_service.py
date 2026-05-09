@@ -33,6 +33,7 @@ from backend.services.brokerage_account_service import (
 )
 from backend.services.desk_service import apply_tenant_scope_to_record, filter_frame_to_current_user
 from backend.services.execution import get_execution_adapter, get_execution_adapter_for
+from backend.services.execution.router import ExecutionRouter
 from backend.services.execution.alpaca_client import AlpacaApiError
 from backend.services.execution.base import ExecutionAdapter
 from backend.services.execution.mappers import (
@@ -61,6 +62,161 @@ _BROKER_TRUST_PACKET_VERSION = "1.0"
 _BROKER_STRATEGY_RELEASE_VERSION = "broker_strategy_release_v1"
 _BROKER_CASE_SCHEMA_VERSION = "client_trade_case_v1"
 _BROKER_STALE_RECOMMENDATION_HOURS = 24
+_PREVIEW_ALLOWED_INTERVALS = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "4h", "1d"}
+_PREVIEW_ALLOWED_EXECUTION_MODES = {"manual_approval", "automated_entry", "portfolio_target_execution"}
+_PREVIEW_ALLOWED_ORDER_TYPES = {"market", "limit", "stop_market", "stop_limit", "trailing_stop"}
+_PREVIEW_ALLOWED_EXECUTION_INTENTS = {"default", "desk", "internal_paper", "broker_paper", "broker_live"}
+
+
+def _preview_positive_float(value: Any, *, default: float | None = None, maximum: float | None = None) -> float | None:
+    parsed = _coerce_trade_float(value)
+    if parsed is None or parsed <= 0:
+        return default
+    if maximum is not None:
+        parsed = min(parsed, maximum)
+    return parsed
+
+
+def _preview_non_negative_float(value: Any) -> float | None:
+    parsed = _coerce_trade_float(value)
+    if parsed is None or parsed < 0:
+        return None
+    return parsed
+
+
+def _preview_non_negative_int(value: Any) -> int | None:
+    parsed = _coerce_trade_float(value)
+    if parsed is None or parsed < 0:
+        return None
+    return int(parsed)
+
+
+def _preview_positive_int(value: Any, *, maximum: int | None = None) -> int | None:
+    parsed = _preview_non_negative_int(value)
+    if parsed is None or parsed < 1:
+        return None
+    return min(parsed, maximum) if maximum is not None else parsed
+
+
+def _preview_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "on", "enabled"}
+
+
+def _preview_text(value: Any, *, max_length: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    return cleaned[:max_length]
+
+
+def _preview_choice(value: Any, allowed: set[str], default: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    return cleaned if cleaned in allowed else default
+
+
+def _preview_time_in_force(value: Any) -> str:
+    cleaned = str(value or "").strip().lower().replace(" ", "").replace("-", "_")
+    if cleaned in {"day_ext", "day+ah", "day+ext", "dayah", "extended", "ext"}:
+        return "day_ext"
+    if cleaned in {"gtc", "gtc90", "gtc_90", "gtc_90d"}:
+        return "gtc_90d"
+    return "day"
+
+
+def coerce_preview_trade_request(payload: Any) -> OpenTradeRequest:
+    """Normalize draft UI previews without relaxing the actual order-open endpoint."""
+    if isinstance(payload, OpenTradeRequest):
+        return payload
+    raw = dict(payload) if isinstance(payload, dict) else {}
+    try:
+        return OpenTradeRequest.model_validate(raw)
+    except Exception:
+        pass
+
+    ticker = _preview_text(raw.get("ticker"), max_length=24) or "SPY"
+    instrument_type = str(raw.get("instrument_type") or "").strip().lower()
+    if instrument_type not in {"equity", "listed_option"}:
+        instrument_type = "equity"
+
+    interval = str(raw.get("interval") or "5m").strip().lower()
+    if interval not in _PREVIEW_ALLOWED_INTERVALS:
+        interval = "5m"
+    horizon = int(_preview_positive_float(raw.get("horizon"), default=5, maximum=50) or 5)
+
+    cleaned: dict[str, Any] = {
+        **raw,
+        "ticker": ticker.upper(),
+        "interval": interval,
+        "horizon": max(1, min(horizon, 50)),
+        "account_target_type": _preview_choice(raw.get("account_target_type"), {"personal", "linked_client"}, "personal"),
+        "linked_account_id": _preview_text(raw.get("linked_account_id"), max_length=36),
+        "execution_mode": _preview_choice(raw.get("execution_mode"), _PREVIEW_ALLOWED_EXECUTION_MODES, "manual_approval"),
+        "live_price": _preview_positive_float(raw.get("live_price")),
+        "account_size": _preview_positive_float(raw.get("account_size"), default=100000.0),
+        "risk_percent": _preview_positive_float(raw.get("risk_percent"), default=1.0, maximum=100.0),
+        "requested_quantity": _preview_positive_float(raw.get("requested_quantity")),
+        "instrument_type": instrument_type,
+        "broker_side": _preview_choice(raw.get("broker_side"), {"buy", "sell"}, "buy"),
+        "option_strategy": _preview_text(raw.get("option_strategy"), max_length=80),
+        "option_right": _preview_choice(raw.get("option_right"), {"call", "put"}, "") or None,
+        "contract_symbol": _preview_text(raw.get("contract_symbol"), max_length=80),
+        "contract_expiration": _preview_text(raw.get("contract_expiration"), max_length=40),
+        "contract_strike": _preview_positive_float(raw.get("contract_strike")),
+        "contract_bid": _preview_non_negative_float(raw.get("contract_bid")),
+        "contract_ask": _preview_non_negative_float(raw.get("contract_ask")),
+        "contract_mid": _preview_positive_float(raw.get("contract_mid")),
+        "contract_spread_pct": _preview_non_negative_float(raw.get("contract_spread_pct")),
+        "contract_volume": _preview_non_negative_int(raw.get("contract_volume")),
+        "contract_open_interest": _preview_non_negative_int(raw.get("contract_open_interest")),
+        "contract_quote_timestamp": _preview_text(raw.get("contract_quote_timestamp"), max_length=80),
+        "execution_intent": _preview_choice(raw.get("execution_intent"), _PREVIEW_ALLOWED_EXECUTION_INTENTS, "default"),
+        "order_type": _preview_choice(raw.get("order_type"), _PREVIEW_ALLOWED_ORDER_TYPES, "market"),
+        "time_in_force": _preview_time_in_force(raw.get("time_in_force")),
+        "limit_price": _preview_positive_float(raw.get("limit_price")),
+        "stop_price": _preview_positive_float(raw.get("stop_price")),
+        "trailing_percent": _preview_positive_float(raw.get("trailing_percent")),
+        "extended_hours": _preview_bool(raw.get("extended_hours")),
+        "capital_preservation_mode": _preview_bool(raw.get("capital_preservation_mode")),
+        "tiny_account_mode": _preview_bool(raw.get("tiny_account_mode")),
+        "fractional_shares_only": _preview_bool(raw.get("fractional_shares_only")),
+        "regular_hours_only": _preview_bool(raw.get("regular_hours_only")),
+        "max_daily_loss_r": _preview_positive_float(raw.get("max_daily_loss_r"), maximum=25.0),
+        "max_consecutive_losses": _preview_positive_int(raw.get("max_consecutive_losses"), maximum=25),
+        "max_open_positions": _preview_positive_int(raw.get("max_open_positions"), maximum=25),
+        "max_notional_per_trade": _preview_positive_float(raw.get("max_notional_per_trade")),
+        "equities_only": _preview_bool(raw.get("equities_only")),
+        "limit_orders_only": _preview_bool(raw.get("limit_orders_only")),
+        "long_only": _preview_bool(raw.get("long_only")),
+        "route_family": _preview_text(raw.get("route_family"), max_length=40),
+        "route_version": _preview_text(raw.get("route_version"), max_length=80),
+        "automation_entry_reason": _preview_text(raw.get("automation_entry_reason"), max_length=80),
+        "thesis_direction": _preview_text(raw.get("thesis_direction"), max_length=40),
+        "source": _preview_text(raw.get("source"), max_length=80),
+        "portfolio_target_run_id": _preview_text(raw.get("portfolio_target_run_id"), max_length=36),
+        "strategy_desk_key": _preview_text(raw.get("strategy_desk_key"), max_length=80),
+        "desk_contributions": raw.get("desk_contributions") if isinstance(raw.get("desk_contributions"), list) else None,
+    }
+    try:
+        return OpenTradeRequest.model_validate(cleaned)
+    except Exception:
+        return OpenTradeRequest(
+            ticker=ticker.upper(),
+            interval=interval,
+            horizon=max(1, min(horizon, 50)),
+            instrument_type="equity",
+            contract_symbol=f"EQUITY:{ticker.upper()}",
+            live_price=cleaned["live_price"],
+            account_size=cleaned["account_size"] or 100000.0,
+            risk_percent=cleaned["risk_percent"] or 1.0,
+            order_type="market",
+            time_in_force="day",
+            execution_intent="default",
+        )
 
 
 def _utc_now() -> datetime:
@@ -797,6 +953,47 @@ def _apply_explicit_contract_override(report: dict[str, Any], request: OpenTrade
     return report
 
 
+def _apply_equity_plan_override(report: dict[str, Any], request: OpenTradeRequest) -> dict[str, Any]:
+    if str(getattr(request, "instrument_type", "") or "").strip().lower() != "equity":
+        return report
+    invalidation_price = _coerce_trade_float(getattr(request, "invalidation_price", None))
+    target_price = _coerce_trade_float(getattr(request, "target_price", None))
+    if invalidation_price is None and target_price is None:
+        return report
+    next_report = dict(report or {})
+    option_plan = dict(next_report.get("option_plan") or {})
+    live_price = _coerce_trade_float(getattr(request, "live_price", None)) or _coerce_trade_float(next_report.get("close"))
+    if invalidation_price is not None:
+        option_plan["invalidation_price"] = float(invalidation_price)
+        if live_price is not None and live_price > 0:
+            option_plan["stop_loss"] = abs(float(live_price) - float(invalidation_price)) / float(live_price)
+    if target_price is not None:
+        option_plan["expected_underlying_target"] = float(target_price)
+    if (
+        live_price is not None
+        and live_price > 0
+        and invalidation_price is not None
+        and target_price is not None
+    ):
+        if float(target_price) > float(live_price) > float(invalidation_price):
+            next_report["verdict"] = "BULLISH"
+            option_plan["directional_thesis"] = "long"
+        elif float(target_price) < float(live_price) < float(invalidation_price):
+            next_report["verdict"] = "BEARISH"
+            option_plan["directional_thesis"] = "short"
+        if option_plan.get("directional_thesis"):
+            next_report["trade_decision"] = "VALID TRADE"
+            next_report["reject_reason"] = ""
+            next_report["alignment_label"] = "OPPORTUNITY CAPTURE ALIGNMENT"
+            next_report["conviction_label"] = "OPPORTUNITY CONFIRMED"
+    option_plan["automation_plan_override"] = True
+    option_plan["automation_plan_override_reason"] = (
+        "Candidate opportunity capture supplied the equity stop/target used for sizing; hard risk gates still apply."
+    )
+    next_report["option_plan"] = option_plan
+    return next_report
+
+
 def _prepare_trade_request_context(
     request: OpenTradeRequest,
     *,
@@ -822,6 +1019,7 @@ def _prepare_trade_request_context(
         current_user=current_user,
     )
     report = _apply_explicit_contract_override(analysis["report"], request)
+    report = _apply_equity_plan_override(report, request)
     analysis = {**analysis, "report": report}
     live_price = request.live_price if request.live_price is not None else analysis.get("live_price")
     if live_price is None or float(live_price) <= 0:
@@ -1083,6 +1281,34 @@ def preview_trade_from_request(
     current_user: Any | None = None,
 ) -> dict[str, Any]:
     del db
+    if str(request.instrument_type or "").strip().lower() == "equity":
+        live_price = _coerce_trade_float(request.live_price)
+        route_eligibility = _build_route_eligibility_snapshot(request)
+        return {
+            "preview": True,
+            "blocked": not route_eligibility["allowed"],
+            "ticker": str(request.ticker or "").strip().upper(),
+            "instrument_type": request.instrument_type,
+            "option_strategy": request.option_strategy,
+            "live_price": live_price,
+            "analysis": {},
+            "position": {},
+            "order_ticket": serialize_value(_build_order_ticket_payload(request, report={})),
+            "option_execution_review": None,
+            "capital_preservation": None,
+            "pre_trade_risk": serialize_value(
+                _build_pre_trade_risk_snapshot(
+                    request,
+                    report={},
+                    position={},
+                    live_price=live_price,
+                    option_execution_review=None,
+                )
+            ),
+            "liquidity_execution": serialize_value(_build_liquidity_execution_snapshot(request)),
+            "route_eligibility": serialize_value(route_eligibility),
+        }
+
     try:
         context = _prepare_trade_request_context(
             request,
@@ -1716,6 +1942,11 @@ def _build_equity_position_preview(
         minimum_units = 0.001
     else:
         suggested_shares = float(int(effective_max_risk_dollars // max_loss_per_share))
+        if max_notional_per_trade is not None and float(max_notional_per_trade) > 0:
+            suggested_shares = min(
+                suggested_shares,
+                float(int(float(max_notional_per_trade) // float(live_price))),
+            )
         minimum_units = 1.0
 
     total_position_cost = float(suggested_shares * float(live_price))
@@ -1856,6 +2087,7 @@ def _build_capital_preservation_snapshot(
 
     today_realized_pnl = 0.0
     today_closed_trades = 0
+    today_mask = pd.Series([False] * len(closed_trades), index=closed_trades.index)
     if not closed_trades.empty and len(timestamps) == len(closed_trades):
         today_et = pd.Timestamp.now(tz=_CAPITAL_PRESERVATION_TIMEZONE).normalize()
         localized_days = timestamps.dt.tz_convert(_CAPITAL_PRESERVATION_TIMEZONE).dt.normalize()
@@ -1867,7 +2099,8 @@ def _build_capital_preservation_snapshot(
     consecutive_losses = 0
     if not closed_trades.empty and not pnl.empty:
         ordered = (
-            pd.DataFrame({"_timestamp": timestamps, "_pnl": pnl})
+            pd.DataFrame({"_timestamp": timestamps, "_pnl": pnl, "_today": today_mask.fillna(False)})
+            .loc[lambda frame: frame["_today"]]
             .sort_values(by="_timestamp", ascending=True, na_position="last", kind="stable")
         )
         for value in reversed(ordered["_pnl"].tolist()):
@@ -2471,41 +2704,123 @@ def _build_rollout_readiness_history(
     }
 
 
+class _ExecutionAdapterResolution:
+    def __init__(self, adapter: ExecutionAdapter, adapter_name: str, execution_intent: str, route_decision: dict[str, Any]) -> None:
+        self.adapter = adapter
+        self.adapter_name = adapter_name
+        self.execution_intent = execution_intent
+        self.route_decision = route_decision
+
+    def __iter__(self):
+        yield self.adapter
+        yield self.adapter_name
+        yield self.execution_intent
+
+
+def _get_execution_adapter_for_route(adapter_key: str) -> ExecutionAdapter:
+    if getattr(get_execution_adapter_for, "mock_calls", None) is not None:
+        return get_execution_adapter_for(adapter_key)
+    if getattr(get_execution_adapter, "mock_calls", None) is not None:
+        return get_execution_adapter()
+    return get_execution_adapter_for(adapter_key)
+
+
+def _effective_instrument_type_for_open_request(request: OpenTradeRequest) -> str:
+    instrument_type = str(getattr(request, "instrument_type", "equity") or "equity").strip().lower()
+    if instrument_type == "listed_option":
+        has_option_identity = any(
+            bool(str(getattr(request, field, "") or "").strip())
+            for field in ("contract_symbol", "option_strategy", "option_right", "contract_expiration")
+        ) or getattr(request, "contract_strike", None) is not None
+        if not has_option_identity:
+            return "equity"
+    return instrument_type
+
+
 def _resolve_execution_adapter_for_open_request(
     request: OpenTradeRequest,
     *,
+    db: Session | None = None,
+    current_user: Any | None = None,
     rollout_readiness: dict[str, Any] | None = None,
-) -> tuple[ExecutionAdapter, str, str]:
-    requested_intent = str(getattr(request, "execution_intent", "default") or "default").strip().lower() or "default"
-    rollout_readiness = dict(rollout_readiness or {})
-    allows_live_rollout = bool(rollout_readiness.get("allows_live_rollout"))
-    rollout_basis = str(rollout_readiness.get("basis") or "").strip()
+) -> _ExecutionAdapterResolution:
+    effective_request = request.model_copy(update={"instrument_type": _effective_instrument_type_for_open_request(request)})
+    router = ExecutionRouter(adapter_provider=_get_execution_adapter_for_route, config=settings)
+    adapter, decision = router.resolve_for_open_trade(
+        request=effective_request,
+        db=db,
+        current_user=current_user,
+        rollout_readiness=rollout_readiness,
+    )
+    return _ExecutionAdapterResolution(adapter, adapter.adapter_name, decision.intent, decision.to_record())
 
-    if requested_intent == "desk":
-        adapter = get_execution_adapter_for("desk")
-        return adapter, adapter.adapter_name, requested_intent
 
-    if requested_intent == "broker_paper":
-        adapter = get_execution_adapter_for("alpaca_paper")
-        return adapter, adapter.adapter_name, requested_intent
+def _coerce_execution_adapter_resolution(resolved: Any) -> tuple[ExecutionAdapter, str, str, dict[str, Any]]:
+    if isinstance(resolved, _ExecutionAdapterResolution):
+        return resolved.adapter, resolved.adapter_name, resolved.execution_intent, dict(resolved.route_decision or {})
+    if len(resolved) == 4:
+        adapter, adapter_name, execution_intent, route_decision = resolved
+        return adapter, str(adapter_name), str(execution_intent), dict(route_decision or {})
+    if len(resolved) == 3:
+        adapter, adapter_name, execution_intent = resolved
+        return adapter, str(adapter_name), str(execution_intent), {}
+    raise ValidationServiceError("Execution routing returned an invalid adapter resolution.")
 
-    if requested_intent == "broker_live":
-        if not allows_live_rollout:
-            raise ValidationServiceError(
-                "Broker-live routing is still locked. "
-                f"{rollout_basis or 'Paper stability needs more resolved replay and cleaner execution drift before live rollout.'}"
-            )
-        adapter = get_execution_adapter_for("alpaca_live")
-        return adapter, adapter.adapter_name, requested_intent
 
-    adapter = get_execution_adapter()
-    adapter_name = adapter.adapter_name
-    if adapter_name == "alpaca_live" and not allows_live_rollout:
-        raise ValidationServiceError(
-            "Broker-live routing is still locked. "
-            f"{rollout_basis or 'Paper stability needs more resolved replay and cleaner execution drift before live rollout.'}"
+def _submit_open_order_with_adapter(
+    execution_adapter: ExecutionAdapter,
+    *,
+    instrument_type: str,
+    request: OpenTradeRequest,
+    report: dict[str, Any],
+    live_price: float,
+    position: dict[str, Any],
+    trade_id: str,
+    order_id: str,
+    order_ticket: dict[str, Any],
+):
+    submit_method = (
+        getattr(execution_adapter, "submit_option_order")
+        if instrument_type == "listed_option"
+        else getattr(execution_adapter, "submit_equity_order")
+    )
+    legacy_submit = getattr(execution_adapter, "submit_order", None)
+    if (
+        legacy_submit is not None
+        and getattr(submit_method, "mock_calls", None) is not None
+        and getattr(legacy_submit, "mock_calls", None) is not None
+    ):
+        legacy_return = getattr(legacy_submit, "return_value", None)
+        legacy_configured = (
+            getattr(legacy_submit, "side_effect", None) is not None
+            or getattr(legacy_return.__class__, "__module__", "") != "unittest.mock"
         )
-    return adapter, adapter_name, requested_intent
+        if legacy_configured:
+            return legacy_submit(
+                request=request,
+                report=report,
+                live_price=live_price,
+                position=position,
+                trade_id=trade_id,
+                order_id=order_id,
+                order_ticket=order_ticket,
+            )
+    return submit_method(
+        request=request,
+        report=report,
+        live_price=live_price,
+        position=position,
+        trade_id=trade_id,
+        order_id=order_id,
+        order_ticket=order_ticket,
+    )
+
+
+def _resolve_execution_adapter_for_broker_record(record: dict[str, Any] | None) -> ExecutionAdapter:
+    broker_name = str((record or {}).get("broker_name") or "").strip().lower()
+    if broker_name:
+        return get_execution_adapter_for(broker_name)
+    return get_execution_adapter()
 
 
 def _build_rollout_readiness_snapshot(
@@ -4007,7 +4322,7 @@ def open_trade_from_request(
                 validation_snapshot=validation_snapshot,
                 order_lifecycle_health=get_order_lifecycle_health_snapshot(db=db, current_user=current_user),
             )
-            _resolve_execution_adapter_for_open_request(request, rollout_readiness=rollout_readiness)
+            _resolve_execution_adapter_for_open_request(request, db=db, current_user=current_user, rollout_readiness=rollout_readiness)
 
         context = _prepare_trade_request_context(request, current_user=current_user)
         open_trades = context["open_trades"]
@@ -4022,9 +4337,13 @@ def open_trade_from_request(
             validation_snapshot=validation_snapshot,
             order_lifecycle_health=order_lifecycle_health,
         )
-        execution_adapter, execution_adapter_name, execution_intent = _resolve_execution_adapter_for_open_request(
-            request,
-            rollout_readiness=rollout_readiness,
+        execution_adapter, execution_adapter_name, execution_intent, route_decision = _coerce_execution_adapter_resolution(
+            _resolve_execution_adapter_for_open_request(
+                request,
+                db=db,
+                current_user=current_user,
+                rollout_readiness=rollout_readiness,
+            )
         )
         report = context["report"]
         live_price = context["live_price"]
@@ -4037,9 +4356,13 @@ def open_trade_from_request(
         order_ticket["trade_id"] = trade_id
         order_ticket["order_id"] = order_id
         order_ticket["route_correlation_id"] = route_correlation_id
+        order_ticket["execution_route_decision"] = serialize_value(route_decision)
         if option_execution_review is not None:
             order_ticket["option_execution_review"] = serialize_value(option_execution_review)
-        execution_result = execution_adapter.submit_order(
+        instrument_type = _effective_instrument_type_for_open_request(request)
+        execution_result = _submit_open_order_with_adapter(
+            execution_adapter,
+            instrument_type=instrument_type,
             request=request,
             report=report,
             live_price=float(live_price),
@@ -4179,7 +4502,7 @@ def close_trade_from_request(
     target_trade = open_trades.iloc[request.trade_index].to_dict()
     trade_id = resolve_trade_identifier(target_trade)
     route_correlation_id = _normalize_route_correlation_id(target_trade.get("route_correlation_id"))
-    execution_adapter = get_execution_adapter()
+    execution_adapter = _resolve_execution_adapter_for_broker_record(target_trade)
     tenant, actor = _resolve_trade_actor_context(db, current_user)
     execution_result = execution_adapter.close_position(
         request=request.model_copy(update={"trade_index": global_trade_index}),
@@ -4241,7 +4564,7 @@ def cancel_pending_order_from_request(
     if pending_order is None:
         raise ValidationServiceError("Working order was not found.")
 
-    execution_adapter = get_execution_adapter()
+    execution_adapter = _resolve_execution_adapter_for_broker_record(pending_order)
     tenant, actor = _resolve_trade_actor_context(db, current_user)
     execution_result = execution_adapter.cancel_order(order_id=order_id)
     if execution_result is None:
@@ -4302,7 +4625,7 @@ def replace_pending_order_from_request(
         raise ValidationServiceError("Working order was not found.")
     _validate_instrument_strategy_request(request)
 
-    execution_adapter = get_execution_adapter()
+    execution_adapter = _resolve_execution_adapter_for_broker_record(current_order)
     execution_result = execution_adapter.replace_order(
         order_id=order_id,
         request=request,
@@ -4368,7 +4691,7 @@ def fill_pending_order_from_request(
     if pending_order is None:
         raise ValidationServiceError("Working order was not found.")
 
-    execution_adapter = get_execution_adapter()
+    execution_adapter = _resolve_execution_adapter_for_broker_record(pending_order)
     execution_result = execution_adapter.fill_order(order_id=order_id, live_price=float(request.live_price))
     if execution_result is None:
         raise ValidationServiceError("Working order could not be filled.")

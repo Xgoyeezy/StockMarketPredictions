@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from hft.market_data.schemas import MarketEvent
 from hft.risk.limits import HFTLimitConfig
 from hft.runtime.session_runner import HFTSessionRunner, LiveSessionConfig
 from hft.strategies.market_making import InventoryAwareMarketMakingStrategy
+from tests._workspace_tmp import reset_tmp_dir
 
 
 class FakeLiveMarketDataAdapter(LiveMarketDataAdapter):
@@ -130,7 +130,7 @@ def regular_events(*, spread: float = 0.02, session: str = "regular") -> list[Ma
 
 class LiveSessionRunnerTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_live_runner_")
+        self.tmpdir = str(reset_tmp_dir("live_session_runner"))
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)

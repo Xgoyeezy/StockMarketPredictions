@@ -1,12 +1,13 @@
 import { useId } from 'react'
 
-export default function SectionCard({ title, subtitle, children, actions, eyebrow = '' }) {
+export default function SectionCard({ title, subtitle, children, actions, eyebrow = '', id }) {
   const headingId = useId()
   const subtitleId = useId()
 
   return (
     <section
       className="ui-panel ui-panel--section"
+      id={id}
       aria-labelledby={headingId}
       aria-describedby={subtitle ? subtitleId : undefined}
     >

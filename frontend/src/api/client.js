@@ -7,7 +7,10 @@ const api = axios.create({
 })
 
 const API_WARNING_WINDOW_MS = 15000
+const TRADE_AUTOMATION_SAFETY_CACHE_TTL_MS = 15000
 const apiWarningTimestamps = new Map()
+let tradeAutomationSafetyStateCache = { value: null, expiresAt: 0 }
+let tradeAutomationWatchdogCache = { value: null, expiresAt: 0 }
 
 function unwrap(response) {
   return response.data.data
@@ -23,6 +26,10 @@ function sleep(ms) {
 
 function isRetriableApiError(error) {
   if (!error) return false
+  const code = String(error.code || '').toUpperCase()
+  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ERR_NETWORK') {
+    return true
+  }
   if (!error.response) return true
   const status = Number(error.response?.status || 0)
   return status >= 500
@@ -648,7 +655,15 @@ const FALLBACK_TICKER_HUB = { favorites: [], recent: [], favorite_count: 0, rece
 const FALLBACK_ORGS = { items: [], count: 0 }
 const FALLBACK_BILLING = {
   tenant: { name: 'Systematic Equities Desk', slug: 'systematic-equities', plan_key: 'pro', billing_email: 'demo@example.test', status: 'active' },
-  plan: { key: 'pro', name: 'Pro', monthly_price: 299, annual_price: 2988, seats_label: 'Up to 5 members', tagline: 'Realtime charting and market stream fallback.' },
+  plan: {
+    key: 'pro',
+    name: 'Pro',
+    monthly_price: 299,
+    annual_price: 2990,
+    seats_label: 'Up to 5 members',
+    tagline: 'Assisted live trading with approval required for every order.',
+    live_mode: 'Assisted live trading',
+  },
   subscription: { provider: 'internal-demo', status: 'active', plan_key: 'pro', managed_mode: 'demo' },
   entitlements: { items: [], count: 0, enabled_count: 0 },
   usage: { members: { used: 1, limit: '5', remaining: 4 }, workspaces: { used: 0, limit: '10', remaining: 10 }, layouts: { used: 0, limit: '50', remaining: 50 } },
@@ -1020,11 +1035,33 @@ const FALLBACK_NOTE_SUMMARY = {
 }
 
 export async function getHealth() { return unwrap(await api.get('/health')) }
+export async function probeBackendHealthz(options = {}) {
+  const timeout = Number(options.timeoutMs || 5000)
+  try {
+    const response = await api.get('/healthz', {
+      timeout,
+      validateStatus: () => true,
+    })
+    const status = Number(response?.status || 0)
+    const payload = response?.data && typeof response.data === 'object' ? response.data : null
+    return {
+      ok: status === 200 && String(payload?.status || '').toLowerCase() === 'ok',
+      status,
+      payload,
+    }
+  } catch (error) {
+    return { ok: false, status: null, payload: null, error }
+  }
+}
 export async function getBootstrap(consumer = 'full') {
-  return safeRequest(() => api.get('/frontend/bootstrap', { params: { consumer } }), FALLBACK_BOOTSTRAP, { key: `bootstrap:${consumer}`, retries: 1 })
+  return safeRequest(
+    () => api.get('/frontend/bootstrap', { params: { consumer } }),
+    FALLBACK_BOOTSTRAP,
+    { key: `bootstrap:${consumer}`, retries: 3, retryDelayMs: 250 },
+  )
 }
 export async function getAuthConfig() {
-  return strictRequest(() => api.get('/auth/config'), { retries: 1 })
+  return strictRequest(() => api.get('/auth/config'), { retries: 3, retryDelayMs: 250 })
 }
 export async function getAuthEntry({ organizationSlug = '', tenantSlug = '', inviteToken = '', redirectPath = '', email = '' } = {}) {
   const resolvedOrganizationSlug = organizationSlug || tenantSlug
@@ -1038,7 +1075,7 @@ export async function getAuthEntry({ organizationSlug = '', tenantSlug = '', inv
   }))
 }
 export async function getAuthSession() {
-  return strictRequest(() => api.get('/auth/session'), { retries: 1 })
+  return strictRequest(() => api.get('/auth/session'), { retries: 3, retryDelayMs: 250 })
 }
 export async function login(payload) { return unwrap(await api.post('/auth/login', payload)) }
 export async function startProviderLogin({
@@ -1076,6 +1113,1040 @@ export async function getOrganizationTradeAutomation(options = {}) {
   if (options.scope_key) params.scope_key = options.scope_key
   if (options.linked_account_id) params.linked_account_id = options.linked_account_id
   return strictRequest(() => api.get('/orgs/trade-automation', { params }))
+}
+export async function getOrganizationTradeAutomationCandidateDiagnostics(options = {}) {
+  const params = {}
+  if (options.scope) params.scope = options.scope
+  if (options.scope_key) params.scope_key = options.scope_key
+  if (options.linked_account_id) params.linked_account_id = options.linked_account_id
+  return strictRequest(() => api.get('/orgs/trade-automation/candidate-diagnostics', { params }))
+}
+export async function getOrganizationTradeAutomationDesks() {
+  return safeRequest(() => api.get('/orgs/trade-automation/desks'), { items: [], count: 0 }, { key: 'orgs:trade-automation-desks', retries: 1 })
+}
+export async function getOrganizationTradeAutomationSafetyState(options = {}) {
+  const force = Boolean(options.force)
+  const now = Date.now()
+  if (!force && tradeAutomationSafetyStateCache.value && tradeAutomationSafetyStateCache.expiresAt > now) {
+    return cloneFallback(tradeAutomationSafetyStateCache.value)
+  }
+  const payload = await safeRequest(
+    () => api.get('/orgs/trade-automation/safety-state'),
+    {
+      status: 'degraded',
+      label: 'Needs attention',
+      tone: 'warning',
+      blocker: 'Safety state has not loaded yet.',
+      next_action: 'Open the live console or run market-open readiness before trading.',
+      route: { active: 'broker_paper', provider: 'alpaca', mode: 'paper' },
+      position_promotion: {
+        current_max_open_positions: null,
+        next_target_positions: null,
+        clean_cycle_count: 0,
+        required_clean_cycles: null,
+        clean_session_count: 0,
+        required_clean_sessions: null,
+        cycle_progress_pct: 0,
+        session_progress_pct: 0,
+        auto_promotion_mode: 'paper_only',
+        blockers: [],
+      },
+      links: {
+        candidate_diagnostics: '/api/orgs/trade-automation/candidate-diagnostics',
+        daily_ledger: '/api/orgs/trade-automation/daily-ledger',
+        position_promotion: '/api/orgs/trade-automation/position-promotion',
+        hft_watchdog_latest: '/api/orgs/trade-automation/hft-watchdog/latest',
+      },
+    },
+    { key: 'orgs:trade-automation-safety-state', retries: 1 },
+  )
+  tradeAutomationSafetyStateCache = {
+    value: payload,
+    expiresAt: Date.now() + TRADE_AUTOMATION_SAFETY_CACHE_TTL_MS,
+  }
+  return cloneFallback(payload)
+}
+
+export async function getOrganizationTradeAutomationWatchdog(options = {}) {
+  const force = Boolean(options.force)
+  const now = Date.now()
+  if (!force && tradeAutomationWatchdogCache.value && tradeAutomationWatchdogCache.expiresAt > now) {
+    return cloneFallback(tradeAutomationWatchdogCache.value)
+  }
+  const payload = await safeRequest(
+    () => api.get('/orgs/trade-automation/watchdog'),
+    {
+      status: 'degraded',
+      label: 'Needs attention',
+      tone: 'warning',
+      blocker: 'Market Watchdog has not loaded yet.',
+      next_action: 'Check backend /api/healthz, /api/readyz, and the managed runtime before expecting scans.',
+      phase: { phase: 'unknown' },
+      components: [],
+      cards: [],
+      component_status_counts: { ready: 0, watching: 0, degraded: 1, blocked: 0, killed: 0 },
+      evidence_million_target: {
+        label: 'Evidence 100M',
+        observed_event_count: 0,
+        live_observed_evidence: 0,
+        simulation_evidence: 0,
+        target_event_count: 100000000,
+        remaining_event_count: 100000000,
+        progress_pct: 0,
+        rate_per_hour: 0,
+        eta_hours: null,
+        eta_days: null,
+        status: 'degraded',
+        usage_mode: 'evidence_memory_target',
+        mutation: 'paper_evidence_state',
+        simulation_counts_toward_live_million: false,
+        evidence_quality: {
+          useful_event_ratio: 0,
+          duplicate_ratio: 0,
+          stale_ratio: 0,
+          simulation_counts_toward_live_million: false,
+        },
+        evidence_accelerator: {
+          status: 'degraded',
+          current_useful_event_count: 0,
+          configured_max_events_per_minute: 1500,
+        },
+        market_possibility_engine: {
+          status: 'degraded',
+          current_simulation_event_count: 0,
+          counts_toward_live_million: false,
+        },
+        can_submit_orders: false,
+        can_submit_live_orders: false,
+      },
+      production_trust: {
+        status: 'needs_attention',
+        label: 'Production Trust Center',
+        alert_delivery: { status: 'not_configured', enabled: false },
+        onboarding: { status: 'needs_attention', items: [], completed_count: 0, total_count: 0 },
+        evidence_quality: { status: 'not_configured', observed_event_count: 0, quality_score: 0 },
+        replay_proof: { status: 'not_configured', evidence_only: true, can_submit_orders: false },
+        provider_reliability: { status: 'degraded' },
+        can_submit_orders: false,
+        can_submit_live_orders: false,
+      },
+      links: {
+        candidate_diagnostics: '/api/orgs/trade-automation/candidate-diagnostics',
+        no_trade_report: '/api/orgs/trade-automation/no-trade-report',
+        daily_ledger: '/api/orgs/trade-automation/daily-ledger',
+        market_day_report: '/api/orgs/trade-automation/market-day-report',
+        alpaca_paper_readiness: '/api/orgs/trade-automation/alpaca-paper-readiness',
+        hft_watchdog_latest: '/api/orgs/trade-automation/hft-watchdog/latest',
+      },
+      position_promotion: {
+        current_max_open_positions: null,
+        next_target_positions: null,
+        clean_cycle_count: 0,
+        required_clean_cycles: null,
+        clean_session_count: 0,
+        required_clean_sessions: null,
+        cycle_progress_pct: 0,
+        session_progress_pct: 0,
+        auto_promotion_mode: 'paper_only',
+        blockers: [],
+      },
+      paper_route_only: true,
+      read_only: true,
+      writes_trade_state: false,
+      can_submit_orders: false,
+      can_submit_live_orders: false,
+      can_clear_kill_switch: false,
+      can_loosen_risk_gates: false,
+    },
+    { key: 'orgs:trade-automation-watchdog', retries: 1 },
+  )
+  tradeAutomationWatchdogCache = {
+    value: payload,
+    expiresAt: Date.now() + TRADE_AUTOMATION_SAFETY_CACHE_TTL_MS,
+  }
+  return cloneFallback(payload)
+}
+
+export async function getOrganizationTradeAutomationProductionTrust() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/production-trust'),
+    {
+      status: 'needs_attention',
+      label: 'Production Trust Center',
+      alert_delivery: { status: 'not_configured', enabled: false, channels: [] },
+      onboarding: { status: 'needs_attention', items: [], completed_count: 0, total_count: 0 },
+      support_bundle: { status: 'not_configured', sanitized: true },
+      evidence_quality: { status: 'not_configured', observed_event_count: 0, quality_score: 0, categories: {} },
+      replay_proof: { status: 'not_configured', evidence_only: true, can_submit_orders: false },
+      provider_reliability: { status: 'degraded' },
+      release_validation: { status: 'degraded', checks: [] },
+      can_submit_orders: false,
+      can_submit_live_orders: false,
+      next_action: 'Production Trust Center has not loaded yet.',
+    },
+    { key: 'orgs:trade-automation-production-trust', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationAlertDeliveryStatus() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/alert-delivery/status'),
+    { status: 'not_configured', enabled: false, channels: [], can_submit_orders: false },
+    { key: 'orgs:trade-automation-alert-delivery', retries: 1 },
+  )
+}
+
+export async function testOrganizationTradeAutomationAlertDelivery() {
+  return unwrap(await api.post('/orgs/trade-automation/alert-delivery/test'))
+}
+
+export async function exportOrganizationTradeAutomationSupportBundle() {
+  return unwrap(await api.post('/orgs/trade-automation/support-bundle/export'))
+}
+
+export async function getOrganizationTradeAutomationEvidenceQuality() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-quality'),
+    { status: 'not_configured', observed_event_count: 0, quality_score: 0, categories: {}, can_submit_orders: false },
+    { key: 'orgs:trade-automation-evidence-quality', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationReplayReport(params = {}) {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/replay-report', { params }),
+    { status: 'not_configured', evidence_only: true, can_submit_orders: false, can_submit_live_orders: false },
+    { key: 'orgs:trade-automation-replay-report', retries: 1 },
+  )
+}
+
+const FALLBACK_EVIDENCE_EDGE = {
+  summary: {
+    candidate_count: 0,
+    allowed_count: 0,
+    blocked_count: 0,
+    missed_move_count: 0,
+    observed_outcome_count: 0,
+    data_status: 'empty',
+    missing_fields: {},
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+    next_action: 'Collect candidate lifecycle rows or closed paper trades before Evidence Edge can estimate blocker value.',
+  },
+  blocker_effectiveness: [],
+  setup_forward_return_stats: [],
+  engine_forward_return_stats: [],
+  regime_forward_return_stats: [],
+  score_bucket_outcomes: [],
+  top_positive_features: [],
+  top_negative_features: [],
+  recommended_ranking_adjustments: [],
+  candidate_rows: [],
+  research_only: true,
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getOrganizationTradeAutomationEvidenceEdgeSummary() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-edge/summary'),
+    FALLBACK_EVIDENCE_EDGE,
+    { key: 'orgs:trade-automation-evidence-edge-summary', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceEdgeBlockers() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-edge/blockers'),
+    { summary: FALLBACK_EVIDENCE_EDGE.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-edge-blockers', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceEdgeSetups() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-edge/setups'),
+    { summary: FALLBACK_EVIDENCE_EDGE.summary, items: [], score_bucket_outcomes: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-edge-setups', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceEdgeEngines() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-edge/engines'),
+    { summary: FALLBACK_EVIDENCE_EDGE.summary, items: [], regime_forward_return_stats: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-edge-engines', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceEdgeRecommendations() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-edge/recommendations'),
+    { summary: FALLBACK_EVIDENCE_EDGE.summary, items: [], top_positive_features: [], top_negative_features: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-edge-recommendations', retries: 1 },
+  )
+}
+
+const FALLBACK_EVIDENCE_REWARD = {
+  summary: {
+    candidate_count: 0,
+    allowed_count: 0,
+    blocked_count: 0,
+    trade_executed_count: 0,
+    observed_outcome_count: 0,
+    missed_move_count: 0,
+    avg_reward: null,
+    reward_distribution: {},
+    reward_by_score_bucket: [],
+    missing_fields: {},
+    data_status: 'empty',
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+    next_action: 'Collect candidate lifecycle rows or closed paper trades before Evidence Reward can score outcomes.',
+  },
+  candidate_rows: [],
+  blocker_rewards: [],
+  engine_rewards: [],
+  setup_rewards: [],
+  ai_rewards: { verdict_count: 0, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+  regime_rewards: [],
+  reward_by_score_bucket: [],
+  research_only: true,
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardSummary() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/summary'),
+    FALLBACK_EVIDENCE_REWARD,
+    { key: 'orgs:trade-automation-evidence-reward-summary', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardCandidates() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/candidates'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-candidates', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardBlockers() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/blockers'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-blockers', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardEngines() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/engines'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-engines', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardSetups() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/setups'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-setups', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardAi() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/ai'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, verdict_count: 0, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-ai', retries: 1 },
+  )
+}
+
+export async function getOrganizationTradeAutomationEvidenceRewardRegimes() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/evidence-reward/regimes'),
+    { summary: FALLBACK_EVIDENCE_REWARD.summary, items: [], research_only: true, paper_route_only: true, can_submit_orders: false, can_submit_live_orders: false, mutation: 'none' },
+    { key: 'orgs:trade-automation-evidence-reward-regimes', retries: 1 },
+  )
+}
+
+const FALLBACK_FORECAST_VALIDATION = {
+  summary: {
+    status: 'empty',
+    generated_at: null,
+    research_only: true,
+    mode: 'research_only',
+    safety: 'Forecast validation is read-only and never adjusts execution, ranking weights, or risk gates.',
+    safety_notes: [
+      'Research only. Does not affect trading.',
+      'Does not change broker routes.',
+      'Does not bypass risk gates.',
+      'Does not place orders.',
+      'Does not grant AI order authority.',
+    ],
+    count: 0,
+    total_forecasts: 0,
+    validated_forecasts: 0,
+    non_rewardable_forecasts: 0,
+    evaluated_count: 0,
+    avg_reward: null,
+    avg_forecast_reward: null,
+    direction_accuracy: null,
+    avg_mae: null,
+    avg_rmse: null,
+    avg_path_mae: null,
+    avg_path_rmse: null,
+    avg_timing_error: null,
+    missing_data_count: 0,
+    missing_field_counts: {},
+    best_prediction: null,
+    worst_prediction: null,
+    reward_formula: 'direction_score + path_fit_score + timing_score - drawdown_penalty - volatility_mismatch_penalty - confidence_penalty',
+    records: [],
+    aggregations: {},
+    missing_fields: {},
+    warnings: [],
+  },
+  predictions: { mode: 'research_only', research_only: true, items: [], records: [], count: 0, safety_notes: [] },
+  models: { mode: 'research_only', research_only: true, by_engine: [], by_source: [], by_model: [], records: [], safety_notes: [] },
+  regimes: { mode: 'research_only', research_only: true, items: [], records: [], safety_notes: [] },
+}
+
+export async function getForecastValidationSummary(params = {}) {
+  return safeRequest(() => api.get('/forecast-validation/summary', { params }), FALLBACK_FORECAST_VALIDATION.summary, { key: 'forecast-validation:summary', retries: 1 })
+}
+
+export async function getForecastValidationPredictions(params = {}) {
+  return safeRequest(() => api.get('/forecast-validation/predictions', { params }), FALLBACK_FORECAST_VALIDATION.predictions, { key: 'forecast-validation:predictions', retries: 1 })
+}
+
+export async function getForecastValidationModels(params = {}) {
+  return safeRequest(() => api.get('/forecast-validation/models', { params }), FALLBACK_FORECAST_VALIDATION.models, { key: 'forecast-validation:models', retries: 1 })
+}
+
+export async function getForecastValidationRegimes(params = {}) {
+  return safeRequest(() => api.get('/forecast-validation/regimes', { params }), FALLBACK_FORECAST_VALIDATION.regimes, { key: 'forecast-validation:regimes', retries: 1 })
+}
+
+const FALLBACK_PROFESSIONAL_BENCHMARK = {
+  status: 'insufficient_evidence',
+  generated_at: null,
+  research_only: true,
+  mode: 'research_only',
+  summary: {
+    benchmark_verdict: 'insufficient_evidence',
+    verdict_reason: 'No rewardable benchmark evidence has been collected yet.',
+    candidate_count: 0,
+    rewardable_count: 0,
+    forecast_count: 0,
+    data_quality_score: 0,
+    hit_rate: null,
+    expected_value: null,
+    average_reward: null,
+    median_reward: null,
+    reward_dispersion: null,
+    slippage_adjusted_reward: null,
+    score_bucket_lift: null,
+    baseline_relative_edge: null,
+    sample_size_warning: true,
+    out_of_sample_status: 'missing_sample_split',
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+  },
+  records: [],
+  aggregations: {},
+  baselines: { available: false, items: [], average_baseline_relative_edge: null, missing_fields: [] },
+  sections: {},
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+  ],
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getProfessionalBenchmarkSummary(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/summary', { params }), FALLBACK_PROFESSIONAL_BENCHMARK, { key: 'professional-benchmark:summary', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkBaselines(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/baselines', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], baselines: FALLBACK_PROFESSIONAL_BENCHMARK.baselines }, { key: 'professional-benchmark:baselines', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkScoreBuckets(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/score-buckets', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], aggregations: { score_bucket_separation: { available: false, items: [] } } }, { key: 'professional-benchmark:score-buckets', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkBlockers(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/blockers', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], aggregations: { blocker_value: { available: false, items: [] } } }, { key: 'professional-benchmark:blockers', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkAi(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/ai', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], aggregations: { ai_verdict_accuracy: { available: false, items: [] } } }, { key: 'professional-benchmark:ai', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkForecast(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/forecast', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], aggregations: { forecast_accuracy: { available: false, items: [] } } }, { key: 'professional-benchmark:forecast', retries: 1 })
+}
+
+export async function getProfessionalBenchmarkExecution(params = {}) {
+  return safeRequest(() => api.get('/professional-benchmark/execution', { params }), { ...FALLBACK_PROFESSIONAL_BENCHMARK, records: [], aggregations: { execution_quality: { available: false } } }, { key: 'professional-benchmark:execution', retries: 1 })
+}
+
+export const FALLBACK_EVIDENCE_OUTCOMES = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  paper_only: true,
+  summary: {
+    candidate_lifecycle_rows: 0,
+    stamped_outcome_rows: 0,
+    candidate_with_outcomes_count: 0,
+    candidate_without_outcomes_count: 0,
+    due_count: 0,
+    available_outcome_count: 0,
+    unavailable_outcome_count: 0,
+    rewardability_lift_candidates: 0,
+    baseline_coverage_rate: 0,
+    execution_cost_coverage_rate: 0,
+    last_run_at: null,
+    primary_baseline_rule: 'random_candidate_forward_return when available, otherwise SPY',
+    research_only: true,
+    paper_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'append_only_research_evidence',
+  },
+  records: [],
+  due_records: [],
+  due: [],
+  aggregations: {
+    missing_field_counts: {},
+    outcomes_by_horizon: {},
+    outcomes_by_candidate: {},
+    baseline_coverage: { rows_with_primary_baseline: 0, coverage_rate: 0 },
+    execution_cost_coverage: { rows_with_execution_cost: 0, coverage_rate: 0 },
+  },
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Paper-route evidence only.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+  ],
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'append_only_research_evidence',
+}
+
+export async function getEvidenceOutcomesSummary(params = {}) {
+  return safeRequest(() => api.get('/evidence-outcomes/summary', { params }), FALLBACK_EVIDENCE_OUTCOMES, { key: 'evidence-outcomes:summary', retries: 1 })
+}
+
+export async function getEvidenceOutcomesDue(params = {}) {
+  return safeRequest(() => api.get('/evidence-outcomes/due', { params }), { ...FALLBACK_EVIDENCE_OUTCOMES, records: [], due_records: [] }, { key: 'evidence-outcomes:due', retries: 1 })
+}
+
+export async function getEvidenceOutcomesRecords(params = {}) {
+  return safeRequest(() => api.get('/evidence-outcomes/records', { params }), { ...FALLBACK_EVIDENCE_OUTCOMES, records: [] }, { key: 'evidence-outcomes:records', retries: 1 })
+}
+
+export async function stampDueEvidenceOutcomes() {
+  return unwrap(await api.post('/evidence-outcomes/stamp-due'))
+}
+
+const FALLBACK_DATA_COMPLETENESS = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  mode: 'research_only',
+  summary: {
+    status: 'empty',
+    total_records: 0,
+    complete_records: 0,
+    incomplete_records: 0,
+    rewardable_records: 0,
+    non_rewardable_records: 0,
+    completion_rate: 0,
+    rewardability_rate: 0,
+    benchmark_ready: false,
+    source_summaries: {},
+    highest_priority_missing_fields: [],
+    benchmark_blockers: [],
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+  },
+  records: [],
+  records_by_source: {},
+  aggregations: {
+    total_records: 0,
+    complete_records: 0,
+    incomplete_records: 0,
+    rewardable_records: 0,
+    non_rewardable_records: 0,
+    completion_rate: 0,
+    rewardability_rate: 0,
+    missing_field_counts: {},
+    missing_by_source: {},
+    missing_by_engine: {},
+    missing_by_setup_type: {},
+    missing_by_regime: {},
+    highest_priority_missing_fields: [],
+    benchmark_blockers: [],
+  },
+  missing_fields: {},
+  warnings: [],
+  safe_next_actions: [],
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getDataCompletenessSummary(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/summary', { params }), FALLBACK_DATA_COMPLETENESS, { key: 'data-completeness:summary', retries: 1 })
+}
+
+export async function getDataCompletenessCandidates(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/candidates', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:candidates', retries: 1 })
+}
+
+export async function getDataCompletenessForecasts(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/forecasts', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:forecasts', retries: 1 })
+}
+
+export async function getDataCompletenessAi(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/ai', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:ai', retries: 1 })
+}
+
+export async function getDataCompletenessBlockers(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/blockers', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:blockers', retries: 1 })
+}
+
+export async function getDataCompletenessExecution(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/execution', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:execution', retries: 1 })
+}
+
+export async function getDataCompletenessBenchmarkReadiness(params = {}) {
+  return safeRequest(() => api.get('/data-completeness/benchmark-readiness', { params }), { ...FALLBACK_DATA_COMPLETENESS, records: [] }, { key: 'data-completeness:benchmark-readiness', retries: 1 })
+}
+
+const FALLBACK_WALK_FORWARD = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  summary: {
+    experiment_count: 0,
+    draft_count: 0,
+    frozen_or_locked_count: 0,
+    status_counts: {},
+    verdict_counts: {},
+    latest_experiment_id: null,
+    research_only: true,
+    storage: 'sanitized_runtime_metadata',
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'research_metadata_only',
+    writes_execution_config: false,
+    writes_broker_config: false,
+    writes_risk_config: false,
+    writes_ranking_config: false,
+  },
+  record: null,
+  records: [],
+  warnings: [],
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+    'Does not change risk settings automatically.',
+  ],
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'research_metadata_only',
+  writes_execution_config: false,
+  writes_broker_config: false,
+  writes_risk_config: false,
+  writes_ranking_config: false,
+}
+
+export async function getWalkForwardSummary(params = {}) {
+  return safeRequest(() => api.get('/walk-forward/summary', { params }), FALLBACK_WALK_FORWARD, { key: 'walk-forward:summary', retries: 1 })
+}
+
+export async function getWalkForwardExperiments(params = {}) {
+  return safeRequest(() => api.get('/walk-forward/experiments', { params }), FALLBACK_WALK_FORWARD, { key: 'walk-forward:experiments', retries: 1 })
+}
+
+export async function getWalkForwardExperiment(experimentId) {
+  return safeRequest(() => api.get(`/walk-forward/experiments/${encodeURIComponent(experimentId)}`), { ...FALLBACK_WALK_FORWARD, record: null }, { key: 'walk-forward:experiment', retries: 1 })
+}
+
+export async function createWalkForwardExperiment(payload) {
+  return strictRequest(() => api.post('/walk-forward/experiments', payload), { retries: 0 })
+}
+
+export async function freezeWalkForwardExperiment(experimentId) {
+  return strictRequest(() => api.post(`/walk-forward/experiments/${encodeURIComponent(experimentId)}/freeze`, {}), { retries: 0 })
+}
+
+export async function cloneWalkForwardExperiment(experimentId) {
+  return strictRequest(() => api.post(`/walk-forward/experiments/${encodeURIComponent(experimentId)}/clone`, {}), { retries: 0 })
+}
+
+const FALLBACK_RESEARCH_PROMOTION = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  summary: {
+    entity_count: 0,
+    status_counts: {},
+    type_counts: {},
+    paper_proven_count: 0,
+    needs_more_evidence_count: 0,
+    rejected_count: 0,
+    benchmark_verdict: 'insufficient_evidence',
+    walk_forward_status: null,
+    walk_forward_verdict: null,
+    data_quality_score: null,
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'research_metadata_only',
+    writes_execution_config: false,
+    writes_broker_config: false,
+    writes_risk_config: false,
+    writes_ranking_config: false,
+  },
+  promotion_status: 'summary',
+  record: null,
+  records: [],
+  evidence_used: {},
+  warnings: [],
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+    'Does not change risk limits automatically.',
+    'Does not grant AI order authority.',
+  ],
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'research_metadata_only',
+  writes_execution_config: false,
+  writes_broker_config: false,
+  writes_risk_config: false,
+  writes_ranking_config: false,
+}
+
+export async function getResearchPromotionSummary(params = {}) {
+  return safeRequest(() => api.get('/research-promotion/summary', { params }), FALLBACK_RESEARCH_PROMOTION, { key: 'research-promotion:summary', retries: 1 })
+}
+
+export async function getResearchPromotionEntities(params = {}) {
+  return safeRequest(() => api.get('/research-promotion/entities', { params }), FALLBACK_RESEARCH_PROMOTION, { key: 'research-promotion:entities', retries: 1 })
+}
+
+export async function getResearchPromotionEntity(entityId) {
+  return safeRequest(() => api.get(`/research-promotion/entities/${encodeURIComponent(entityId)}`), { ...FALLBACK_RESEARCH_PROMOTION, record: null }, { key: 'research-promotion:entity', retries: 1 })
+}
+
+export async function setResearchPromotionStatus(entityId, payload) {
+  return strictRequest(() => api.post(`/research-promotion/entities/${encodeURIComponent(entityId)}/status`, payload), { retries: 0 })
+}
+
+const FALLBACK_SCORE_CALIBRATION = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  summary: {
+    status: 'empty',
+    candidate_count: 0,
+    rewardable_count: 0,
+    non_rewardable_count: 0,
+    score_scale: { scale: 'missing', description: 'No score fields were present.' },
+    bucket_lift: null,
+    monotonicity_score: null,
+    calibration_warning: 'Need rewardable records in multiple score buckets before calibration can be trusted.',
+    score_to_reward_correlation: null,
+    score_to_forecast_accuracy_correlation: null,
+    score_to_execution_adjusted_reward_correlation: null,
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+    writes_execution_config: false,
+    writes_broker_config: false,
+    writes_risk_config: false,
+    writes_ranking_config: false,
+  },
+  records: [],
+  aggregations: {
+    score_bucket_separation: { available: false, items: [], bucket_lift: null, monotonicity_score: null },
+    feature_attribution: { available: false, items: [], top_positive_features: [], top_negative_features: [], false_positive_drivers: [], false_negative_drivers: [] },
+    setup_specific_lift: [],
+    engine_specific_lift: [],
+    regime_specific_lift: [],
+    recommendations: [],
+  },
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+  writes_execution_config: false,
+  writes_broker_config: false,
+  writes_risk_config: false,
+  writes_ranking_config: false,
+}
+
+export async function getScoreCalibrationSummary(params = {}) {
+  return safeRequest(() => api.get('/score-calibration/summary', { params }), FALLBACK_SCORE_CALIBRATION, { key: 'score-calibration:summary', retries: 1 })
+}
+
+export async function getScoreCalibrationBuckets(params = {}) {
+  return safeRequest(() => api.get('/score-calibration/buckets', { params }), { ...FALLBACK_SCORE_CALIBRATION, records: [] }, { key: 'score-calibration:buckets', retries: 1 })
+}
+
+export async function getScoreCalibrationFeatures(params = {}) {
+  return safeRequest(() => api.get('/score-calibration/features', { params }), { ...FALLBACK_SCORE_CALIBRATION, records: [] }, { key: 'score-calibration:features', retries: 1 })
+}
+
+export async function getScoreCalibrationRegimes(params = {}) {
+  return safeRequest(() => api.get('/score-calibration/regimes', { params }), { ...FALLBACK_SCORE_CALIBRATION, records: [] }, { key: 'score-calibration:regimes', retries: 1 })
+}
+
+export async function getScoreCalibrationRecommendations(params = {}) {
+  return safeRequest(() => api.get('/score-calibration/recommendations', { params }), { ...FALLBACK_SCORE_CALIBRATION, records: [] }, { key: 'score-calibration:recommendations', retries: 1 })
+}
+
+export async function getOrganizationExecutionDiagnostics() {
+  return safeRequest(() => api.get('/orgs/execution/diagnostics'), { configured: {}, providers: {} }, { key: 'orgs:execution-diagnostics', retries: 2, retryDelayMs: 250 })
+}
+export async function getOrganizationTradeAutomationDailyLedger(params = {}) {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/daily-ledger', { params }),
+    { items: [], count: 0, returned_count: 0 },
+    { key: 'orgs:trade-automation-daily-ledger', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationDailySafetySummary(params = {}) {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/daily-safety-summary', { params }),
+    { record_count: 0, latest_status: 'unknown', strongest_status: 'unknown', status_counts: {}, event_type_counts: {} },
+    { key: 'orgs:trade-automation-daily-safety-summary', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationHftWatchdogLatest() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/hft-watchdog/latest'),
+    { available: false, status: 'not_started', message: 'No HFT watchdog summary has been written yet.' },
+    { key: 'orgs:trade-automation-hft-watchdog', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationAlpacaPaperReadiness() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/alpaca-paper-readiness'),
+    {
+      status: 'degraded',
+      provider: 'alpaca',
+      mode: 'paper',
+      route: 'broker_paper',
+      credentials: { api_key_present: false, secret_key_present: false, secrets_exposed: false },
+      account_heartbeat: { available: false, buying_power_is_ceiling: true },
+      reconciliation: { open_count: 0, pending_count: 0, closed_count: 0, needs_review: false },
+    },
+    { key: 'orgs:trade-automation-alpaca-paper-readiness', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationAiEvidenceReviewStatus() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/ai-evidence-review/status'),
+    {
+      status: 'disabled',
+      mode: 'shadow_review',
+      settings: {
+        ai_evidence_review_enabled: false,
+        ai_evidence_review_mode: 'shadow_review',
+        ai_evidence_min_confidence: 0.7,
+        ai_evidence_max_candidates_per_cycle: 12,
+      },
+      safety: { paper_route_only: true, can_override_risk_gates: false, can_submit_orders: false },
+    },
+    { key: 'orgs:trade-automation-ai-evidence-review', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationMarketSession() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/market-session'),
+    {
+      status: 'degraded',
+      label: 'Needs attention',
+      tone: 'warning',
+      phase: { phase: 'unknown' },
+      components: [],
+      desks: { items: [], count: 0 },
+      no_trade_escalation: { stage: 'monitoring' },
+      links: {},
+      paper_route_only: true,
+      mutation: 'none',
+    },
+    { key: 'orgs:trade-automation-market-session', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationNoTradeReport() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/no-trade-report'),
+    {
+      read_only: true,
+      mutation: 'none',
+      can_submit_orders: false,
+      escalation_stage: 'monitoring',
+      trades_today: 0,
+      desk_reports: [],
+      operator_actions: [],
+    },
+    { key: 'orgs:trade-automation-no-trade-report', retries: 1 },
+  )
+}
+export async function getOrganizationTradeAutomationMarketDayReport() {
+  return safeRequest(
+    () => api.get('/orgs/trade-automation/market-day-report'),
+    {
+      ok: false,
+      artifact: null,
+      market_session: null,
+      no_trade_report: null,
+      close_report: null,
+      paper_route_only: true,
+      mutation: 'none',
+    },
+    { key: 'orgs:trade-automation-market-day-report', retries: 1 },
+  )
+}
+export async function updateOrganizationTradeAutomationDesk(deskKey, payload = {}) {
+  return unwrap(await api.patch(`/orgs/trade-automation/desks/${encodeURIComponent(deskKey)}`, payload || {}))
+}
+export async function scanOrganizationTradeAutomationDesk(deskKey, payload = {}) {
+  return unwrap(await api.post(`/orgs/trade-automation/desks/${encodeURIComponent(deskKey)}/scan`, payload || {}))
+}
+export async function getOrganizationTradeAutomationDeskCandidateDiagnostics(deskKey, options = {}) {
+  const params = {}
+  if (options.refresh) params.refresh = true
+  return strictRequest(() => api.get(`/orgs/trade-automation/desks/${encodeURIComponent(deskKey)}/candidate-diagnostics`, { params }))
+}
+export async function getInternalBrokerRouter() {
+  return safeRequest(
+    () => api.get('/orgs/paper-execution-router'),
+    {
+      status: 'unknown',
+      mode: 'alpaca_paper',
+      service_label: 'Alpaca paper route monitor',
+      execution_router_mode: 'alpaca_paper',
+      deprecated_alias: 'internal-broker-router',
+      broker_mode: 'alpaca_paper',
+      paper_only: true,
+      regulated_broker_dealer: false,
+      real_money_execution_enabled: false,
+      licensed_realtime_options_data: false,
+      health: {
+        status: 'degraded',
+        detail: 'Alpaca paper route snapshot is not available yet.',
+        metrics: {},
+      },
+      routing: {
+        equities: 'alpaca_paper',
+        options: 'alpaca_paper',
+        options_data: 'free_delayed',
+        execution_venue: 'alpaca_paper',
+        live_routing_enabled: false,
+      },
+      balances: {
+        internal_simulated: {
+          equity: 100000,
+          cash: 100000,
+          buying_power: 100000,
+          option_buying_power: 100000,
+          status: 'ready',
+        },
+        alpaca_paper: { status: 'disabled' },
+        combined_paper: {
+          equity: 100000,
+          cash: 100000,
+          buying_power: 100000,
+          status: 'ready',
+        },
+      },
+      orders: { open: [], rejected: [], recent_fills: [] },
+      positions: [],
+      audit: { hash_chain_valid: true, latest_events: [] },
+    },
+    { key: 'orgs:internal-broker-router', retries: 1 },
+  )
+}
+export async function submitInternalBrokerPaperOrder(payload = {}) {
+  return unwrap(await api.post('/orgs/paper-execution-router/orders', payload || {}))
+}
+export async function cancelInternalBrokerPaperOrder(brokerOrderId) {
+  return unwrap(await api.post(`/orgs/paper-execution-router/orders/${encodeURIComponent(brokerOrderId)}/cancel`, {}))
+}
+export async function syncInternalBrokerRouter() {
+  return unwrap(await api.post('/orgs/paper-execution-router/sync', {}))
 }
 export async function updateOrganizationTradeAutomation(payload, options = {}) {
   const nextPayload = {
@@ -1386,7 +2457,7 @@ export async function getDashboard(consumer = 'desk', options = {}) {
     return liveFallback || createFallbackDashboard()
   }
 }
-export async function analyzeTicker(payload) { return unwrap(await api.post('/market/analyze', payload)) }
+export async function analyzeTicker(payload) { return unwrap(await api.post('/market/analyze', payload, { timeout: 70000 })) }
 export async function getChart(ticker, interval = '5m', pointsLimit = 300, regularHoursOnly = false) {
   return unwrap(
     await api.get(`/market/chart/${ticker}`, {
@@ -1523,8 +2594,8 @@ export async function getTradeSummary() {
       status: 'locked',
       tone: 'warning',
       label: 'Paper first',
-      detail: 'Paper stability evidence is still thin. Keep broker-live routing on paper until replay depth and fill drift improve.',
-      basis: 'Need resolved board outcomes, saved fill replay, and a clean order lifecycle before broker-live pilot routing.',
+      detail: 'Paper stability evidence is still thin. Keep Alpaca live routing on paper until replay depth and fill drift improve.',
+      basis: 'Need resolved board outcomes, saved fill replay, and a clean order lifecycle before scoped live routing.',
       allows_live_rollout: false,
       metrics: {
         resolved_count: 0,
@@ -1542,15 +2613,15 @@ export async function getTradeSummary() {
       history: {
         count: 0,
         trend: 'unknown',
-        label: 'No broker-live history',
+        label: 'No live readiness history',
         tone: 'info',
-        detail: 'Saved boards and fill replay will populate broker-live history once the desk records a few validation checkpoints.',
+        detail: 'Saved boards and fill replay will populate live readiness history once the desk records a few validation checkpoints.',
         items: [],
       },
       order_lifecycle: {
         summary: {
           status: 'healthy',
-          message: 'Order lifecycle is healthy for the current broker-live snapshot.',
+          message: 'Order lifecycle is healthy for the current live readiness snapshot.',
           pending_order_count: 0,
           stale_pending_count: 0,
           reject_count: 0,
@@ -1571,9 +2642,9 @@ export async function getTradeSummary() {
       count: 0,
       allowed_count: 0,
       blocked_count: 0,
-      label: 'No broker-live pilot yet',
+      label: 'No live attempt yet',
       tone: 'info',
-      detail: 'Broker-live attempts will be recorded here once the desk clears the paper gate and routes a pilot order.',
+      detail: 'Live attempts will be recorded here once the desk clears the paper gate and routes a scoped order.',
       latest: null,
       items: [],
     },
@@ -2011,3 +3082,360 @@ export async function deleteNote(noteId) { return unwrap(await api.delete(`/fron
 
 export async function bulkUpdateNotes(payload) { return unwrap(await api.post('/frontend/notes/bulk', payload)) }
 export async function snoozeNote(noteId, minutes) { return unwrap(await api.post(`/frontend/notes/${noteId}/snooze`, { minutes })) }
+
+export async function getStrategies(params = {}) { return safeRequest(() => api.get('/strategies', { params }), { items: [], count: 0 }, { key: 'strategies:list', retries: 1 }) }
+export async function createStrategy(payload) { return unwrap(await api.post('/strategies', payload)) }
+export async function getStrategy(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}`), { retries: 1 }) }
+export async function updateProductizedStrategy(strategyId, payload) { return unwrap(await api.patch(`/strategies/${encodeURIComponent(strategyId)}`, payload || {})) }
+export async function createStrategyVersion(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/versions`, payload)) }
+export async function getStrategyVersions(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}/versions`), { retries: 1 }) }
+export async function startStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/start`, payload)) }
+export async function stopStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/stop`, payload)) }
+export async function promoteStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/promote`, payload)) }
+export async function rollbackStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/rollback`, payload)) }
+export async function getStrategyReadiness(strategyId) { return strictRequest(() => api.get(`/readiness/strategies/${encodeURIComponent(strategyId)}`), { retries: 1 }) }
+export async function evaluateStrategyReadiness(strategyId, payload = {}) { return unwrap(await api.post(`/readiness/strategies/${encodeURIComponent(strategyId)}/evaluate`, payload)) }
+export async function getDeskReadiness() { return strictRequest(() => api.get('/readiness/desk'), { retries: 1 }) }
+export async function getStrategyRuns(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}/runs`), { retries: 1 }) }
+export async function getStrategyMetrics(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}/metrics`), { retries: 1 }) }
+
+export async function getProductAutomationStatus() { return strictRequest(() => api.get('/automation/status'), { retries: 1 }) }
+export async function requestStrategyLive(strategyId, payload = {}) { return unwrap(await api.post(`/automation/strategies/${encodeURIComponent(strategyId)}/live/request`, payload)) }
+export async function killProductStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/automation/strategies/${encodeURIComponent(strategyId)}/kill`, payload)) }
+export async function getProductAutomationEvents(params = {}) { return safeRequest(() => api.get('/automation/events', { params }), { items: [], count: 0 }, { key: 'automation:events', retries: 1 }) }
+
+export async function createLiveAuthorization(payload = {}) { return unwrap(await api.post('/live/authorizations', payload)) }
+export async function getLiveAuthorizations(params = {}) { return safeRequest(() => api.get('/live/authorizations', { params }), { items: [], count: 0 }, { key: 'live:authorizations', retries: 1 }) }
+export async function getLiveAuthorization(authorizationId) { return strictRequest(() => api.get(`/live/authorizations/${encodeURIComponent(authorizationId)}`), { retries: 1 }) }
+export async function revokeLiveAuthorization(authorizationId, payload = {}) { return unwrap(await api.post(`/live/authorizations/${encodeURIComponent(authorizationId)}/revoke`, payload)) }
+export async function requestLiveStart(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/request`, payload)) }
+export async function armLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/arm`, payload)) }
+export async function startLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/start`, payload)) }
+export async function pauseLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/pause`, payload)) }
+export async function resumeLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/resume`, payload)) }
+export async function stopLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/stop`, payload)) }
+export async function killLiveStrategy(strategyId, payload = {}) { return unwrap(await api.post(`/strategies/${encodeURIComponent(strategyId)}/live/kill`, payload)) }
+export async function getLiveStatus() { return safeRequest(() => api.get('/live/status'), { feature_flags: {}, summary: {}, sessions: [] }, { key: 'live:status', retries: 1 }) }
+export async function getLiveRiskEvents(params = {}) { return safeRequest(() => api.get('/live/risk/events', { params }), { items: [], count: 0 }, { key: 'live:risk-events', retries: 1 }) }
+export async function getLiveKillSwitch(params = {}) { return safeRequest(() => api.get('/live/kill-switch', { params }), { active: false, items: [], count: 0 }, { key: 'live:kill-switch', retries: 1 }) }
+export async function activateLiveKillSwitch(payload = {}) { return unwrap(await api.post('/live/kill-all', payload)) }
+export async function clearLiveKillSwitch(payload = {}) { return unwrap(await api.post('/live/kill-switch/clear', payload)) }
+export async function getLiveOrders(params = {}) { return safeRequest(() => api.get('/live/orders', { params }), { items: [], count: 0 }, { key: 'live:orders', retries: 1 }) }
+export async function getLiveOrder(orderIntentId) { return strictRequest(() => api.get(`/live/orders/${encodeURIComponent(orderIntentId)}`), { retries: 1 }) }
+export async function approveLiveOrder(orderIntentId, payload = {}) { return unwrap(await api.post(`/live/orders/${encodeURIComponent(orderIntentId)}/approve`, payload)) }
+export async function rejectLiveOrder(orderIntentId, payload = {}) { return unwrap(await api.post(`/live/orders/${encodeURIComponent(orderIntentId)}/reject`, payload)) }
+export async function runLiveRiskCheck(orderIntentId, payload = {}) { return unwrap(await api.post(`/live/orders/${encodeURIComponent(orderIntentId)}/risk-check`, payload)) }
+
+export async function getRiskPolicies() { return safeRequest(() => api.get('/risk/policies'), { items: [], count: 0 }, { key: 'risk:policies', retries: 1 }) }
+export async function createRiskPolicy(payload) { return unwrap(await api.post('/risk/policies', payload)) }
+export async function updateRiskPolicy(policyId, payload = {}) { return unwrap(await api.patch(`/risk/policies/${encodeURIComponent(policyId)}`, payload)) }
+export async function runRiskCheck(payload = {}) { return unwrap(await api.post('/risk/check', payload)) }
+export async function getRiskEvents(params = {}) { return safeRequest(() => api.get('/risk/events', { params }), { items: [], count: 0 }, { key: 'risk:events', retries: 1 }) }
+export async function activateKillSwitch(payload = {}) { return unwrap(await api.post('/risk/kill-switch', payload)) }
+export async function clearKillSwitch(payload = {}) { return unwrap(await api.post('/risk/kill-switch/clear', payload)) }
+
+export async function getAuditEvents(params = {}) { return safeRequest(() => api.get('/audit/events', { params }), { items: [], count: 0 }, { key: 'audit:events', retries: 1 }) }
+export async function getTradeReplay(tradeId) { return strictRequest(() => api.get(`/audit/trades/${encodeURIComponent(tradeId)}/replay`), { retries: 1 }) }
+export async function getStrategyAudit(strategyId) { return strictRequest(() => api.get(`/audit/strategies/${encodeURIComponent(strategyId)}`), { retries: 1 }) }
+export async function exportAuditBundle(payload = {}) { return unwrap(await api.post('/audit/export', payload)) }
+
+const FALLBACK_EXECUTION_QUALITY_TCA = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  paper_only: true,
+  summary: {
+    status: 'empty',
+    trade_count: 0,
+    paper_only: true,
+    average_slippage: null,
+    median_slippage: null,
+    average_fill_delay_seconds: null,
+    average_alpha_decay: null,
+    average_execution_adjusted_reward: null,
+    average_spread_cost: null,
+    average_cost_adjusted_edge: null,
+    missed_fill_rate: null,
+    partial_fill_rate: null,
+    execution_quality_score: null,
+    research_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+  },
+  records: [],
+  aggregations: {
+    average_slippage: null,
+    median_slippage: null,
+    slippage_by_engine: [],
+    slippage_by_setup_type: [],
+    slippage_by_symbol: [],
+    slippage_by_regime: [],
+    fill_delay_by_engine: [],
+    alpha_decay_by_engine: [],
+    execution_adjusted_reward_by_setup: [],
+    spread_cost_by_setup: [],
+    missed_fill_rate: null,
+    partial_fill_rate: null,
+    execution_quality_score: null,
+  },
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Paper-route evidence only.',
+    'Does not place orders.',
+    'Does not change order routing.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getExecutionQualityTcaSummary(params = {}) { return safeRequest(() => api.get('/execution-quality/summary', { params }), FALLBACK_EXECUTION_QUALITY_TCA, { key: 'execution-quality:summary', retries: 1 }) }
+export async function getExecutionQualityTcaTrades(params = {}) { return safeRequest(() => api.get('/execution-quality/trades', { params }), { ...FALLBACK_EXECUTION_QUALITY_TCA, records: [] }, { key: 'execution-quality:trades', retries: 1 }) }
+export async function getExecutionQualityTcaSlippage(params = {}) { return safeRequest(() => api.get('/execution-quality/slippage', { params }), { ...FALLBACK_EXECUTION_QUALITY_TCA, records: [] }, { key: 'execution-quality:slippage', retries: 1 }) }
+export async function getExecutionQualityTcaAlphaDecay(params = {}) { return safeRequest(() => api.get('/execution-quality/alpha-decay', { params }), { ...FALLBACK_EXECUTION_QUALITY_TCA, records: [] }, { key: 'execution-quality:alpha-decay', retries: 1 }) }
+export async function getExecutionQualityTcaEngines(params = {}) { return safeRequest(() => api.get('/execution-quality/engines', { params }), { ...FALLBACK_EXECUTION_QUALITY_TCA, records: [] }, { key: 'execution-quality:engines', retries: 1 }) }
+export async function getExecutionQualityTcaSetups(params = {}) { return safeRequest(() => api.get('/execution-quality/setups', { params }), { ...FALLBACK_EXECUTION_QUALITY_TCA, records: [] }, { key: 'execution-quality:setups', retries: 1 }) }
+
+export const FALLBACK_PORTFOLIO_RISK_INTELLIGENCE = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  paper_only: true,
+  summary: {
+    status: 'empty',
+    position_count: 0,
+    gross_exposure: 0,
+    net_exposure: 0,
+    long_exposure: 0,
+    short_or_proxy_exposure: 0,
+    symbol_concentration: null,
+    sector_concentration: null,
+    correlation_heat: null,
+    liquidity_exposure: 0,
+    beta_to_SPY: null,
+    beta_to_QQQ: null,
+    drawdown_state: 'unknown',
+    daily_risk_budget_usage: null,
+    open_heat: null,
+    research_only: true,
+    paper_only: true,
+    paper_route_only: true,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'none',
+  },
+  records: [],
+  aggregations: {
+    gross_exposure: 0,
+    net_exposure: 0,
+    long_exposure: 0,
+    short_or_proxy_exposure: 0,
+    sector_exposure: [],
+    engine_exposure: [],
+    setup_exposure: [],
+    strategy_exposure: [],
+    regime_exposure: [],
+    concentration: { top_symbols: [], top_sectors: [] },
+    correlation_heat: { buckets: [] },
+    liquidity_exposure: { warnings: [] },
+    drawdown_state: {},
+    daily_risk_budget_usage: {},
+    open_heat: {},
+    forecast_confidence_exposure: { buckets: [] },
+  },
+  stress_tests: [],
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Paper-route evidence only.',
+    'Risk visibility only. Does not enforce, loosen, or change risk gates.',
+    'Does not place or block orders.',
+    'Does not change broker routes.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'none',
+}
+
+export async function getPortfolioRiskSummary(params = {}) { return safeRequest(() => api.get('/portfolio-risk/summary', { params }), FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, { key: 'portfolio-risk:summary', retries: 1 }) }
+export async function getPortfolioRiskExposures(params = {}) { return safeRequest(() => api.get('/portfolio-risk/exposures', { params }), { ...FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, records: [] }, { key: 'portfolio-risk:exposures', retries: 1 }) }
+export async function getPortfolioRiskConcentration(params = {}) { return safeRequest(() => api.get('/portfolio-risk/concentration', { params }), { ...FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, records: [] }, { key: 'portfolio-risk:concentration', retries: 1 }) }
+export async function getPortfolioRiskCorrelation(params = {}) { return safeRequest(() => api.get('/portfolio-risk/correlation', { params }), { ...FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, records: [] }, { key: 'portfolio-risk:correlation', retries: 1 }) }
+export async function getPortfolioRiskStressTests(params = {}) { return safeRequest(() => api.get('/portfolio-risk/stress-tests', { params }), { ...FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, records: [] }, { key: 'portfolio-risk:stress-tests', retries: 1 }) }
+export async function getPortfolioRiskRegimes(params = {}) { return safeRequest(() => api.get('/portfolio-risk/regimes', { params }), { ...FALLBACK_PORTFOLIO_RISK_INTELLIGENCE, records: [] }, { key: 'portfolio-risk:regimes', retries: 1 }) }
+
+export const FALLBACK_SHADOW_MODE = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  summary: {
+    status: 'empty',
+    record_count: 0,
+    human_rewardable_count: 0,
+    system_rewardable_count: 0,
+    comparison_count: 0,
+    human_win_count: 0,
+    system_win_count: 0,
+    tie_count: 0,
+    human_direction_accuracy: null,
+    system_direction_accuracy: null,
+    human_avg_reward: null,
+    system_avg_reward: null,
+    human_vs_system_edge: null,
+    can_submit_orders: false,
+    can_submit_live_orders: false,
+    mutation: 'research_metadata_only',
+  },
+  records: [],
+  comparisons: [],
+  aggregations: {
+    human_direction_accuracy: null,
+    system_direction_accuracy: null,
+    human_target_hit_rate: null,
+    system_target_hit_rate: null,
+    human_invalidation_hit_rate: null,
+    system_invalidation_hit_rate: null,
+    human_avg_reward: null,
+    system_avg_reward: null,
+    human_vs_system_edge: null,
+    human_false_positive_rate: null,
+    system_false_positive_rate: null,
+    human_false_negative_rate: null,
+    system_false_negative_rate: null,
+    override_quality: {},
+    missed_winner_comparison: {},
+    bias_diagnostics: { items: [], counts: {} },
+  },
+  warnings: [],
+  missing_fields: {},
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not change ranking weights automatically.',
+  ],
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  mutation: 'research_metadata_only',
+}
+
+export async function getShadowModeSummary(params = {}) { return safeRequest(() => api.get('/shadow-mode/summary', { params }), FALLBACK_SHADOW_MODE, { key: 'shadow-mode:summary', retries: 1 }) }
+export async function getShadowModeRecords(params = {}) { return safeRequest(() => api.get('/shadow-mode/records', { params }), { ...FALLBACK_SHADOW_MODE, records: [] }, { key: 'shadow-mode:records', retries: 1 }) }
+export async function getShadowModeComparisons(params = {}) { return safeRequest(() => api.get('/shadow-mode/comparisons', { params }), { ...FALLBACK_SHADOW_MODE, records: [] }, { key: 'shadow-mode:comparisons', retries: 1 }) }
+export async function getShadowModeBias(params = {}) { return safeRequest(() => api.get('/shadow-mode/bias', { params }), { ...FALLBACK_SHADOW_MODE, records: [] }, { key: 'shadow-mode:bias', retries: 1 }) }
+export async function createHumanShadowThesis(payload = {}) { return unwrap(await api.post('/shadow-mode/human-thesis', payload || {})) }
+
+export const FALLBACK_AI_AGENTS = {
+  status: 'empty',
+  generated_at: null,
+  research_only: true,
+  authority_level: 'research_only',
+  summary: {
+    memo_count: 0,
+    committee_report_count: 0,
+    role_count: 14,
+    desk_agent_count: 5,
+    permission_model: 'read-only decision support with append-only sanitized research memo storage',
+  },
+  record: null,
+  records: [],
+  warnings: [],
+  missing_fields: [],
+  memos_created: [],
+  agents_run: [],
+  agents_skipped: [],
+  llm_available: false,
+  fallback_used: true,
+  safety_checks_passed: true,
+  execution_mutation: false,
+  broker_route_mutation: false,
+  risk_gate_mutation: false,
+  ranking_mutation: false,
+  safety_notes: [
+    'Research only. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not clear kill switches.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+}
+
+export async function getAiAgentsSummary(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/summary', { params }), FALLBACK_AI_AGENTS, { key: 'ai-agents:summary', retries: 1 })
+}
+
+export async function getAiAgentRoles(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/roles', { params }), { ...FALLBACK_AI_AGENTS, records: [] }, { key: 'ai-agents:roles', retries: 1 })
+}
+
+export async function getAiAgentMemos(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/memos', { params }), { ...FALLBACK_AI_AGENTS, records: [] }, { key: 'ai-agents:memos', retries: 1 })
+}
+
+export async function getAiAgentMemo(memoId) {
+  return safeRequest(() => api.get(`/ai-agents/memos/${encodeURIComponent(memoId)}`), { ...FALLBACK_AI_AGENTS, record: null }, { key: 'ai-agents:memo', retries: 1 })
+}
+
+export async function getAiAgentsCommitteeLatest(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/committee/latest', { params }), { ...FALLBACK_AI_AGENTS, record: null }, { key: 'ai-agents:committee', retries: 1 })
+}
+
+export async function getAiAgentsSafety(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/safety', { params }), FALLBACK_AI_AGENTS, { key: 'ai-agents:safety', retries: 1 })
+}
+
+export async function getAiAgentsLlmStatus(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/llm-status', { params }), FALLBACK_AI_AGENTS, { key: 'ai-agents:llm-status', retries: 1 })
+}
+
+export async function getAiAgentsReadinessBacklog(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/readiness-backlog', { params }), { ...FALLBACK_AI_AGENTS, records: [] }, { key: 'ai-agents:readiness-backlog', retries: 1 })
+}
+
+export async function getAiAgentsExternalReview(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/external-review', { params }), { ...FALLBACK_AI_AGENTS, records: [] }, { key: 'ai-agents:external-review', retries: 1 })
+}
+
+export async function getAiAgentProposals(params = {}) {
+  return safeRequest(() => api.get('/ai-agents/proposals', { params }), { ...FALLBACK_AI_AGENTS, records: [] }, { key: 'ai-agents:proposals', retries: 1 })
+}
+
+export async function createAiAgentProposal(payload = {}) {
+  return strictRequest(() => api.post('/ai-agents/proposals', payload || {}), { retries: 0 })
+}
+
+export async function decideAiAgentProposal(proposalId, payload = {}) {
+  return strictRequest(() => api.post(`/ai-agents/proposals/${encodeURIComponent(proposalId)}/decision`, payload || {}), { retries: 0 })
+}
+
+export async function runAiAgentRole(roleName) {
+  return strictRequest(() => api.post(`/ai-agents/run-role/${encodeURIComponent(roleName)}`, {}), { retries: 0 })
+}
+
+export async function runAiAgentsCommittee() {
+  return strictRequest(() => api.post('/ai-agents/run-committee', {}), { retries: 0 })
+}
+
+export async function runAiDeskAgent(deskName) {
+  return strictRequest(() => api.post(`/ai-agents/run-desk/${encodeURIComponent(deskName)}`, {}), { retries: 0 })
+}
+
+export async function getExecutionQualitySummary(params = {}) { return strictRequest(() => api.get('/execution-analytics/summary', { params }), { retries: 1 }) }
+export async function getExecutionSlippage(params = {}) { return safeRequest(() => api.get('/execution-analytics/slippage', { params }), { summary: {}, rows: [] }, { key: 'execution:slippage', retries: 1 }) }
+export async function getStrategyExecutionQuality(strategyId, params = {}) { return strictRequest(() => api.get(`/execution-analytics/strategies/${encodeURIComponent(strategyId)}`, { params }), { retries: 1 }) }
+
+export async function getExecutionDiagnostics(params = {}) { return strictRequest(() => api.get('/execution/diagnostics', { params }), { retries: 1 }) }

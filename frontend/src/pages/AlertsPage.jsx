@@ -45,8 +45,8 @@ function formatPercent(value, { ratio = true, digits = 1 } = {}) {
 
 function formatExecutionIntentLabel(value) {
   const normalized = String(value || 'desk').trim().toLowerCase()
-  if (normalized === 'broker_live') return 'Broker live'
-  if (normalized === 'broker_paper') return 'Broker paper'
+  if (normalized === 'broker_live') return 'Alpaca live'
+  if (normalized === 'broker_paper') return 'Alpaca paper'
   return 'Desk only'
 }
 
@@ -1107,8 +1107,8 @@ export default function AlertsPage() {
       />
       <section className="metrics-grid">{metrics.map((item) => <MetricCard key={item.label} {...item} />)}</section>
       <SectionCard
-        title="Broker-live readiness"
-        subtitle="Shared broker-live readiness and the current route posture for this desk."
+        title="Live readiness"
+        subtitle="Shared live readiness and the current route posture for this desk."
       >
         <section className="metrics-grid">
           <MetricCard
@@ -1117,18 +1117,18 @@ export default function AlertsPage() {
             tone={selectedExecutionRouteTone}
             helper={
               effectiveExecutionIntent === 'broker_live' && !rolloutReadiness.allowsLiveRollout
-                ? 'Broker-live routing is selected but still locked by broker-live readiness.'
+    ? 'Alpaca live routing is selected but still locked by live readiness.'
                 : effectiveExecutionIntent === 'broker_live'
-                  ? 'Broker-live routing is selected and the broker-live gate is clear.'
+      ? 'Alpaca live routing is selected and the live gate is clear.'
                   : effectiveExecutionIntent === 'broker_paper'
-                    ? 'Alerts are still feeding a broker-paper-first desk.'
+                    ? 'Alerts are still feeding a connected-paper-first desk.'
                     : 'Alerts are feeding a local desk-first route.'
             }
           />
           {rolloutReadiness.cards.map((item) => <MetricCard key={`rollout-${item.label}`} {...item} />)}
         </section>
         <div className="ui-panel ui-panel--section">
-          <div className="ui-panel__kicker">Broker-live gate</div>
+          <div className="ui-panel__kicker">Live gate</div>
           <div className="ui-panel__title">{rolloutReadiness.label}</div>
           <div className="ui-panel__note">
             {rolloutReadiness.detail}

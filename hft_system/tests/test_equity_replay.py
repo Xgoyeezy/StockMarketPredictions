@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import tempfile
 import unittest
 import random
 from datetime import datetime
@@ -16,6 +15,7 @@ from hft.market_data.sessions import is_extended_session
 from hft.risk.checks import HFTRiskEngine
 from hft.risk.limits import HFTLimitConfig
 from hft.strategies.market_making import InventoryAwareMarketMakingStrategy
+from tests._workspace_tmp import reset_tmp_dir
 
 
 def sample_equity_events() -> list[MarketEvent]:
@@ -30,7 +30,7 @@ def sample_equity_events() -> list[MarketEvent]:
 
 class EquityReplayTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmpdir = tempfile.mkdtemp(prefix="hft_equity_replay_")
+        self.tmpdir = str(reset_tmp_dir("equity_replay"))
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)

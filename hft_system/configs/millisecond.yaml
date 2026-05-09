@@ -1,0 +1,18 @@
+engine:
+  enabled: true
+  strategy_name: millisecond_micro_scalper
+  order_quantity: 1
+  min_edge_bps: 1.5
+  max_spread_bps: 8.0
+  max_quote_age_ns: 500000000
+  max_decision_latency_ns: 2000000
+  min_order_interval_ms: 250
+  max_orders_per_second: 2
+  allowed_sessions:
+    - regular
+  price_offset_bps: 0.5
+runtime:
+  poll_retry_attempts: 2
+  poll_retry_backoff_ms: 100
+  max_consecutive_poll_errors: 3
+  require_execution_connection: true

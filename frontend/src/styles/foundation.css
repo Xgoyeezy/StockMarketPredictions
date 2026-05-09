@@ -5,52 +5,52 @@
   --font-display: "Arial Narrow", "Bahnschrift", "Franklin Gothic Medium", "Segoe UI", sans-serif;
   --font-mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
 
-  --bg-0: #000000;
-  --bg-1: #050505;
-  --bg-2: #0a0a0a;
-  --bg-3: #111111;
+  --bg-0: #030404;
+  --bg-1: #050706;
+  --bg-2: #0b1110;
+  --bg-3: #111b1a;
 
-  --surface-0: rgba(10, 10, 10, 0.88);
-  --surface-1: rgba(14, 14, 14, 0.94);
-  --surface-2: rgba(20, 20, 20, 0.98);
+  --surface-0: rgba(11, 17, 16, 0.88);
+  --surface-1: rgba(16, 24, 23, 0.94);
+  --surface-2: rgba(17, 27, 26, 0.98);
 
   --line-soft: rgba(255, 255, 255, 0.08);
   --line-mid: rgba(255, 255, 255, 0.13);
 
-  --text-1: #f5f5f5;
-  --text-2: #a7adb5;
-  --text-3: #737882;
+  --text-1: #eef6f2;
+  --text-2: #9fadab;
+  --text-3: #74827f;
 
-  --accent-1: #565656;
-  --accent-2: #2f2f2f;
-  --accent-3: #8a8a8a;
-  --accent-1-rgb: 86 86 86;
-  --accent-2-rgb: 47 47 47;
-  --bg-0-rgb: 0 0 0;
+  --accent-1: #2fc28d;
+  --accent-2: #5a9ed6;
+  --accent-3: #d8a35c;
+  --accent-1-rgb: 47 194 141;
+  --accent-2-rgb: 90 158 214;
+  --bg-0-rgb: 3 4 4;
 
-  --positive: #22c55e;
-  --negative: #ef4444;
-  --warning: #f59e0b;
+  --positive: #2fc28d;
+  --negative: #e46859;
+  --warning: #d8a35c;
 
-  --state-positive-text: #9cf0b8;
-  --state-positive-border: rgba(34, 197, 94, 0.22);
-  --state-positive-bg: rgba(34, 197, 94, 0.12);
-  --state-positive-surface: rgba(8, 18, 14, 0.9);
+  --state-positive-text: #a7f5d7;
+  --state-positive-border: rgba(47, 194, 141, 0.24);
+  --state-positive-bg: rgba(47, 194, 141, 0.12);
+  --state-positive-surface: rgba(8, 21, 17, 0.9);
 
-  --state-warning-text: #ffd789;
-  --state-warning-border: rgba(245, 158, 11, 0.24);
-  --state-warning-bg: rgba(245, 158, 11, 0.12);
-  --state-warning-surface: rgba(24, 16, 7, 0.9);
+  --state-warning-text: #f2c98d;
+  --state-warning-border: rgba(216, 163, 92, 0.26);
+  --state-warning-bg: rgba(216, 163, 92, 0.12);
+  --state-warning-surface: rgba(28, 20, 10, 0.9);
 
-  --state-accent-text: #dddddd;
-  --state-accent-border: rgba(126, 126, 126, 0.24);
-  --state-accent-bg: rgba(82, 82, 82, 0.12);
-  --state-accent-surface: rgba(20, 20, 20, 0.92);
+  --state-accent-text: #cfe7fb;
+  --state-accent-border: rgba(90, 158, 214, 0.24);
+  --state-accent-bg: rgba(90, 158, 214, 0.12);
+  --state-accent-surface: rgba(12, 20, 27, 0.92);
 
-  --state-danger-text: #ffb0b0;
-  --state-danger-border: rgba(239, 68, 68, 0.22);
-  --state-danger-bg: rgba(239, 68, 68, 0.12);
-  --state-danger-surface: rgba(23, 10, 12, 0.9);
+  --state-danger-text: #ffb7ad;
+  --state-danger-border: rgba(228, 104, 89, 0.24);
+  --state-danger-bg: rgba(228, 104, 89, 0.12);
+  --state-danger-surface: rgba(28, 12, 11, 0.9);
 
   --shadow-soft: 0 16px 42px rgba(0, 0, 0, 0.22);
   --shadow-lift: 0 26px 60px rgba(0, 0, 0, 0.30);
@@ -78,6 +78,12 @@
   --ease-emphasis: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-swift: cubic-bezier(0.3, 0, 0.2, 1);
 
+  --glass-border: rgb(255 255 255 / 0.08);
+  --glass-border-strong: rgb(255 255 255 / 0.12);
+  --glass-bg: linear-gradient(180deg, rgb(18 18 18 / 0.78), rgb(8 8 8 / 0.94));
+  --glass-bg-strong: linear-gradient(180deg, rgb(14 14 14 / 0.94), rgb(7 7 7 / 0.98));
+  --glass-bg-surface: linear-gradient(180deg, rgb(18 18 18 / 0.94), rgb(8 8 8 / 0.98));
+
   font-family: var(--font-ui);
   background: var(--bg-0);
   color: var(--text-1);
@@ -103,8 +109,94 @@ body {
   background:
     radial-gradient(circle at top center, rgb(var(--accent-2-rgb) / 0.09), transparent 28%),
     radial-gradient(circle at 18% 12%, rgb(var(--accent-1-rgb) / 0.07), transparent 22%),
-    linear-gradient(180deg, #060606 0%, #020202 55%, rgb(var(--bg-0-rgb)) 100%);
+    linear-gradient(180deg, #050706 0%, #030404 55%, rgb(var(--bg-0-rgb)) 100%);
   color: var(--text-1);
+}
+
+body.site-skin--cinematic {
+  background:
+    radial-gradient(circle at 12% 10%, rgb(var(--accent-1-rgb) / 0.12), transparent 36%),
+    radial-gradient(circle at 80% 18%, rgb(var(--accent-2-rgb) / 0.10), transparent 44%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 55%, #030404 100%);
+  position: relative;
+  overflow-x: hidden;
+}
+
+body.site-skin--cinematic::before,
+body.site-skin--cinematic::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.site-skin--cinematic::before {
+  background:
+    radial-gradient(circle at calc(34% + (var(--scroll-progress, 0) * 6%)) 12%, rgb(var(--accent-2-rgb) / 0.16), transparent 52%),
+    radial-gradient(circle at calc(68% - (var(--scroll-progress, 0) * 7%)) 46%, rgb(var(--accent-1-rgb) / 0.14), transparent 58%),
+    radial-gradient(circle at 46% 78%, rgb(216 163 92 / 0.11), transparent 60%);
+  filter: blur(22px);
+  opacity: calc(0.72 + (var(--scroll-velocity, 0) * 0.10));
+}
+
+body.site-skin--cinematic::after {
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 0.02), transparent 28%),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 52px,
+      rgb(255 255 255 / 0.014) 53px,
+      transparent 54px
+    );
+  opacity: 0.35;
+  mask-image: radial-gradient(circle at top, rgb(0 0 0 / 0.72), transparent 72%);
+}
+
+body.site-skin--cinematic #root {
+  position: relative;
+  z-index: 1;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-emphasis);
+}
+
+::view-transition-old(root) {
+  animation-name: pageFadeOut;
+}
+
+::view-transition-new(root) {
+  animation-name: pageFadeIn;
+}
+
+@keyframes pageFadeOut {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0px);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.992);
+    filter: blur(2px);
+  }
+}
+
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.992);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0px);
+  }
 }
 
 button,
@@ -141,6 +233,11 @@ a {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
   }
 
   *,

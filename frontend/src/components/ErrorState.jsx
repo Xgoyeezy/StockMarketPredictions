@@ -3,6 +3,7 @@ import FeedbackState from './FeedbackState'
 export default function ErrorState({
   title = 'Something needs attention.',
   description,
+  error = null,
   eyebrow = 'Needs attention',
   actionLabel = 'Try again',
   onAction = null,
@@ -11,6 +12,8 @@ export default function ErrorState({
   compact = false,
   className = '',
 }) {
+  const resolvedTitle = error?.display_title || title
+  const resolvedDescription = description || error?.display_detail || ''
   const actions = []
   if (actionLabel && onAction) {
     actions.push({ label: actionLabel, onAction, variant: 'solid' })
@@ -23,8 +26,8 @@ export default function ErrorState({
     <FeedbackState
       tone="negative"
       eyebrow={eyebrow}
-      title={title}
-      description={description}
+      title={resolvedTitle}
+      description={resolvedDescription}
       actions={actions}
       compact={compact}
       className={className}

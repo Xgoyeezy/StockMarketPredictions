@@ -45,7 +45,7 @@ function formatDeskActivityLabel(value) {
 function accountProfileLabel(value) {
   const normalized = String(value || '').trim().toLowerCase()
   if (normalized === 'personal_live') return 'Personal live'
-  if (normalized === 'brokerage') return 'Brokerage-linked'
+  if (normalized === 'brokerage') return 'Alpaca linked'
   return 'Personal paper'
 }
 
@@ -130,7 +130,7 @@ export default function Topbar({ title = 'Workspace' }) {
         label: `Organization ${(session?.active_tenant?.status || 'active').toUpperCase()}`,
         tone: session?.active_tenant?.status === 'paused' ? 'negative' : 'neutral',
       },
-      { label: `Plan ${(session?.active_tenant?.plan_key || 'starter').toUpperCase()}`, tone: 'neutral' },
+      { label: `Plan ${(session?.active_tenant?.plan_key || 'personal').toUpperCase()}`, tone: 'neutral' },
       ...sharedChips,
     ]
   }, [personalMode, session, status, alertSummary, opsStatus, preferences])

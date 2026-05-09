@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+import math
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,9 @@ def _serialize_value(value: Any, active_ids: set[int], depth: int) -> Any:
         return None
     if value is None:
         return None
-    if isinstance(value, (str, int, float, bool)):
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, pd.DataFrame):
         return serialize_dataframe(value)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ from backend.services.trade_service import (
     sync_pending_orders_from_broker,
 )
 from backend.services.workspace_service import list_workspaces
+
+logger = logging.getLogger(__name__)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -1331,6 +1334,21 @@ def _attach_trade_events_to_open_and_monitor_rows(
     return open_trade_rows, monitor_rows
 
 
+def _safe_order_events_snapshot(
+    db: Session | None,
+    current_user: Any | None,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if db is None or current_user is None:
+        return []
+    try:
+        return get_order_events_snapshot(db, current_user, limit=limit)
+    except MemoryError:
+        logger.exception("Skipping order event snapshot after a local memory allocation failure.")
+        return []
+
+
 def _filter_monitor_rows_for_trades(trades: pd.DataFrame, monitored: pd.DataFrame) -> pd.DataFrame:
     if trades.empty or monitored.empty:
         return monitored.iloc[0:0].copy() if not monitored.empty else pd.DataFrame()
@@ -1370,7 +1388,7 @@ def get_open_trades(
     total = len(trades)
     trades = trades.iloc[offset: offset + limit]
     monitored = _filter_monitor_rows_for_trades(trades, monitored)
-    order_events = get_order_events_snapshot(db, current_user, limit=30)
+    order_events = _safe_order_events_snapshot(db, current_user, limit=30)
     latest_lookup = _build_latest_order_lookup(order_events)
     serialized_trades = serialize_dataframe(trades)
     serialized_monitored = serialize_dataframe(monitored)
@@ -1462,7 +1480,7 @@ def get_portfolio(
     closed_trades = filter_frame_to_current_user(sdm.read_closed_trades(), current_user)
     normalized_closed_trades = _normalize_closed_trades_for_journal(closed_trades)
     monitored = filter_frame_to_current_user(sdm.monitor_open_trades(), current_user)
-    order_events = get_order_events_snapshot(db, current_user, limit=40)
+    order_events = _safe_order_events_snapshot(db, current_user, limit=40)
     latest_lookup = _build_latest_order_lookup(order_events)
     serialized_open_trades = serialize_dataframe(open_trades)
     serialized_monitored = serialize_dataframe(monitored)
@@ -1519,7 +1537,7 @@ def get_portfolio_dashboard_snapshot(
     closed_trades = filter_frame_to_current_user(sdm.read_closed_trades(), current_user)
     normalized_closed_trades = _normalize_closed_trades_for_journal(closed_trades)
     monitored = filter_frame_to_current_user(sdm.monitor_open_trades(), current_user)
-    order_events = get_order_events_snapshot(db, current_user, limit=20)
+    order_events = _safe_order_events_snapshot(db, current_user, limit=20)
     latest_lookup = _build_latest_order_lookup(order_events)
     serialized_open_trades = serialize_dataframe(open_trades)
     serialized_monitored = serialize_dataframe(monitored)

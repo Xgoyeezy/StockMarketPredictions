@@ -82,7 +82,7 @@ export function buildCapitalPreservationPolicy({
     toNumber(tradeTicket?.accountSize) ??
     toNumber(preferences?.defaultAccountSize) ??
     toNumber(defaults.accountSize) ??
-    1000
+    100000
   const riskPercent =
     toNumber(tradeTicket?.riskPercent) ??
     toNumber(preferences?.defaultRiskPercent) ??
@@ -512,13 +512,13 @@ export function buildRolloutReadinessSummary(readiness) {
   const reviewChecks = checks.filter((check) => check?.tone === 'warning')
   const unlockChecks = priorityChecks.length ? priorityChecks : reviewChecks.length ? reviewChecks : checks.slice(0, 1)
   const unlockSummary = Boolean(payload?.allows_live_rollout)
-    ? 'Broker-live routing is unlocked for a tightly scoped pilot while paper replay, fill drift, and order lifecycle stay stable.'
+    ? 'Alpaca live routing is unlocked for a tightly scoped run while paper replay, fill drift, and order lifecycle stay stable.'
     : unlockChecks.length
-      ? `Broker-live routing unlocks after ${unlockChecks
+      ? `Alpaca live routing unlocks after ${unlockChecks
         .slice(0, 2)
         .map((check) => String(check?.label || 'the next readiness check').trim().toLowerCase())
         .join(' and ')} clear.`
-      : 'Broker-live routing unlocks after replay depth, fill drift, and order lifecycle clear together.'
+      : 'Alpaca live routing unlocks after replay depth, fill drift, and order lifecycle clear together.'
   const nextCheckDetail = unlockChecks
     .map((check) => check?.message || check?.helper || '')
     .filter(Boolean)
@@ -552,10 +552,10 @@ export function buildRolloutReadinessSummary(readiness) {
     label: payload?.label || 'Paper first',
     detail:
       payload?.detail
-      || 'Keep broker-live routing locked to paper until replay depth, fill drift, and order lifecycle stabilize.',
+      || 'Keep Alpaca live routing locked to paper until replay depth, fill drift, and order lifecycle stabilize.',
     basis:
       payload?.basis
-      || 'Paper stability still needs more replay depth and cleaner lifecycle evidence before broker-live routing.',
+      || 'Paper stability still needs more replay depth and cleaner lifecycle evidence before Alpaca live routing.',
     allowsLiveRollout: Boolean(payload?.allows_live_rollout),
     cards,
     orderLifecycleSummary: payload?.order_lifecycle?.summary || null,
@@ -563,13 +563,13 @@ export function buildRolloutReadinessSummary(readiness) {
     nextCheckDetail:
       nextCheckDetail
       || payload?.basis
-      || 'Clear the remaining replay, slippage, and lifecycle checks before turning on broker-live routing.',
+      || 'Clear the remaining replay, slippage, and lifecycle checks before turning on Alpaca live routing.',
     historyTrend: historyPayload?.trend || 'unknown',
-    historyLabel: historyPayload?.label || 'No broker-live history',
+    historyLabel: historyPayload?.label || 'No live readiness history',
     historyTone: historyPayload?.tone || 'info',
     historyDetail:
       historyPayload?.detail
-      || 'Saved boards and fill replay will populate broker-live history once the desk records a few validation checkpoints.',
+      || 'Saved boards and fill replay will populate live readiness history once the desk records a few validation checkpoints.',
     historyItems,
   }
 }
@@ -587,14 +587,14 @@ export function buildLivePilotAuditSummary(audit) {
       detail: item?.detail || '',
       createdAt: item?.created_at || null,
       createdLabel: formatHistoryTimestamp(item?.created_at),
-      routeLabel: item?.route_label || 'Broker-live route',
+      routeLabel: item?.route_label || 'Alpaca live route',
       adapter: item?.adapter || '--',
       gateStatus: item?.gate_status || 'unknown',
       gateTone: item?.gate_tone || 'info',
-      gateLabel: item?.gate_label || 'Broker-live gate',
+      gateLabel: item?.gate_label || 'Live gate',
       basis: item?.basis || '',
       historyTrend: item?.history_trend || 'unknown',
-      historyLabel: item?.history_label || 'No broker-live history',
+      historyLabel: item?.history_label || 'No live readiness history',
       resolvedCount: Number(item?.resolved_count || 0),
       openCount: Number(item?.open_count || 0),
       replayWinRate:
@@ -624,7 +624,7 @@ export function buildLivePilotAuditSummary(audit) {
     },
     {
       label: 'Latest gate',
-      value: latest?.gateLabel || 'No broker-live pilot yet',
+      value: latest?.gateLabel || 'No live attempt yet',
       helper: latest?.createdLabel || 'Awaiting first live-route attempt',
       tone: latest?.gateTone || payload?.tone || 'info',
     },
@@ -646,11 +646,11 @@ export function buildLivePilotAuditSummary(audit) {
     count: Number(payload?.count || items.length || 0),
     allowedCount: Number(payload?.allowed_count || 0),
     blockedCount: Number(payload?.blocked_count || 0),
-    label: payload?.label || 'No broker-live pilot yet',
+    label: payload?.label || 'No live attempt yet',
     tone: payload?.tone || 'info',
     detail:
       payload?.detail
-      || 'Broker-live attempts will be recorded here once the desk clears the paper gate and routes a pilot order.',
+      || 'Live attempts will be recorded here once the desk clears the paper gate and routes a scoped order.',
     latest,
     cards,
     items,

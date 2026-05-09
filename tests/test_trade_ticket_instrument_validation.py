@@ -1,9 +1,15 @@
 import unittest
 
+import pandas as pd
+
 from backend.schemas import OpenTradeRequest
 from backend.services.exceptions import ValidationServiceError
 from backend.services.execution.mappers import build_alpaca_option_order_payload
 from backend.services.trade_service import (
+    coerce_preview_trade_request,
+    _apply_equity_plan_override,
+    _build_capital_preservation_snapshot,
+    _build_equity_position_preview,
     _normalize_option_strategy,
     _validate_instrument_strategy_request,
 )
@@ -50,6 +56,109 @@ class TradeTicketInstrumentValidationTests(unittest.TestCase):
         request = self._option_request(option_strategy="single_leg")
 
         _validate_instrument_strategy_request(request)
+
+    def test_chart_range_horizon_is_clamped_for_trade_ticket(self):
+        request = self._option_request(horizon=600)
+
+        self.assertEqual(request.horizon, 50)
+
+    def test_preview_payload_sanitizes_stale_draft_values(self):
+        request = coerce_preview_trade_request(
+            {
+                "ticker": "spy",
+                "interval": "bad",
+                "horizon": 600,
+                "instrument_type": "stock",
+                "live_price": 0,
+                "account_size": 0,
+                "risk_percent": 250,
+                "order_type": "bad",
+                "time_in_force": "DAY + AH",
+                "limit_price": 0,
+                "max_open_positions": 0,
+            }
+        )
+
+        self.assertEqual(request.ticker, "SPY")
+        self.assertEqual(request.interval, "5m")
+        self.assertEqual(request.horizon, 50)
+        self.assertEqual(request.instrument_type, "equity")
+        self.assertIsNone(request.live_price)
+        self.assertEqual(request.account_size, 100000.0)
+        self.assertEqual(request.risk_percent, 100.0)
+        self.assertEqual(request.order_type, "market")
+        self.assertEqual(request.time_in_force, "day_ext")
+        self.assertIsNone(request.limit_price)
+        self.assertIsNone(request.max_open_positions)
+
+    def test_equity_position_preview_caps_whole_share_sizing_by_ticket_notional(self):
+        report = {
+            "trade_decision": "VALID TRADE",
+            "forecast": {"regime_strength_score": 0.7},
+            "option_plan": {
+                "invalidation_price": 99.0,
+                "expected_underlying_target": 102.0,
+            },
+        }
+
+        position = _build_equity_position_preview(
+            report,
+            live_price=100.0,
+            account_size=100000.0,
+            risk_percent=1.0,
+            fractional_shares_only=False,
+            max_notional_per_trade=7500.0,
+        )
+
+        self.assertEqual(position["suggested_contracts"], 75.0)
+        self.assertEqual(position["total_position_cost"], 7500.0)
+        self.assertTrue(position["affordable"])
+
+    def test_equity_plan_override_aligns_direction_with_supplied_target_and_stop(self):
+        request = OpenTradeRequest(
+            ticker="SPY",
+            instrument_type="equity",
+            live_price=100.0,
+            target_price=103.0,
+            invalidation_price=98.0,
+        )
+        report = {
+            "verdict": "BEARISH",
+            "trade_decision": "PASS",
+            "reject_reason": "Conviction too weak.",
+            "option_plan": {},
+        }
+
+        updated = _apply_equity_plan_override(report, request)
+
+        self.assertEqual(updated["verdict"], "BULLISH")
+        self.assertEqual(updated["trade_decision"], "VALID TRADE")
+        self.assertEqual(updated["reject_reason"], "")
+        self.assertEqual(updated["option_plan"]["directional_thesis"], "long")
+        self.assertEqual(updated["option_plan"]["expected_underlying_target"], 103.0)
+        self.assertEqual(updated["option_plan"]["invalidation_price"], 98.0)
+
+    def test_capital_preservation_loss_streak_resets_each_trading_day(self):
+        today_noon_et = pd.Timestamp.now(tz="America/New_York").normalize() + pd.Timedelta(hours=12)
+        yesterday_et = today_noon_et - pd.Timedelta(days=1)
+        two_days_ago_et = today_noon_et - pd.Timedelta(days=2)
+
+        closed_trades = pd.DataFrame(
+            [
+                {"ticker": "SPY", "closed_at": two_days_ago_et.tz_convert("UTC").isoformat(), "realized_pnl": -20.0},
+                {"ticker": "QQQ", "closed_at": yesterday_et.tz_convert("UTC").isoformat(), "realized_pnl": -15.0},
+                {"ticker": "AAPL", "closed_at": today_noon_et.tz_convert("UTC").isoformat(), "realized_pnl": 0.0},
+            ]
+        )
+
+        snapshot = _build_capital_preservation_snapshot(
+            pd.DataFrame(),
+            pd.DataFrame(),
+            closed_trades,
+        )
+
+        self.assertEqual(snapshot["consecutive_losses"], 0)
+        self.assertEqual(snapshot["today_closed_trades"], 1)
 
     def test_short_premium_is_review_only(self):
         request = self._option_request(option_strategy="short_premium", broker_side="sell")

@@ -129,7 +129,7 @@ class OpenTradeRequest(BaseModel):
     linked_account_id: str | None = Field(default=None, max_length=36)
     execution_mode: Literal["manual_approval", "automated_entry", "portfolio_target_execution"] = "manual_approval"
     live_price: float | None = Field(default=None, gt=0)
-    account_size: float = Field(10000.0, gt=0)
+    account_size: float = Field(100000.0, gt=0)
     risk_percent: float = Field(1.0, gt=0, le=100)
     requested_quantity: float | None = Field(default=None, gt=0)
     instrument_type: Literal["listed_option", "equity"] = "listed_option"
@@ -146,12 +146,14 @@ class OpenTradeRequest(BaseModel):
     contract_volume: int | None = Field(default=None, ge=0)
     contract_open_interest: int | None = Field(default=None, ge=0)
     contract_quote_timestamp: str | None = Field(default=None, max_length=80)
-    execution_intent: Literal["default", "desk", "broker_paper", "broker_live"] = "default"
+    execution_intent: Literal["default", "desk", "internal_paper", "broker_paper", "broker_live"] = "default"
     order_type: Literal["market", "limit", "stop_market", "stop_limit", "trailing_stop"] = "market"
     time_in_force: Literal["day", "day_ext", "gtc_90d"] = "day"
     limit_price: float | None = Field(default=None, gt=0)
     stop_price: float | None = Field(default=None, gt=0)
     trailing_percent: float | None = Field(default=None, gt=0)
+    target_price: float | None = Field(default=None, gt=0)
+    invalidation_price: float | None = Field(default=None, gt=0)
     extended_hours: bool = False
     capital_preservation_mode: bool = False
     tiny_account_mode: bool = False
@@ -159,7 +161,7 @@ class OpenTradeRequest(BaseModel):
     regular_hours_only: bool = False
     max_daily_loss_r: float | None = Field(default=None, gt=0, le=25)
     max_consecutive_losses: int | None = Field(default=None, ge=1, le=25)
-    max_open_positions: int | None = Field(default=None, ge=1, le=25)
+    max_open_positions: int | None = Field(default=None, ge=1, le=30)
     max_notional_per_trade: float | None = Field(default=None, gt=0)
     equities_only: bool = False
     limit_orders_only: bool = False
@@ -181,6 +183,15 @@ class OpenTradeRequest(BaseModel):
             raise ValueError("Ticker cannot be empty.")
         return cleaned
 
+    @field_validator("horizon", mode="before")
+    @classmethod
+    def normalize_trade_horizon(cls, value: Any) -> int:
+        try:
+            parsed = int(round(float(value)))
+        except (TypeError, ValueError):
+            return 5
+        return max(1, min(parsed, 50))
+
     @field_validator(
         "option_strategy",
         "contract_symbol",
@@ -201,6 +212,41 @@ class OpenTradeRequest(BaseModel):
             return value
         cleaned = value.strip()
         return cleaned or None
+
+
+class InternalBrokerPaperOrderRequest(BaseModel):
+    account_id: str = Field(default="internal-paper", min_length=1, max_length=80)
+    symbol: str = Field(..., min_length=1, max_length=80)
+    instrument_type: Literal["equity", "listed_option"] = "equity"
+    side: Literal["buy", "sell"] = "buy"
+    quantity: int = Field(..., ge=1, le=100_000)
+    order_type: Literal["market", "limit"] = "limit"
+    limit_price: float | None = Field(default=None, gt=0)
+    reference_price: float | None = Field(default=None, gt=0)
+    session: Literal["pre_market", "regular", "after_hours", "closed"] = "regular"
+    extended_hours: bool = False
+    execution_mode: Literal["paper", "live"] = "paper"
+    idempotency_key: str | None = Field(default=None, max_length=140)
+    strategy_name: str = Field(default="manual", min_length=1, max_length=80)
+    strategy_version: str = Field(default="1", min_length=1, max_length=40)
+    signal_id: str | None = Field(default=None, max_length=140)
+    simulate_fill: bool | None = None
+
+    @field_validator("account_id", "strategy_name", "strategy_version", "signal_id")
+    @classmethod
+    def normalize_internal_broker_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_internal_broker_symbol(cls, value: str) -> str:
+        cleaned = value.strip().upper()
+        if not cleaned:
+            raise ValueError("Symbol cannot be empty.")
+        return cleaned
 
 
 class LinkedBrokerageAccountAutomationUpdateRequest(BaseModel):
@@ -450,6 +496,193 @@ class ApiEnvelope(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+# UNSPECIFIED: productization schemas stay in this file for v1; split by router later if schema size becomes a maintenance issue.
+class StrategyCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    desk_key: str = Field(..., min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=1000)
+    allocation_cap: float = Field(default=0.0, ge=0)
+    symbols: list[str] = Field(default_factory=list, max_length=200)
+    mode: Literal["research", "paper", "live"] = "paper"
+    risk_profile: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    status: str | None = Field(default=None, max_length=32)
+    lifecycle_stage: str | None = Field(default=None, max_length=32)
+    mode: str | None = Field(default=None, max_length=32)
+    allocation_cap: float | None = Field(default=None, ge=0)
+    symbols: list[str] | None = Field(default=None, max_length=200)
+    risk_profile: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class StrategyVersionCreateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    source_type: str = Field(default="internal", max_length=32)
+    source_hash: str | None = Field(default=None, max_length=128)
+    config: dict[str, Any] = Field(default_factory=dict)
+    risk_profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyActionRequest(BaseModel):
+    linked_account_id: str | None = Field(default=None, max_length=36)
+    mode: Literal["paper", "live", "research"] | None = None
+    reason: str | None = Field(default=None, max_length=400)
+    dry_run: bool = False
+
+
+class StrategyPromotionRequest(BaseModel):
+    to_stage: str = Field(default="validated", max_length=32)
+    from_stage: str | None = Field(default=None, max_length=32)
+    approval_note: str | None = Field(default=None, max_length=400)
+    force_evaluate: bool = False
+
+
+class StrategyRollbackRequest(BaseModel):
+    version_id: str | None = Field(default=None, max_length=36)
+    reason: str | None = Field(default=None, max_length=400)
+
+
+class AutomationStrategyActionRequest(BaseModel):
+    linked_account_id: str | None = Field(default=None, max_length=36)
+    deployment_mode: Literal["paper", "live"] | None = None
+    dry_run: bool = False
+    reason: str | None = Field(default=None, max_length=400)
+
+
+class LiveAuthorizationCreateRequest(BaseModel):
+    strategy_id: str = Field(..., min_length=1, max_length=36)
+    strategy_version_id: str | None = Field(default=None, max_length=36)
+    linked_account_id: str = Field(..., min_length=1, max_length=36)
+    authorization_type: str = Field(default="supervised_live", max_length=32)
+    authorized_mode: str = Field(default="approval_required", max_length=32)
+    max_capital_allocation: float = Field(default=0.0, ge=0)
+    max_daily_loss: float = Field(default=0.0, ge=0)
+    max_order_notional: float = Field(default=0.0, ge=0)
+    allowed_symbols: list[str] = Field(default_factory=list, max_length=500)
+    allowed_instruments: list[str] = Field(default_factory=list, max_length=50)
+    risk_acknowledgement_version: str | None = Field(default=None, max_length=32)
+    signed: bool = False
+
+
+class LiveAuthorizationRevokeRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=400)
+
+
+class LiveStrategyActionRequest(BaseModel):
+    authorization_id: str | None = Field(default=None, max_length=36)
+    linked_account_id: str | None = Field(default=None, max_length=36)
+    expected_min_readiness_score: int | None = Field(default=None, ge=0, le=100)
+    reason: str | None = Field(default=None, max_length=400)
+    dry_run: bool = False
+
+
+class LiveOrderIntentCreateRequest(BaseModel):
+    live_trading_session_id: str | None = Field(default=None, max_length=36)
+    trade_decision_id: str | None = Field(default=None, max_length=36)
+    symbol: str = Field(..., min_length=1, max_length=24)
+    instrument_type: str = Field(default="equity", max_length=32)
+    side: Literal["buy", "sell", "buy_to_open", "sell_to_close", "sell_short", "buy_to_cover"] = "buy"
+    quantity: float = Field(default=0.0, gt=0)
+    order_type: str = Field(default="market", max_length=16)
+    limit_price: float | None = Field(default=None, ge=0)
+    stop_price: float | None = Field(default=None, ge=0)
+    time_in_force: str | None = Field(default="day", max_length=16)
+    notional_value: float = Field(default=0.0, ge=0)
+    confidence_score: float | None = Field(default=None, ge=0, le=1)
+    decision_reason: str | None = Field(default=None, max_length=1000)
+    signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    risk_snapshot: dict[str, Any] = Field(default_factory=dict)
+    readiness_snapshot: dict[str, Any] = Field(default_factory=dict)
+    market_snapshot: dict[str, Any] = Field(default_factory=dict)
+    broker_snapshot: dict[str, Any] = Field(default_factory=dict)
+    duplicate_key: str | None = Field(default=None, max_length=128)
+
+
+class LiveOrderApprovalRequest(BaseModel):
+    note: str | None = Field(default=None, max_length=400)
+
+
+class LiveOrderRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=400)
+
+
+class LiveRiskCheckRequest(BaseModel):
+    force_refresh: bool = False
+
+
+class LiveKillSwitchRequest(BaseModel):
+    strategy_id: str | None = Field(default=None, max_length=36)
+    live_trading_session_id: str | None = Field(default=None, max_length=36)
+    scope: Literal["tenant", "strategy", "session"] = "tenant"
+    reason: str = Field(default="Operator requested live kill switch.", min_length=1, max_length=800)
+
+
+class ReadinessEvaluateRequest(BaseModel):
+    force_refresh: bool = False
+
+
+class RiskPolicyCreateRequest(BaseModel):
+    strategy_id: str | None = Field(default=None, max_length=36)
+    scope: str = Field(default="strategy", max_length=32)
+    status: str = Field(default="active", max_length=32)
+    max_daily_loss: float = Field(default=0.0, ge=0)
+    max_weekly_loss: float = Field(default=0.0, ge=0)
+    max_drawdown_pct: float = Field(default=0.0, ge=0)
+    max_position_notional: float = Field(default=0.0, ge=0)
+    max_order_notional: float = Field(default=0.0, ge=0)
+    max_open_positions: int = Field(default=0, ge=0)
+    allowed_symbols: list[str] = Field(default_factory=list, max_length=500)
+    blocked_symbols: list[str] = Field(default_factory=list, max_length=500)
+    allowed_instruments: list[str] = Field(default_factory=list, max_length=50)
+    requires_approval_above: float | None = Field(default=None, ge=0)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class RiskPolicyUpdateRequest(BaseModel):
+    status: str | None = Field(default=None, max_length=32)
+    max_daily_loss: float | None = Field(default=None, ge=0)
+    max_weekly_loss: float | None = Field(default=None, ge=0)
+    max_drawdown_pct: float | None = Field(default=None, ge=0)
+    max_position_notional: float | None = Field(default=None, ge=0)
+    max_order_notional: float | None = Field(default=None, ge=0)
+    max_open_positions: int | None = Field(default=None, ge=0)
+    allowed_symbols: list[str] | None = Field(default=None, max_length=500)
+    blocked_symbols: list[str] | None = Field(default=None, max_length=500)
+    allowed_instruments: list[str] | None = Field(default=None, max_length=50)
+    requires_approval_above: float | None = Field(default=None, ge=0)
+    config: dict[str, Any] | None = None
+
+
+class RiskCheckRequest(BaseModel):
+    strategy_id: str | None = Field(default=None, max_length=36)
+    symbol: str = Field(..., min_length=1, max_length=24)
+    instrument_type: str = Field(default="equity", max_length=32)
+    side: Literal["buy", "sell", "long", "short"] = "buy"
+    quantity: float = Field(default=0.0, ge=0)
+    expected_notional: float = Field(default=0.0, ge=0)
+
+
+class RiskKillSwitchRequest(BaseModel):
+    strategy_id: str | None = Field(default=None, max_length=36)
+    scope: str = Field(default="tenant", max_length=32)
+    reason: str | None = Field(default=None, max_length=400)
+
+
+class AuditExportRequest(BaseModel):
+    strategy_id: str | None = Field(default=None, max_length=36)
+    trade_id: str | None = Field(default=None, max_length=80)
+    export_type: str = Field(default="audit_bundle", max_length=32)
+    date_start: str | None = Field(default=None, max_length=64)
+    date_end: str | None = Field(default=None, max_length=64)
+
+
 class DeskSummary(BaseModel):
     tenant_slug: str
     tenant_name: str
@@ -464,6 +697,7 @@ class DeskSummary(BaseModel):
 class AuthLoginRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     name: str = Field(..., min_length=1, max_length=160)
+    login_secret: str | None = Field(default=None, max_length=256)
     tenant_slug: str | None = Field(default=None, max_length=80)
     invite_token: str | None = Field(default=None, max_length=160)
     organization_name: str | None = Field(default=None, max_length=160)
@@ -1153,6 +1387,10 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
     cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
     account_size: float | None = Field(default=None, gt=0)
     effective_funds_multiplier: float | None = Field(default=None, ge=1.0, le=10.0)
+    dynamic_sizing_enabled: bool | None = None
+    dynamic_sizing_base: Literal["equity"] | None = None
+    dynamic_ticket_pct_of_equity: float | None = Field(default=None, gt=0, le=100)
+    dynamic_total_open_pct_of_equity: float | None = Field(default=None, gt=0, le=500)
     risk_percent: float | None = Field(default=None, gt=0, le=5)
     auto_trade_equities: bool | None = None
     auto_trade_listed_options: bool | None = None
@@ -1164,7 +1402,7 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
     auto_manage_positions: bool | None = None
     auto_flatten_before_close: bool | None = None
     flatten_before_close_minutes: int | None = Field(default=None, ge=1, le=90)
-    max_open_positions: int | None = Field(default=None, ge=1, le=25)
+    max_open_positions: int | None = Field(default=None, ge=1, le=30)
     cycle_entry_rank_limit: int | None = Field(default=None, ge=1, le=10)
     max_notional_per_trade: float | None = Field(default=None, gt=0)
     max_total_open_notional: float | None = Field(default=None, gt=0)
@@ -1195,6 +1433,15 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
     equities_only: bool | None = None
     fractional_shares_only: bool | None = None
     use_fast_model: bool | None = None
+    scan_mode: Literal["fast_two_stage_full_universe", "legacy_deep"] | None = None
+    deep_scan_limit: int | None = Field(default=None, ge=1, le=25)
+    opportunity_capture_enabled: bool | None = None
+    priority_deep_scan_limit: int | None = Field(default=None, ge=0, le=25)
+    rapid_confirmation_enabled: bool | None = None
+    min_opportunity_score: float | None = Field(default=None, ge=0, le=100)
+    min_breakout_relative_volume: float | None = Field(default=None, ge=0.1, le=20)
+    max_spread_bps_for_opportunity: float | None = Field(default=None, ge=0, le=1000)
+    scan_time_budget_seconds: int | None = Field(default=None, ge=5, le=300)
     allow_pyramiding: bool | None = None
     allow_averaging_down: bool | None = None
     require_liquidity_fields: bool | None = None
@@ -1205,6 +1452,10 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
     ai_review_min_trades: int | None = Field(default=None, ge=0, le=100)
     ai_max_daily_setting_changes: int | None = Field(default=None, ge=0, le=12)
     ai_max_step_pct: float | None = Field(default=None, ge=1, le=50)
+    ai_evidence_review_enabled: bool | None = None
+    ai_evidence_review_mode: Literal["shadow_review", "paper_assist"] | None = None
+    ai_evidence_min_confidence: float | None = Field(default=None, ge=0, le=1)
+    ai_evidence_max_candidates_per_cycle: int | None = Field(default=None, ge=1, le=50)
     accuracy_calibration_enabled: bool | None = None
     accuracy_calibration_apply_to_live: bool | None = None
     accuracy_calibration_min_samples: int | None = Field(default=None, ge=1, le=500)
@@ -1215,6 +1466,22 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
     daily_profit_target_dollars: float | None = Field(default=None, ge=1, le=1_000_000)
     daily_loss_budget_pct: float | None = Field(default=None, ge=0.1, le=10)
     daily_objective_apply_to_live: bool | None = None
+    paper_evidence_collection_enabled: bool | None = None
+    paper_evidence_auto_review_enabled: bool | None = None
+    paper_evidence_require_edge_telemetry: bool | None = None
+    paper_evidence_require_spread_telemetry: bool | None = None
+    replay_lab_enabled: bool | None = None
+    replay_lab_auto_review_enabled: bool | None = None
+    replay_lab_window_sessions: int | None = Field(default=None, ge=1, le=60)
+    replay_lab_min_trades: int | None = Field(default=None, ge=1, le=500)
+    replay_lab_apply_to_live: bool | None = None
+    replay_lab_max_recommended_setting_changes: int | None = Field(default=None, ge=0, le=12)
+    transaction_cost_calibration_enabled: bool | None = None
+    transaction_cost_calibration_auto_review_enabled: bool | None = None
+    transaction_cost_calibration_apply_to_live: bool | None = None
+    transaction_cost_calibration_min_samples: int | None = Field(default=None, ge=1, le=500)
+    transaction_cost_calibration_stale_after_sessions: int | None = Field(default=None, ge=1, le=60)
+    transaction_cost_calibration_max_candidate_penalty: float | None = Field(default=None, ge=0, le=100)
     state_control_enabled: bool | None = None
     state_control_auto_throttle_enabled: bool | None = None
     state_control_auto_halt_enabled: bool | None = None
@@ -1342,6 +1609,31 @@ class OrganizationTradeAutomationUpdateRequest(BaseModel):
         cleaned = value.strip()
         return cleaned or None
 
+class OrganizationTradeAutomationDeskUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    armed: bool | None = None
+    interval: AllowedInterval | None = None
+    cycle_interval_seconds: int | None = Field(default=None, ge=15, le=86400)
+    market_aware_schedule: bool | None = None
+    macro_signal_refresh_time_et: str | None = Field(default=None, max_length=5)
+    macro_entry_scan_time_et: str | None = Field(default=None, max_length=5)
+    macro_preclose_review_time_et: str | None = Field(default=None, max_length=5)
+    macro_new_entries_after_time_et: str | None = Field(default=None, max_length=5)
+    macro_new_entries_before_time_et: str | None = Field(default=None, max_length=5)
+    deep_scan_limit: int | None = Field(default=None, ge=1, le=25)
+    max_hold_minutes: int | None = Field(default=None, ge=1, le=180 * 24 * 60)
+    cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
+    risk_budget_pct: float | None = Field(default=None, gt=0, le=100)
+    max_open_notional_pct: float | None = Field(default=None, gt=0, le=100)
+    max_positions: int | None = Field(default=None, ge=1, le=25)
+    allowed_tickers: list[str] | None = Field(default=None, max_length=250)
+    strategy_family: str | None = Field(default=None, max_length=64)
+    objective_role: Literal["primary_intraday", "secondary_position", "carry_macro"] | None = None
+
+
+class OrganizationTradeAutomationDeskScanRequest(BaseModel):
+    force: bool = False
+
 
 class OrganizationTradeAutomationActionRequest(BaseModel):
     action: Literal[
@@ -1354,10 +1646,15 @@ class OrganizationTradeAutomationActionRequest(BaseModel):
         "run_ai_review",
         "run_daily_objective_review",
         "run_accuracy_calibration_review",
+        "run_paper_evidence_review",
+        "run_replay_lab_review",
+        "run_transaction_cost_calibration_review",
         "run_loss_containment_review",
         "run_exit_watchdog_review",
         "run_state_control_review",
         "run_state_control_shadow_validation",
+        "reconcile_paper_orders",
+        "reconcile_and_prepare_clear_kill_switch",
         "run_paper_broker_reconciliation",
         "run_paper_order_lifecycle_soak",
         "run_paper_order_lifecycle_canary_review",
@@ -1629,7 +1926,7 @@ class AiTradePlanRequest(BaseModel):
     execution_intent: Literal["desk", "broker_paper", "broker_live"] = "desk"
     interval: AllowedInterval = "5m"
     horizon: int = Field(5, ge=1, le=50)
-    account_size: float = Field(10000.0, gt=0)
+    account_size: float = Field(100000.0, gt=0)
     risk_percent: float = Field(0.5, gt=0, le=5)
     live_price: float | None = Field(default=None, gt=0)
     limit_price: float | None = Field(default=None, gt=0)
@@ -1682,7 +1979,7 @@ class AiLiveIntentRequest(BaseModel):
     target_symbol: str | None = Field(default=None, max_length=24)
     desk_key: str | None = Field(default=None, max_length=80)
     linked_account_id: str | None = Field(default=None, max_length=36)
-    account_size: float = Field(10000.0, gt=0)
+    account_size: float = Field(100000.0, gt=0)
     risk_percent: float = Field(0.5, gt=0, le=5)
     live_price: float | None = Field(default=None, gt=0)
     limit_price: float | None = Field(default=None, gt=0)

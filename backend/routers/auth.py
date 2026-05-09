@@ -83,6 +83,7 @@ def login(
             db,
             email=payload.email,
             name=payload.name,
+            login_secret=payload.login_secret,
             requested_tenant_slug=payload.tenant_slug,
             invite_token=payload.invite_token,
             organization_name=payload.organization_name,

@@ -963,7 +963,7 @@ def _build_open_trade_request(
         linked_account_id=linked_account,
         execution_mode="manual_approval",
         live_price=getattr(request, "live_price", None),
-        account_size=float(getattr(request, "account_size", 10000.0)),
+        account_size=float(getattr(request, "account_size", 100000.0)),
         risk_percent=float(getattr(request, "risk_percent", 0.5)),
         instrument_type="equity",
         broker_side="buy",

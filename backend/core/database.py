@@ -55,6 +55,7 @@ def init_database() -> None:
     if settings.database_url.startswith("sqlite:///"):
         sqlite_path = settings.database_url.removeprefix("sqlite:///")
         Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    # UNSPECIFIED: keep runtime bootstrap until Alembic is made the only production schema path.
     Base.metadata.create_all(bind=engine)
     _ensure_runtime_schema()
 

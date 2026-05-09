@@ -19,6 +19,7 @@ from backend.services.tenant_service import _build_tenant_launch_ops_snapshot
 
 _PENDING_JOB_WARNING_COUNT = 10
 _PENDING_JOB_STALE_MINUTES = 15
+_NON_CRITICAL_BACKLOG_TYPES = {"partner_webhook_delivery"}
 
 
 def _utc_now() -> datetime:
@@ -40,6 +41,38 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _count_non_critical_jobs_by_type(type_counts: dict[str, Any]) -> int:
+    return sum(
+        int(count or 0)
+        for job_type, count in dict(type_counts or {}).items()
+        if str(job_type or "").strip().lower() in _NON_CRITICAL_BACKLOG_TYPES
+    )
+
+
+def _count_non_critical_dead_letters(job_snapshot: dict[str, Any], dead_letter_count: int) -> int:
+    summary = dict(job_snapshot.get("summary") or {})
+    dead_letter_by_type = dict(summary.get("dead_letter_by_type") or {})
+    if dead_letter_by_type:
+        return min(dead_letter_count, _count_non_critical_jobs_by_type(dead_letter_by_type))
+
+    observed_non_critical = 0
+    observed_dead_letters = 0
+    for item in list(job_snapshot.get("dead_letters") or []):
+        observed_dead_letters += 1
+        if str(item.get("job_type") or "").strip().lower() in _NON_CRITICAL_BACKLOG_TYPES:
+            observed_non_critical += 1
+    for item in list(job_snapshot.get("recent_jobs") or []):
+        if str(item.get("status") or "").strip().lower() != "dead_letter":
+            continue
+        observed_dead_letters += 1
+        if str(item.get("job_type") or "").strip().lower() in _NON_CRITICAL_BACKLOG_TYPES:
+            observed_non_critical += 1
+
+    if observed_dead_letters >= dead_letter_count:
+        return min(dead_letter_count, observed_non_critical)
+    return min(dead_letter_count, observed_non_critical)
 
 
 def _make_check(
@@ -126,6 +159,14 @@ def _check_job_worker() -> dict[str, Any]:
             message="Background worker is running but recently reported an error.",
             details=snapshot,
         )
+    if snapshot.get("stale") or snapshot.get("status") == "running_but_stale":
+        return _make_check(
+            "job_worker",
+            "Background worker",
+            status="warning",
+            message="Background worker is running but stale.",
+            details=snapshot,
+        )
     return _make_check(
         "job_worker",
         "Background worker",
@@ -139,27 +180,51 @@ def _check_job_backlog(session: Session) -> dict[str, Any]:
     snapshot = get_job_metrics_snapshot(session)
     summary = dict(snapshot.get("summary") or {})
     dead_letter_count = int(summary.get("dead_letter", 0) or 0)
+    non_critical_dead_letter_count = _count_non_critical_dead_letters(snapshot, dead_letter_count)
+    critical_dead_letter_count = max(0, dead_letter_count - non_critical_dead_letter_count)
     pending_count = int(summary.get("pending", 0) or 0)
+    retrying_count = int(summary.get("retrying", 0) or 0)
+    stuck_running_count = int(summary.get("stuck_running_count", 0) or 0)
+    pending_by_type = dict(summary.get("pending_by_type") or {})
+    non_critical_pending = _count_non_critical_jobs_by_type(pending_by_type)
+    critical_pending_count = max(0, pending_count - non_critical_pending)
+    snapshot["summary"] = summary
+    summary["critical_dead_letter"] = critical_dead_letter_count
+    summary["non_critical_dead_letter"] = non_critical_dead_letter_count
+    summary["critical_pending"] = critical_pending_count
+    summary["non_critical_pending"] = non_critical_pending
     oldest_pending_at = _parse_iso_datetime(summary.get("oldest_pending_at"))
     stale_backlog = bool(
         oldest_pending_at
         and (_utc_now() - oldest_pending_at) > timedelta(minutes=_PENDING_JOB_STALE_MINUTES)
     )
 
-    if dead_letter_count > 0:
+    if critical_dead_letter_count > 0:
         return _make_check(
             "job_backlog",
             "Async job backlog",
             status="blocked",
-            message="Dead-letter jobs are present and should be investigated before pilot launch.",
+            message="Critical dead-letter jobs are present and should be investigated before pilot launch.",
             details=snapshot,
         )
-    if pending_count >= _PENDING_JOB_WARNING_COUNT or stale_backlog:
+    if stuck_running_count > 0 or retrying_count > 0 or critical_pending_count >= _PENDING_JOB_WARNING_COUNT or stale_backlog:
         return _make_check(
             "job_backlog",
             "Async job backlog",
             status="warning",
             message="Async job backlog is growing or stale.",
+            details=snapshot,
+        )
+    if non_critical_dead_letter_count > 0:
+        summary["triage_note"] = (
+            "Non-critical delivery dead letters are visible as triage evidence for cleanup, "
+            "but they do not affect trading readiness."
+        )
+        return _make_check(
+            "job_backlog",
+            "Async job backlog",
+            status="ready",
+            message="Async job backlog is healthy; non-critical delivery dead letters are tracked as triage evidence only.",
             details=snapshot,
         )
     return _make_check(
@@ -300,7 +365,15 @@ def _resolve_release_gate_billing(session: Session, tenant: Tenant | None) -> di
 def _resolve_release_gate_job_backlog(job_snapshot: dict[str, Any]) -> dict[str, Any]:
     summary = dict(job_snapshot.get("summary") or {})
     pending_count = int(summary.get("pending", 0) or 0)
+    retrying_count = int(summary.get("retrying", 0) or 0)
     stuck_running_count = int(summary.get("stuck_running_count", 0) or 0)
+    pending_by_type = dict(summary.get("pending_by_type") or {})
+    non_critical_pending = sum(
+        int(count or 0)
+        for job_type, count in pending_by_type.items()
+        if str(job_type or "").strip().lower() in _NON_CRITICAL_BACKLOG_TYPES
+    )
+    critical_pending_count = max(0, pending_count - non_critical_pending)
     oldest_pending_at = _parse_iso_datetime(summary.get("oldest_pending_at"))
     stale_backlog = bool(
         oldest_pending_at
@@ -310,7 +383,7 @@ def _resolve_release_gate_job_backlog(job_snapshot: dict[str, Any]) -> dict[str,
     if stuck_running_count > 0 or stale_backlog:
         status = "blocked"
         message = "Async job backlog is stale or has stuck running jobs."
-    elif pending_count >= _PENDING_JOB_WARNING_COUNT:
+    elif retrying_count > 0 or critical_pending_count >= _PENDING_JOB_WARNING_COUNT:
         status = "warning"
         message = "Async job backlog is above the pilot warning threshold."
     else:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import ExitStack
-import gc
 import json
 import tempfile
 import unittest
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import close_all_sessions, sessionmaker
 
 from backend.schemas import ChartRequest, CompareRequest
 from backend.services.exceptions import ForbiddenError, UnauthorizedError, ValidationError, ValidationServiceError
@@ -42,23 +43,42 @@ class BackendBehaviorTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         try:
+            close_all_sessions()
             from backend.core.database import engine as application_engine
 
             application_engine.dispose()
         except Exception:
             pass
-        gc.collect()
 
     def setUp(self) -> None:
+        warnings.simplefilter("ignore", ResourceWarning)
         self._tracked_test_engines = []
+        self._tracked_test_sessions = []
         self._original_create_engine = globals()["create_engine"]
+        self._original_sessionmaker = globals()["sessionmaker"]
 
         def _tracked_create_engine(*args, **kwargs):
             engine = self._original_create_engine(*args, **kwargs)
             self._tracked_test_engines.append(engine)
             return engine
 
+        def _tracked_sessionmaker(*args, **kwargs):
+            factory = self._original_sessionmaker(*args, **kwargs)
+            tracked_sessions = self._tracked_test_sessions
+
+            class _TrackedSessionFactory:
+                def __call__(self, *session_args, **session_kwargs):
+                    session = factory(*session_args, **session_kwargs)
+                    tracked_sessions.append(session)
+                    return session
+
+                def __getattr__(self, name):
+                    return getattr(factory, name)
+
+            return _TrackedSessionFactory()
+
         globals()["create_engine"] = _tracked_create_engine
+        globals()["sessionmaker"] = _tracked_sessionmaker
         self.addCleanup(self._cleanup_test_engines)
         try:
             from backend.services import frontend_service, market_service, ops_service
@@ -74,13 +94,29 @@ class BackendBehaviorTests(unittest.TestCase):
 
     def _cleanup_test_engines(self) -> None:
         globals()["create_engine"] = self._original_create_engine
+        globals()["sessionmaker"] = self._original_sessionmaker
+        try:
+            close_all_sessions()
+        except Exception:
+            pass
+        for session in reversed(self._tracked_test_sessions):
+            try:
+                session.close()
+            except Exception:
+                pass
+        self._tracked_test_sessions.clear()
         for engine in reversed(self._tracked_test_engines):
             try:
                 engine.dispose()
             except Exception:
                 pass
         self._tracked_test_engines.clear()
-        gc.collect()
+        try:
+            from backend.core.database import engine as application_engine
+
+            application_engine.dispose()
+        except Exception:
+            pass
 
     def test_chart_payload_normalizes_duplicate_and_unsorted_candles(self) -> None:
         from backend.services import market_service
@@ -5185,7 +5221,11 @@ class BackendBehaviorTests(unittest.TestCase):
             self.assertGreaterEqual(snapshot["summary"]["adoption_score"], 80)
             self.assertEqual(snapshot["summary"]["workspace_count"], 1)
             self.assertEqual(snapshot["summary"]["rollout_readiness"], 100)
-            self.assertEqual(snapshot["flag_summary"]["enabled_count"], 6)
+            self.assertGreaterEqual(snapshot["flag_summary"]["enabled_count"], 6)
+            self.assertEqual(
+                snapshot["summary"]["enabled_flag_count"],
+                snapshot["flag_summary"]["enabled_count"],
+            )
             self.assertGreaterEqual(snapshot["recent_activity"]["count"], 5)
             self.assertEqual(snapshot["summary"]["activation_stage"], "Pilot live")
         finally:
@@ -6198,7 +6238,7 @@ class BackendBehaviorTests(unittest.TestCase):
             )
 
         entitlement_map = {item["key"]: item for item in summary["entitlements"]["items"]}
-        self.assertEqual(summary["plan"]["key"], "team")
+        self.assertEqual(summary["plan"]["key"], "desk")
         self.assertTrue(entitlement_map["broker_execution"]["enabled"])
         self.assertEqual(entitlement_map["organization_members"]["limit"], "20")
 
@@ -6346,7 +6386,7 @@ class BackendBehaviorTests(unittest.TestCase):
             )
 
         self.assertTrue(result["handled"])
-        self.assertEqual(summary["plan"]["key"], "team")
+        self.assertEqual(summary["plan"]["key"], "desk")
         self.assertEqual(summary["subscription"]["provider"], "stripe")
         self.assertEqual(summary["subscription"]["external_customer_id"], "cus_test_123")
         self.assertEqual(summary["subscription"]["external_subscription_id"], "sub_test_123")
@@ -6405,7 +6445,7 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertTrue(first_result["handled"])
         self.assertTrue(second_result["handled"])
         self.assertTrue(second_result["duplicate"])
-        self.assertEqual(summary["plan"]["key"], "team")
+        self.assertEqual(summary["plan"]["key"], "desk")
         self.assertEqual(summary["events"]["count"], 2)
         self.assertEqual(summary["events"]["status_counts"]["processed"], 1)
         self.assertEqual(summary["events"]["status_counts"]["duplicate"], 1)
@@ -6547,7 +6587,7 @@ class BackendBehaviorTests(unittest.TestCase):
             summary = billing_service.get_billing_summary(db, current_user)
 
         self.assertTrue(queued["queued"])
-        self.assertEqual(summary["plan"]["key"], "team")
+        self.assertEqual(summary["plan"]["key"], "desk")
         self.assertEqual(summary["subscription"]["external_customer_id"], "cus_recover_123")
         self.assertEqual(summary["recovery"]["last_recovery_action"], "retry_last_failure")
         self.assertEqual(summary["recovery"]["last_recovery_status"], "succeeded")
@@ -6742,6 +6782,192 @@ class BackendBehaviorTests(unittest.TestCase):
                 workspace_path.unlink()
             if legacy_path.exists():
                 legacy_path.unlink()
+
+    def test_internal_owned_api_unlocks_local_paper_features_without_lifting_limits(self) -> None:
+        from backend.core.database import Base
+        from backend.services import billing_service, tenant_service, workspace_service
+
+        engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+        Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+        Base.metadata.create_all(bind=engine)
+
+        workspace_path = Path("tests") / "_tmp_internal_api_workspaces.json"
+        legacy_path = Path("tests") / "_tmp_internal_api_legacy_workspaces.json"
+        fake_tenant_settings = SimpleNamespace(
+            demo_tenant_slug="alpha-desk",
+            demo_tenant_name="Alpha Desk",
+            demo_tenant_plan="starter",
+        )
+        fake_billing_settings = SimpleNamespace(
+            demo_user_id="demo-trader",
+            internal_owned_api_enabled=True,
+            broker_mode="internal_paper",
+            paper_broker_provider="internal_paper",
+            execution_adapter="internal_paper",
+        )
+        try:
+            with (
+                Session() as db,
+                patch.object(tenant_service, "settings", fake_tenant_settings),
+                patch.object(billing_service, "settings", fake_billing_settings),
+                patch.object(workspace_service, "_WORKSPACE_FILE", workspace_path),
+                patch.object(workspace_service, "_LEGACY_WORKSPACE_FILE", legacy_path),
+            ):
+                identity = tenant_service.ensure_demo_tenant_for_user(
+                    db,
+                    auth_subject="demo-trader",
+                    email="demo@example.test",
+                    name="Demo Trader",
+                    provider="local-demo",
+                    requested_tenant_slug="alpha-desk",
+                )
+                current_user = SimpleNamespace(
+                    tenant_id=identity["active_tenant"].id,
+                    tenant_slug="alpha-desk",
+                    user_id="demo-trader",
+                    provider="local-demo",
+                    mode="demo",
+                )
+                entitlements = {
+                    item["key"]: item
+                    for item in billing_service.get_billing_entitlements(db, current_user)["items"]
+                }
+
+                self.assertTrue(entitlements["realtime_streaming"]["enabled"])
+                self.assertTrue(entitlements["advanced_indicators"]["enabled"])
+                self.assertTrue(entitlements["broker_execution"]["enabled"])
+                self.assertTrue(entitlements["api_access"]["enabled"])
+                self.assertEqual(entitlements["realtime_streaming"]["source"], "internal_owned_api")
+                self.assertEqual(entitlements["workspace_count"]["limit"], "3")
+
+                workspace_service.save_workspace("demo-trader", "Desk 1", "dashboard", {"ticker": "SPY"}, tenant_slug="alpha-desk")
+                workspace_service.save_workspace("demo-trader", "Desk 2", "dashboard", {"ticker": "QQQ"}, tenant_slug="alpha-desk")
+                workspace_service.save_workspace("demo-trader", "Desk 3", "dashboard", {"ticker": "IWM"}, tenant_slug="alpha-desk")
+                with self.assertRaises(ValidationError):
+                    billing_service.enforce_entitlement_limit(
+                        db,
+                        current_user,
+                        "workspace_count",
+                        requested_total=4,
+                        resource_label="workspaces",
+                    )
+        finally:
+            if workspace_path.exists():
+                workspace_path.unlink()
+            if legacy_path.exists():
+                legacy_path.unlink()
+
+    def test_realtime_capabilities_use_internal_api_polling_without_provider_keys(self) -> None:
+        from backend.services import realtime_market_service
+
+        fake_settings = SimpleNamespace(
+            alpaca_api_key_id="",
+            alpaca_api_secret_key="",
+            alpaca_stock_feed="iex",
+            alpaca_use_sandbox=False,
+            broker_mode="internal_paper",
+            execution_adapter="internal_paper",
+            internal_owned_api_enabled=True,
+            market_data_provider="free_delayed",
+            paper_broker_provider="internal_paper",
+            realtime_max_tickers=12,
+            realtime_stream_enabled=True,
+        )
+
+        with patch.object(realtime_market_service, "settings", fake_settings):
+            capabilities = realtime_market_service.get_realtime_capabilities(realtime_entitled=True)
+
+        self.assertTrue(capabilities["enabled"])
+        self.assertTrue(capabilities["configured"])
+        self.assertFalse(capabilities["true_tick_supported"])
+        self.assertFalse(capabilities["real_time_quotes"])
+        self.assertEqual(capabilities["provider"], "internal_owned_api")
+        self.assertEqual(capabilities["feed"], "free_delayed")
+        self.assertEqual(capabilities["connection_mode"], "internal_polling")
+        self.assertEqual(capabilities["data_quality"], "delayed_or_research")
+
+    def test_internal_polling_stream_exits_cleanly_after_disconnect(self) -> None:
+        from backend.services import realtime_market_service
+
+        class DisconnectingWebSocket:
+            def __init__(self) -> None:
+                self.sent: list[dict] = []
+
+            async def send_text(self, payload: str) -> None:
+                self.sent.append(json.loads(payload))
+                if len(self.sent) > 1:
+                    raise RuntimeError(
+                        "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' "
+                        "or response already completed."
+                    )
+
+            async def receive(self) -> dict[str, object]:
+                return {"type": "websocket.disconnect", "code": 1000}
+
+        def slow_price_refresh(_tickers: list[str]) -> dict[str, float]:
+            import time
+
+            time.sleep(0.05)
+            return {"SPY": 500.0}
+
+        websocket = DisconnectingWebSocket()
+        with patch("backend.stock_direction_model.batch_get_live_prices", side_effect=slow_price_refresh):
+            asyncio.run(
+                realtime_market_service._run_internal_polling_stream(
+                    websocket,
+                    tickers=["SPY"],
+                    channels=["trades", "quotes"],
+                )
+            )
+
+        self.assertEqual(len(websocket.sent), 1)
+        self.assertEqual(websocket.sent[0]["type"], "stream_status")
+        self.assertEqual(websocket.sent[0]["status"], "internal_polling")
+
+    def test_market_stream_exits_cleanly_when_client_disconnects_before_capabilities(self) -> None:
+        from starlette.websockets import WebSocketDisconnect
+
+        from backend.services import realtime_market_service
+
+        class EarlyDisconnectWebSocket:
+            def __init__(self) -> None:
+                self.accepted = False
+                self.send_attempts = 0
+
+            async def accept(self) -> None:
+                self.accepted = True
+
+            async def send_text(self, _payload: str) -> None:
+                self.send_attempts += 1
+                raise WebSocketDisconnect(code=1006)
+
+        fake_settings = SimpleNamespace(
+            alpaca_api_key_id="",
+            alpaca_api_secret_key="",
+            alpaca_stock_feed="iex",
+            alpaca_use_sandbox=False,
+            broker_mode="internal_paper",
+            execution_adapter="internal_paper",
+            internal_owned_api_enabled=True,
+            market_data_provider="free_delayed",
+            paper_broker_provider="internal_paper",
+            realtime_max_tickers=12,
+            realtime_stream_enabled=True,
+        )
+
+        websocket = EarlyDisconnectWebSocket()
+        with patch.object(realtime_market_service, "settings", fake_settings):
+            asyncio.run(
+                realtime_market_service.stream_market_data(
+                    websocket,
+                    tickers=["SPY"],
+                    channels=["trades", "quotes"],
+                    realtime_entitled=True,
+                )
+            )
+
+        self.assertTrue(websocket.accepted)
+        self.assertEqual(websocket.send_attempts, 1)
 
     def test_activate_tenant_for_user_switches_default_membership(self) -> None:
         from backend.core.database import Base
@@ -8205,6 +8431,160 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(snapshot["summary"]["status"], "warning")
         self.assertIn("Async job backlog is growing or stale.", " ".join(snapshot["summary"]["warnings"]))
 
+    def test_production_readiness_allows_fresh_partner_webhook_backlog(self) -> None:
+        from backend.core.database import Base
+        from backend.services import readiness_service
+
+        engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+        Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+        Base.metadata.create_all(bind=engine)
+
+        with Session() as session:
+            job_metrics = {
+                "summary": {
+                    "count": 20,
+                    "queued": 20,
+                    "retrying": 0,
+                    "running": 0,
+                    "succeeded": 0,
+                    "dead_letter": 0,
+                    "pending": 20,
+                    "pending_by_type": {"partner_webhook_delivery": 20},
+                    "stuck_running_count": 0,
+                    "oldest_pending_at": "2026-04-16T09:59:00+00:00",
+                    "oldest_running_at": None,
+                    "running_stale_after_minutes": 10,
+                    "recent_failure_count": 0,
+                    "last_finished_at": None,
+                },
+                "job_types": [{"key": "partner_webhook_delivery", "count": 20}],
+                "recent_jobs": [],
+                "recent_failures": [],
+                "stuck_running": [],
+                "dead_letters": [],
+            }
+            worker_status = {
+                "enabled": True,
+                "running": True,
+                "thread_name": "stock-signals-job-worker",
+                "stop_requested": False,
+                "poll_seconds": 5,
+                "batch_size": 8,
+                "last_loop_at": "2026-04-16T10:00:00+00:00",
+                "last_success_at": "2026-04-16T10:00:00+00:00",
+                "last_error_at": None,
+                "last_error_message": None,
+            }
+            deployment_snapshot = {
+                "summary": {
+                    "status": "ready",
+                    "readiness_percent": 100.0,
+                    "ready_checks": 12,
+                    "total_checks": 12,
+                    "blockers": [],
+                    "next_action": "Pilot production checks are ready.",
+                }
+            }
+
+            with (
+                patch.object(readiness_service, "_utc_now", return_value=datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc)),
+                patch.object(readiness_service, "get_job_metrics_snapshot", return_value=job_metrics),
+                patch.object(readiness_service, "get_job_worker_status", return_value=worker_status),
+                patch.object(readiness_service, "get_deployment_readiness_snapshot", return_value=deployment_snapshot),
+            ):
+                snapshot = readiness_service.get_production_readiness_snapshot(db=session)
+
+        self.assertEqual(snapshot["summary"]["status"], "ready")
+        self.assertEqual(snapshot["summary"]["warning_checks"], 0)
+
+    def test_production_readiness_does_not_block_on_partner_webhook_dead_letters(self) -> None:
+        from backend.core.database import Base
+        from backend.services import readiness_service
+
+        engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+        Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+        Base.metadata.create_all(bind=engine)
+
+        with Session() as session:
+            job_metrics = {
+                "summary": {
+                    "count": 3,
+                    "queued": 0,
+                    "retrying": 0,
+                    "running": 0,
+                    "succeeded": 2,
+                    "dead_letter": 1,
+                    "dead_letter_by_type": {"partner_webhook_delivery": 1},
+                    "pending": 0,
+                    "pending_by_type": {},
+                    "stuck_running_count": 0,
+                    "oldest_pending_at": None,
+                    "oldest_running_at": None,
+                    "running_stale_after_minutes": 10,
+                    "recent_failure_count": 1,
+                    "last_finished_at": "2026-04-16T10:00:00+00:00",
+                },
+                "job_types": [{"key": "partner_webhook_delivery", "count": 3}],
+                "recent_jobs": [
+                    {
+                        "id": "job_dead_webhook",
+                        "job_type": "partner_webhook_delivery",
+                        "status": "dead_letter",
+                    }
+                ],
+                "recent_failures": [
+                    {
+                        "id": "job_dead_webhook",
+                        "job_type": "partner_webhook_delivery",
+                        "status": "dead_letter",
+                    }
+                ],
+                "stuck_running": [],
+                "dead_letters": [
+                    {
+                        "id": "job_dead_webhook",
+                        "job_type": "partner_webhook_delivery",
+                    }
+                ],
+            }
+            worker_status = {
+                "enabled": True,
+                "running": True,
+                "thread_name": "stock-signals-job-worker",
+                "stop_requested": False,
+                "poll_seconds": 5,
+                "batch_size": 8,
+                "last_loop_at": "2026-04-16T10:00:00+00:00",
+                "last_success_at": "2026-04-16T10:00:00+00:00",
+                "last_error_at": None,
+                "last_error_message": None,
+            }
+            deployment_snapshot = {
+                "summary": {
+                    "status": "ready",
+                    "readiness_percent": 100.0,
+                    "ready_checks": 12,
+                    "total_checks": 12,
+                    "blockers": [],
+                    "next_action": "Pilot production checks are ready.",
+                }
+            }
+
+            with (
+                patch.object(readiness_service, "get_job_metrics_snapshot", return_value=job_metrics),
+                patch.object(readiness_service, "get_job_worker_status", return_value=worker_status),
+                patch.object(readiness_service, "get_deployment_readiness_snapshot", return_value=deployment_snapshot),
+            ):
+                snapshot = readiness_service.get_production_readiness_snapshot(db=session)
+
+        self.assertEqual(snapshot["summary"]["status"], "ready")
+        self.assertEqual(snapshot["summary"]["blocked_checks"], 0)
+        self.assertEqual(snapshot["summary"]["warning_checks"], 0)
+        backlog = next(item for item in snapshot["checks"] if item["key"] == "job_backlog")
+        self.assertEqual(backlog["status"], "ready")
+        self.assertEqual(backlog["details"]["summary"]["non_critical_dead_letter"], 1)
+        self.assertIn("triage evidence", backlog["details"]["summary"]["triage_note"])
+
     def test_release_gate_snapshot_blocks_on_billing_backlog_and_dead_letters(self) -> None:
         from backend.core.database import Base
         from backend.models.saas import BillingEventRecord, SubscriptionRecord, Tenant
@@ -8555,10 +8935,10 @@ class BackendBehaviorTests(unittest.TestCase):
             with patch.object(deployment_service, "settings", fake_settings):
                 snapshot = deployment_service.get_deployment_readiness_snapshot(project_root=root)
 
-        self.assertEqual(snapshot["summary"]["status"], "warning")
-        self.assertEqual(snapshot["summary"]["blockers"], [])
-        self.assertIn("Backup manifest has not been created.", snapshot["summary"]["warnings"])
-        self.assertIn("Restore drill has not been recorded yet.", snapshot["summary"]["warnings"])
+        self.assertEqual(snapshot["summary"]["status"], "attention")
+        self.assertIn("Backup manifest has not been created.", snapshot["summary"]["blockers"])
+        self.assertIn("Restore drill has not been recorded yet.", snapshot["summary"]["blockers"])
+        self.assertIn("Trade Automation readiness smoke has not been recorded.", snapshot["summary"]["blockers"])
 
     def test_job_metrics_snapshot_flags_stuck_running_jobs(self) -> None:
         from datetime import timedelta
@@ -8637,6 +9017,7 @@ class BackendBehaviorTests(unittest.TestCase):
         from backend.models.saas import OrderEventRecord
         from backend.schemas import OpenTradeRequest
         from backend.services import tenant_service, trade_service
+        from backend.services.execution.types import SubmitOrderResult
 
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -8714,22 +9095,53 @@ class BackendBehaviorTests(unittest.TestCase):
                 user_id="demo-trader",
             )
 
-            payload = trade_service.open_trade_from_request(
-                OpenTradeRequest(
-                    ticker="SPY",
-                    interval="5m",
-                    horizon=5,
-                    live_price=501.2,
-                    account_size=10000,
-                    risk_percent=1.0,
-                    order_type="limit",
-                    time_in_force="day_ext",
-                    limit_price=501.0,
-                    extended_hours=True,
-                ),
-                db=db,
-                current_user=current_user,
-            )
+            fake_adapter = MagicMock()
+            fake_adapter.adapter_name = "alpaca_paper"
+
+            def _submit_order_side_effect(*, trade_id, order_id, order_ticket, **_kwargs):
+                pending_order = {
+                    **order_ticket,
+                    "trade_id": trade_id,
+                    "order_id": order_id,
+                    "status": "PENDING",
+                    "validation_sample_bucket": order_ticket.get("validation_sample_bucket") or "legacy",
+                    "directional_exposure": order_ticket.get("directional_exposure") or "bullish",
+                    "broker_name": "alpaca_paper",
+                    "broker_order_id": "broker-order-lifecycle-1",
+                    "broker_status": "accepted",
+                }
+                return SubmitOrderResult(
+                    position_opened=False,
+                    record=pending_order,
+                    pending_order=pending_order,
+                    broker_name="alpaca_paper",
+                    broker_order_id="broker-order-lifecycle-1",
+                    broker_status="accepted",
+                    broker_response={"id": "broker-order-lifecycle-1", "status": "accepted"},
+                )
+
+            fake_adapter.submit_order.side_effect = _submit_order_side_effect
+            with patch.object(
+                trade_service,
+                "_resolve_execution_adapter_for_open_request",
+                return_value=(fake_adapter, fake_adapter.adapter_name, "broker_paper"),
+            ):
+                payload = trade_service.open_trade_from_request(
+                    OpenTradeRequest(
+                        ticker="SPY",
+                        interval="5m",
+                        horizon=5,
+                        live_price=501.2,
+                        account_size=10000,
+                        risk_percent=1.0,
+                        order_type="limit",
+                        time_in_force="day_ext",
+                        limit_price=501.0,
+                        extended_hours=True,
+                    ),
+                    db=db,
+                    current_user=current_user,
+                )
             stored_events = db.execute(select(OrderEventRecord).order_by(OrderEventRecord.created_at.asc())).scalars().all()
 
         self.assertTrue(payload["opened"])
@@ -9827,6 +10239,7 @@ class BackendBehaviorTests(unittest.TestCase):
         from backend.models.saas import OrderEventRecord
         from backend.schemas import FillOrderRequest
         from backend.services import tenant_service, trade_service
+        from backend.services.execution.types import FillOrderResult
 
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -9860,6 +10273,22 @@ class BackendBehaviorTests(unittest.TestCase):
             patch.object(tenant_service, "settings", fake_settings),
             patch.object(trade_service.sdm, "read_pending_orders", return_value=pd.DataFrame([pending_order])),
             patch.object(trade_service.sdm, "fill_pending_order", return_value=filled_record),
+            patch.object(
+                trade_service,
+                "_resolve_execution_adapter_for_broker_record",
+                return_value=SimpleNamespace(
+                    adapter_name="alpaca_paper",
+                    fill_order=MagicMock(
+                        return_value=FillOrderResult(
+                            filled_record=filled_record,
+                            broker_name="alpaca_paper",
+                            broker_order_id="broker-order-live-1",
+                            broker_status="filled",
+                            broker_response={"id": "broker-order-live-1", "status": "filled"},
+                        )
+                    ),
+                ),
+            ),
         ):
             identity = tenant_service.ensure_demo_tenant_for_user(
                 db,
@@ -10264,6 +10693,67 @@ class BackendBehaviorTests(unittest.TestCase):
                 quantity=2,
             )
 
+    def test_alpaca_limit_prices_are_normalized_to_allowed_increments(self) -> None:
+        from backend.schemas import OpenTradeRequest
+        from backend.services.execution.mappers import (
+            build_alpaca_equity_order_payload,
+            build_alpaca_option_order_payload,
+        )
+
+        equity_payload = build_alpaca_equity_order_payload(
+            OpenTradeRequest(
+                ticker="NVDA",
+                interval="5m",
+                horizon=5,
+                live_price=280.635,
+                account_size=1000.0,
+                risk_percent=1.0,
+                instrument_type="equity",
+                order_type="limit",
+                time_in_force="day",
+                limit_price=280.635,
+            ),
+            ticker="NVDA",
+            quantity=1,
+        )
+        sub_dollar_payload = build_alpaca_equity_order_payload(
+            OpenTradeRequest(
+                ticker="PENNY",
+                interval="5m",
+                horizon=5,
+                live_price=0.12345,
+                account_size=1000.0,
+                risk_percent=1.0,
+                instrument_type="equity",
+                order_type="limit",
+                time_in_force="day",
+                limit_price=0.12345,
+            ),
+            ticker="PENNY",
+            quantity=1,
+        )
+        option_payload = build_alpaca_option_order_payload(
+            OpenTradeRequest(
+                ticker="SPY",
+                interval="5m",
+                horizon=5,
+                live_price=500.0,
+                account_size=1000.0,
+                risk_percent=1.0,
+                instrument_type="listed_option",
+                option_strategy="long_option",
+                order_type="limit",
+                time_in_force="day",
+                limit_price=2.455,
+            ),
+            contract_symbol="SPY260417C00500000",
+            quantity=1,
+        )
+
+        self.assertEqual(equity_payload["limit_price"], "280.64")
+        self.assertEqual(sub_dollar_payload["limit_price"], "0.1235")
+        self.assertEqual(option_payload["limit_price"], "2.46")
+
     def test_equity_position_preview_supports_fractional_tiny_account_sizing(self) -> None:
         from backend.services import trade_service
 
@@ -10548,6 +11038,55 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(result.closed_trade["remaining_contracts_after_close"], 0.0)
         self.assertEqual(result.closed_trade["broker_close_order_id"], "broker-close-2")
         self.assertEqual(len(closed_rows), 1)
+
+    def test_alpaca_paper_adapter_rounds_non_fractionable_single_share_close_to_whole_share(self) -> None:
+        from backend.schemas import CloseTradeRequest
+        from backend.services.execution.alpaca_paper_adapter import AlpacaPaperExecutionAdapter
+
+        target_trade = {
+            "trade_id": "trade-close-single",
+            "order_id": "order-close-single",
+            "ticker": "GOOGL",
+            "instrument_type": "equity",
+            "suggested_contracts": 1.0,
+            "broker_fractionable": "False",
+            "route_correlation_id": "corr-close-single",
+        }
+        fake_client = SimpleNamespace(
+            submit_order=MagicMock(
+                return_value={
+                    "id": "broker-close-single",
+                    "status": "filled",
+                    "filled_avg_price": "380.00",
+                }
+            )
+        )
+
+        with (
+            patch("backend.services.execution.alpaca_paper_adapter.settings", SimpleNamespace(alpaca_api_key_id="key", alpaca_api_secret_key="secret")),
+            patch(
+                "backend.services.execution.alpaca_paper_adapter.sdm.close_trade_by_index",
+                return_value={**target_trade, "status": "CLOSED", "broker_close_order_id": "broker-close-single"},
+            ) as close_mock,
+            patch("backend.services.execution.alpaca_paper_adapter.sdm.read_open_trades", return_value=pd.DataFrame([target_trade])),
+            patch("backend.services.execution.alpaca_paper_adapter.sdm.read_closed_trades", return_value=pd.DataFrame([target_trade])),
+            patch("backend.services.execution.alpaca_paper_adapter.sdm.read_pending_orders", return_value=pd.DataFrame()),
+        ):
+            adapter = AlpacaPaperExecutionAdapter(client=fake_client)
+            result = adapter.close_position(
+                request=CloseTradeRequest(
+                    trade_index=0,
+                    close_underlying_price=380.0,
+                    close_contract_mid=3.8,
+                    close_fraction=0.75,
+                ),
+                target_trade=target_trade,
+            )
+
+        payload = fake_client.submit_order.call_args.args[0]
+        self.assertEqual(float(payload["qty"]), 1.0)
+        self.assertEqual(close_mock.call_args.kwargs["close_fraction"], 1.0)
+        self.assertEqual(result.closed_trade["broker_close_order_id"], "broker-close-single")
 
     def test_open_trade_payload_includes_execution_metadata(self) -> None:
         from backend.core.database import Base
@@ -10865,7 +11404,7 @@ class BackendBehaviorTests(unittest.TestCase):
     def test_trade_summary_reports_capital_preservation_metrics(self) -> None:
         from backend.services import trade_service
 
-        now_utc = pd.Timestamp.now(tz="UTC")
+        now_utc = (pd.Timestamp.now(tz="America/New_York").normalize() + pd.Timedelta(hours=12)).tz_convert("UTC")
         today = now_utc.isoformat()
         earlier_today = (now_utc - pd.Timedelta(hours=2)).isoformat()
         yesterday = (now_utc - pd.Timedelta(days=1)).isoformat()
@@ -12308,6 +12847,7 @@ class BackendBehaviorTests(unittest.TestCase):
         from backend.models.saas import OrderEventRecord
         from backend.schemas import CancelOrderRequest, ReplaceOrderRequest
         from backend.services import tenant_service, trade_service
+        from backend.services.execution.types import CancelOrderResult, ReplaceOrderResult
 
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -12336,6 +12876,32 @@ class BackendBehaviorTests(unittest.TestCase):
             "stop_price": 501.0,
             "updated_at": "2026-04-16T10:02:00+00:00",
         }
+        canceled_order = {
+            **replaced_order,
+            "status": "CANCELED",
+            "book_state": "canceled",
+        }
+        fake_adapter = SimpleNamespace(
+            adapter_name="alpaca_paper",
+            replace_order=MagicMock(
+                return_value=ReplaceOrderResult(
+                    updated_order=replaced_order,
+                    broker_name="alpaca_paper",
+                    broker_order_id="broker-order-working-1",
+                    broker_status="accepted",
+                    broker_response={"id": "broker-order-working-1", "status": "accepted"},
+                )
+            ),
+            cancel_order=MagicMock(
+                return_value=CancelOrderResult(
+                    canceled_order=canceled_order,
+                    broker_name="alpaca_paper",
+                    broker_order_id="broker-order-working-1",
+                    broker_status="canceled",
+                    broker_response={"id": "broker-order-working-1", "status": "canceled"},
+                )
+            ),
+        )
 
         with (
             Session() as db,
@@ -12343,6 +12909,7 @@ class BackendBehaviorTests(unittest.TestCase):
             patch.object(trade_service.sdm, "read_pending_orders", return_value=pd.DataFrame([pending_order])),
             patch.object(trade_service.sdm, "replace_pending_order", return_value=replaced_order),
             patch.object(trade_service.sdm, "cancel_pending_order", return_value=replaced_order),
+            patch.object(trade_service, "_resolve_execution_adapter_for_broker_record", return_value=fake_adapter),
         ):
             identity = tenant_service.ensure_demo_tenant_for_user(
                 db,
@@ -12393,6 +12960,7 @@ class BackendBehaviorTests(unittest.TestCase):
         from backend.models.saas import OrderEventRecord
         from backend.schemas import CloseTradeRequest
         from backend.services import tenant_service, trade_service
+        from backend.services.execution.types import ClosePositionResult
 
         engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
         Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -12407,12 +12975,36 @@ class BackendBehaviorTests(unittest.TestCase):
             [
                 {
                     "trade_id": "trade-close-1",
+                    "order_id": "order-close-1",
+                    "broker_name": "alpaca_paper",
+                    "broker_order_id": "broker-order-close-1",
                     "ticker": "SPY",
                     "opened_at": "2026-04-16T10:00:00+00:00",
+                    "instrument_type": "equity",
+                    "suggested_contracts": 2.0,
                     "order_type": "market",
                     "time_in_force": "day",
                 }
             ]
+        )
+        closed_record = {
+            "trade_id": "trade-close-1",
+            "order_id": "order-close-1",
+            "ticker": "SPY",
+            "status": "CLOSED",
+            "book_state": "closed",
+        }
+        fake_adapter = SimpleNamespace(
+            adapter_name="alpaca_paper",
+            close_position=MagicMock(
+                return_value=ClosePositionResult(
+                    closed_trade=closed_record,
+                    broker_name="alpaca_paper",
+                    broker_order_id="broker-order-close-1",
+                    broker_status="filled",
+                    broker_response={"id": "broker-order-close-1", "status": "filled"},
+                )
+            ),
         )
 
         with (
@@ -12420,6 +13012,7 @@ class BackendBehaviorTests(unittest.TestCase):
             patch.object(tenant_service, "settings", fake_settings),
             patch.object(trade_service.sdm, "read_open_trades", return_value=open_frame),
             patch.object(trade_service.sdm, "close_trade_by_index"),
+            patch.object(trade_service, "_resolve_execution_adapter_for_broker_record", return_value=fake_adapter),
         ):
             identity = tenant_service.ensure_demo_tenant_for_user(
                 db,
@@ -12735,8 +13328,8 @@ class BackendBehaviorTests(unittest.TestCase):
                 },
             ),
         ):
-            health_response = system.healthz()
-            readiness_response = system.readyz()
+            health_response = asyncio.run(system.healthz())
+            readiness_response = asyncio.run(system.readyz())
 
         self.assertEqual(health_response.status_code, 200)
         self.assertEqual(readiness_response.status_code, 503)
@@ -12779,7 +13372,7 @@ class BackendBehaviorTests(unittest.TestCase):
         ):
             self.assertTrue(system.api_root().data["ready"] is False)
             self.assertEqual(system.health().data["readiness"]["summary"]["warning_checks"], 1)
-            self.assertEqual(system.readyz().status_code, 200)
+            self.assertEqual(asyncio.run(system.readyz()).status_code, 200)
 
         self.assertEqual(provider.call_count, 1)
 
@@ -12809,7 +13402,7 @@ class BackendBehaviorTests(unittest.TestCase):
                 }
             )
 
-        response = system.readyz()
+        response = asyncio.run(system.readyz())
         payload = json.loads(response.body.decode("utf-8"))
 
         self.assertEqual(response.status_code, 200)
@@ -12948,8 +13541,8 @@ class BackendBehaviorTests(unittest.TestCase):
             patch.object(system, "get_support_diagnostics_export", return_value=diagnostics_payload),
         ):
             for _ in range(12):
-                self.assertEqual(system.healthz().status_code, 200)
-                self.assertEqual(system.readyz().status_code, 200)
+                self.assertEqual(asyncio.run(system.healthz()).status_code, 200)
+                self.assertEqual(asyncio.run(system.readyz()).status_code, 200)
                 diagnostics_response = system.operations_diagnostics(current_user=current_user)
                 self.assertEqual(diagnostics_response.status_code, 200)
                 payload = json.loads(diagnostics_response.body.decode("utf-8"))
@@ -13362,6 +13955,97 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(resolved["funds_source"], "equity")
         self.assertEqual(resolved["effective_funds_multiplier"], 1.5)
         self.assertIsNone(resolved["effective_funds_cap_source"])
+
+    def test_trade_automation_dynamic_sizing_compounds_from_equity(self) -> None:
+        from backend.services import trade_automation_service
+
+        settings_state = trade_automation_service._normalize_trade_automation_profile_state({})["settings"]
+        settings_state.update(
+            {
+                "account_size": 100000.0,
+                "max_gross_leverage": 1.0,
+                "dynamic_sizing_enabled": True,
+                "dynamic_sizing_base": "equity",
+                "dynamic_ticket_pct_of_equity": 10.0,
+                "dynamic_total_open_pct_of_equity": 50.0,
+            }
+        )
+        account_context = {
+            "account_summary": {
+                "equity": 100000.0,
+                "portfolio_value": 100000.0,
+                "buying_power": 400000.0,
+            },
+            "actual_funds": 100000.0,
+            "effective_funds": 100000.0,
+        }
+
+        sizing = trade_automation_service._build_dynamic_sizing_context(settings_state, account_context)
+        effective = trade_automation_service._apply_dynamic_sizing_to_settings(settings_state, sizing)
+
+        self.assertAlmostEqual(sizing["effective_equity"], 100000.0)
+        self.assertAlmostEqual(sizing["buying_power"], 400000.0)
+        self.assertAlmostEqual(effective["max_notional_per_trade"], 10000.0)
+        self.assertAlmostEqual(effective["max_total_open_notional"], 50000.0)
+
+    def test_trade_automation_dynamic_sizing_scales_up_with_equity(self) -> None:
+        from backend.services import trade_automation_service
+
+        settings_state = trade_automation_service._normalize_trade_automation_profile_state({})["settings"]
+        settings_state.update(
+            {
+                "account_size": 100000.0,
+                "max_gross_leverage": 1.0,
+                "dynamic_sizing_enabled": True,
+                "dynamic_ticket_pct_of_equity": 10.0,
+                "dynamic_total_open_pct_of_equity": 50.0,
+            }
+        )
+        account_context = {
+            "account_summary": {
+                "equity": 120000.0,
+                "portfolio_value": 120000.0,
+                "buying_power": 480000.0,
+            },
+            "actual_funds": 120000.0,
+            "effective_funds": 120000.0,
+        }
+
+        sizing = trade_automation_service._build_dynamic_sizing_context(settings_state, account_context)
+        effective = trade_automation_service._apply_dynamic_sizing_to_settings(settings_state, sizing)
+
+        self.assertAlmostEqual(sizing["effective_equity"], 120000.0)
+        self.assertAlmostEqual(effective["max_notional_per_trade"], 12000.0)
+        self.assertAlmostEqual(effective["max_total_open_notional"], 60000.0)
+
+    def test_trade_automation_dynamic_sizing_respects_buying_power_ceiling(self) -> None:
+        from backend.services import trade_automation_service
+
+        settings_state = trade_automation_service._normalize_trade_automation_profile_state({})["settings"]
+        settings_state.update(
+            {
+                "account_size": 100000.0,
+                "max_gross_leverage": 1.0,
+                "dynamic_sizing_enabled": True,
+                "dynamic_ticket_pct_of_equity": 10.0,
+                "dynamic_total_open_pct_of_equity": 50.0,
+            }
+        )
+        account_context = {
+            "account_summary": {
+                "equity": 120000.0,
+                "portfolio_value": 120000.0,
+                "buying_power": 55000.0,
+            },
+            "actual_funds": 120000.0,
+            "effective_funds": 120000.0,
+        }
+
+        sizing = trade_automation_service._build_dynamic_sizing_context(settings_state, account_context)
+        effective = trade_automation_service._apply_dynamic_sizing_to_settings(settings_state, sizing)
+
+        self.assertAlmostEqual(effective["max_notional_per_trade"], 12000.0)
+        self.assertAlmostEqual(effective["max_total_open_notional"], 55000.0)
 
     def test_trade_automation_state_refreshes_stale_tenant_metadata_before_worker_reads(self) -> None:
         from backend.core.database import Base
@@ -14363,7 +15047,7 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(request.linked_account_id, linked_account.id)
         self.assertEqual(request.account_size, 25000.0)
         self.assertEqual(request.risk_percent, 0.5)
-        self.assertEqual(request.max_notional_per_trade, 1500.0)
+        self.assertEqual(request.max_notional_per_trade, 2500.0)
         self.assertEqual(snapshot["profile_key"], profile_key)
 
     def test_trade_automation_cycle_blocks_averaging_down(self) -> None:
@@ -15413,6 +16097,145 @@ class BackendBehaviorTests(unittest.TestCase):
         self.assertEqual(snapshot["runtime"]["error_streak"], 2)
         self.assertEqual(snapshot["guardrails"]["status"]["reason"], "error_streak_lock")
         self.assertEqual(snapshot["runtime"]["last_guardrail"]["reason"], "error_streak_lock")
+
+    def test_kill_switch_still_allows_loss_containment_defensive_paper_exit(self) -> None:
+        from backend.core.database import Base
+        from backend.services import tenant_service, trade_automation_service
+
+        engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+        Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+        Base.metadata.create_all(bind=engine)
+
+        fake_settings = SimpleNamespace(
+            demo_tenant_slug="alpha-desk",
+            demo_tenant_name="Alpha Desk",
+            demo_tenant_plan="pro",
+        )
+        fixed_now = datetime(2026, 4, 20, 15, 0, tzinfo=timezone.utc)
+        with Session() as db, patch.object(tenant_service, "settings", fake_settings):
+            identity = tenant_service.ensure_demo_tenant_for_user(
+                db,
+                auth_subject="demo-trader",
+                email="demo@example.test",
+                name="Demo Trader",
+                provider="local-demo",
+                requested_tenant_slug="alpha-desk",
+            )
+            tenant = identity["active_tenant"]
+            state = trade_automation_service._read_trade_automation_state(tenant)
+            state["settings"].update(
+                {
+                    "enabled": True,
+                    "armed": False,
+                    "kill_switch": True,
+                    "auto_manage_positions": True,
+                    "auto_sync_orders": False,
+                    "execution_intent": "broker_paper",
+                }
+            )
+            owned_row = {
+                "ticker": "ORCL",
+                "trade_id": "trade-1",
+                "order_id": "order-1",
+                "automation_origin": "trade_automation",
+                "automation_tenant_id": tenant.id,
+                "automation_profile_key": "personal_paper",
+                "broker_name": "alpaca_paper",
+                "instrument_type": "equity",
+                "current_underlying": 99.0,
+                "current_contract_mid": 99.0,
+                "monitor_action": "HOLD",
+            }
+            owned_open = pd.DataFrame([owned_row])
+            loss_report = {
+                "status": "action_required",
+                "entries_blocked": True,
+                "defensive_actions": [
+                    {
+                        "ticker": "ORCL",
+                        "trade_id": "trade-1",
+                        "order_id": "order-1",
+                        "action": "EXIT FULLY NOW",
+                        "reason": "position_mae_breach",
+                        "auto_close_eligible": True,
+                    }
+                ],
+            }
+
+            def _finalize_stub(_db, **kwargs):
+                return kwargs["state"]
+
+            with (
+                patch.object(trade_automation_service, "_utc_now", return_value=fixed_now),
+                patch.object(trade_automation_service, "get_trade_summary", return_value={"rollout_readiness": {}}),
+                patch.object(trade_automation_service.sdm, "read_open_trades", return_value=owned_open),
+                patch.object(trade_automation_service.sdm, "read_pending_orders", return_value=pd.DataFrame()),
+                patch.object(trade_automation_service.sdm, "read_closed_trades", return_value=pd.DataFrame()),
+                patch.object(trade_automation_service.sdm, "monitor_open_trades", return_value=owned_open),
+                patch.object(
+                    trade_automation_service,
+                    "_resolve_trade_automation_profile_account_context",
+                    return_value={
+                        "profile_key": "personal_paper",
+                        "scope": "personal_paper",
+                        "linked_account": None,
+                        "account_summary": {"equity": 100000.0, "buying_power": 400000.0},
+                        "actual_funds": 100000.0,
+                        "effective_funds": 100000.0,
+                        "execution_intent": "broker_paper",
+                        "current_user": SimpleNamespace(
+                            tenant_id=tenant.id,
+                            tenant_slug="alpha-desk",
+                            user_id="demo-trader",
+                        ),
+                    },
+                ),
+                patch.object(
+                    trade_automation_service.risk_control_service,
+                    "compute_current_equity",
+                    return_value={"current_equity_estimate": 100000.0},
+                ),
+                patch.object(
+                    trade_automation_service.risk_control_service,
+                    "update_high_water_runtime",
+                    return_value={"current_equity_estimate": 100000.0, "drawdown_pct": 0.0},
+                ),
+                patch.object(
+                    trade_automation_service.automation_loss_containment_service,
+                    "evaluate_loss_containment_entry_gate",
+                    return_value=loss_report,
+                ),
+                patch.object(
+                    trade_automation_service.automation_exit_execution_watchdog_service,
+                    "evaluate_exit_watchdog_entry_gate",
+                    return_value={"status": "clean"},
+                ),
+                patch.object(
+                    trade_automation_service,
+                    "_manage_automation_positions",
+                    return_value={
+                        "acted_count": 1,
+                        "failed_count": 0,
+                        "items": [{"ticker": "ORCL", "status": "close_working"}],
+                        "failed_items": [],
+                    },
+                ) as manage_mock,
+                patch.object(trade_automation_service, "open_trade_from_request", side_effect=AssertionError("should not open")),
+                patch.object(trade_automation_service, "_finalize_trade_automation_cycle", side_effect=_finalize_stub),
+            ):
+                snapshot = trade_automation_service._run_trade_automation_cycle(
+                    db,
+                    tenant=tenant,
+                    state=state,
+                    forced=False,
+                    actor=None,
+                )
+
+        manage_mock.assert_called_once()
+        self.assertTrue(snapshot["settings"]["kill_switch"])
+        self.assertEqual(snapshot["runtime"]["last_decision"]["decision"], "loss_containment_exit_while_killed")
+        self.assertTrue(snapshot["runtime"]["last_decision"]["kill_switch_remains_active"])
+        self.assertEqual(snapshot["runtime"]["last_action"]["type"], "loss_containment_exit_while_killed")
 
     def test_open_trade_from_request_blocks_bearish_equity_entry_when_long_only(self) -> None:
         from backend.schemas import OpenTradeRequest

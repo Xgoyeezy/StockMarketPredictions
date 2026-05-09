@@ -314,10 +314,23 @@ def _candidate_summary(row: dict[str, Any], *, selected: bool, now: datetime | N
             "execution_score": _row_float(row, "execution_score", "ranking_score", "setup_score"),
             "edge_to_cost_ratio": _row_float(row, "edge_to_cost_ratio"),
             "expected_edge_bps": edge_bps,
+            "estimated_cost_bps": _row_float(
+                row,
+                "transaction_cost_adjusted_estimated_cost_bps",
+                "estimated_cost_bps",
+                "expected_cost_bps",
+            ),
             "expected_pnl": expected_pnl,
             "spread_bps": _row_float(row, "daily_objective_spread_bps", "spread_bps", "bid_ask_spread_bps"),
             "liquidity": _row_float(row, "average_dollar_volume", "avg_dollar_volume", "dollar_volume"),
             "rank": row.get("portfolio_rank") or row.get("board_rank"),
+            "setup_bucket": str(row.get("setup_bucket") or "").strip() or None,
+            "session_bucket": str(row.get("session_bucket") or "").strip() or None,
+            "daily_objective_expected_pnl": _row_float(row, "daily_objective_expected_pnl"),
+            "daily_objective_target_gap_contribution_pct": _row_float(
+                row,
+                "daily_objective_target_gap_contribution_pct",
+            ),
             "reject_reason": str(row.get("reject_reason") or "").strip() or None,
         }
     )
@@ -368,6 +381,7 @@ def build_accuracy_marker_fields(candidate: dict[str, Any]) -> dict[str, Any]:
         "accuracy_expected_edge_bps": summary.get("expected_edge_bps"),
         "accuracy_expected_pnl": summary.get("expected_pnl"),
         "accuracy_edge_to_cost_ratio": summary.get("edge_to_cost_ratio"),
+        "accuracy_estimated_cost_bps": summary.get("estimated_cost_bps"),
         "accuracy_spread_bps": summary.get("spread_bps"),
         "accuracy_selected_at": summary.get("at"),
     }
@@ -621,11 +635,37 @@ def build_accuracy_calibration_report(
         )
 
     daily_objective = dict(runtime.get("daily_objective_last_report") or {})
+    transaction_cost = dict(runtime.get("transaction_cost_calibration_last_report") or {})
+    transaction_cost_status = str(transaction_cost.get("status") or "").strip().lower()
+    transaction_cost_error = _coerce_float(transaction_cost.get("estimated_vs_realized_cost_error_bps"), 0.0)
+    if transaction_cost_status in {"blocked", "warning"} or transaction_cost_error > 10.0:
+        warnings.append(
+            {
+                "key": "transaction_cost_calibration_weak",
+                "detail": (
+                    "Transaction-cost calibration shows realized paper cost drift; directionally correct trades "
+                    "should still be treated as weak if they lose after costs."
+                ),
+            }
+        )
+        if status == "calibrated":
+            status = "watch"
+            label = "Calibration watch"
+        recommendations.insert(
+            0,
+            {
+                "field": "candidate_ranking",
+                "direction": "penalize_cost_drift",
+                "reason": "Cost calibration found weak execution buckets that reduce decision-PnL accuracy.",
+            },
+        )
     objective_impact = {
         "daily_objective_status": daily_objective.get("status"),
         "target_progress_pct": daily_objective.get("target_progress_pct"),
         "target_gap": daily_objective.get("target_gap"),
         "accuracy_helped_target": total_pnl > 0,
+        "transaction_cost_status": transaction_cost.get("status"),
+        "transaction_cost_error_bps": transaction_cost.get("estimated_vs_realized_cost_error_bps"),
     }
 
     return serialize_value(
@@ -874,6 +914,7 @@ def run_accuracy_calibration_review(
     actor: Any = None,
     now: datetime | None = None,
     run_source: str = "manual",
+    write_note: bool = True,
 ) -> dict[str, Any]:
     now = now or _utc_now()
     normalized_profile_key = _normalize_profile_key(profile_key)
@@ -895,7 +936,7 @@ def run_accuracy_calibration_review(
         profile_key=normalized_profile_key,
         report=report,
         actor=actor,
-        write_note=True,
+        write_note=write_note,
     )
 
 

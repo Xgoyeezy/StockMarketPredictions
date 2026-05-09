@@ -81,6 +81,7 @@ class AutomationLossContainmentServiceTests(unittest.TestCase):
                     "live_price_at_open": row.get("entry_price", 100.0),
                     "position_cost": row.get("position_cost", 1000.0),
                     "opened_at": row.get("opened_at", "2026-04-24T17:30:00+00:00"),
+                    "quote_age_seconds": row.get("quote_age_seconds", None),
                 }
             )
         return pd.DataFrame(normalized)
@@ -217,6 +218,46 @@ class AutomationLossContainmentServiceTests(unittest.TestCase):
         self.assertEqual(report["status"], "blocked")
         self.assertTrue(report["entries_blocked"])
         self.assertIn("stale_quote", {item["key"] for item in report["blockers"]})
+
+    def test_fresh_current_monitor_quote_overrides_stale_entry_quote_evidence(self) -> None:
+        _, tenant = self._db()
+        state = self._state()
+
+        report = self._report(
+            tenant,
+            state,
+            [{"trade_id": "fresh-1", "order_id": "fresh-order", "quote_age_seconds": 9999.0}],
+            [{"trade_id": "fresh-1", "order_id": "fresh-order", "unrealized_pnl": 25.0, "quote_age_seconds": 5.0}],
+        )
+
+        self.assertEqual(report["status"], "clean")
+        self.assertFalse(report["entries_blocked"])
+        self.assertNotIn("stale_quote", {item["key"] for item in report["blockers"]})
+
+    def test_stale_quote_blocks_auto_defensive_close_even_when_loss_breached(self) -> None:
+        _, tenant = self._db()
+        state = self._state()
+
+        report = self._report(
+            tenant,
+            state,
+            [{"trade_id": "stale-loss-1", "order_id": "stale-loss-order"}],
+            [
+                {
+                    "trade_id": "stale-loss-1",
+                    "order_id": "stale-loss-order",
+                    "unrealized_pnl": -275.0,
+                    "quote_age_seconds": 180.0,
+                }
+            ],
+        )
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertTrue(report["entries_blocked"])
+        self.assertEqual(report["defensive_actions"][0]["reason"], "position_loss_r_breach")
+        self.assertTrue(report["defensive_actions"][0]["stale_quote_blocks_auto_close"])
+        self.assertFalse(report["defensive_actions"][0]["auto_close_eligible"])
+        self.assertEqual(automation_loss_containment_service.build_forced_exit_actions(report), {})
 
     def test_live_profile_is_advisory_when_live_scope_disabled(self) -> None:
         _, tenant = self._db()

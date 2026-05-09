@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.core.config import settings
 from backend.core.database import SessionLocal
-from backend.models.saas import AsyncJob, BillingEventRecord, EntitlementRecord, SubscriptionRecord, Tenant
+from backend.models.saas import AsyncJob, BillingEventRecord, EntitlementRecord, EntitlementUsage, SubscriptionRecord, Tenant
 from backend.services.audit_service import record_audit_event
 from backend.services.desk_service import normalize_desk_slug
 from backend.services.exceptions import ForbiddenError, NotFoundError, ValidationError
@@ -21,12 +21,28 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover
     stripe = None
 
-PLAN_ORDER = ("starter", "pro", "team", "enterprise", "white-label")
+PLAN_ORDER = ("starter", "personal", "pro", "professional", "desk", "team", "enterprise", "white-label")
+PUBLIC_PLAN_ORDER = ("starter", "pro", "professional", "team", "enterprise")
 BILLING_CYCLES = ("monthly", "annual")
 _BILLING_EVENT_HISTORY_LIMIT = 8
 _BILLING_OPS_HISTORY_LIMIT = 6
 _BILLING_PROCESSED_STATUSES = {"processed", "ignored", "duplicate"}
 _BILLING_RECOVERY_ACTIONS = {"reconcile", "retry_last_failure", "sync_entitlements"}
+_INTERNAL_OWNED_API_ENTITLEMENTS = {
+    "advanced_indicators",
+    "api_access",
+    "broker_execution",
+    "realtime_streaming",
+}
+_INTERNAL_OWNED_API_PROVIDERS = {"local-demo", "local-session"}
+_INTERNAL_PAPER_MODES = {
+    "internal",
+    "internal_paper",
+    "internal_simulator",
+    "legitimate",
+    "legitimate_brokerage",
+    "legitimate_brokerage_paper",
+}
 
 ENTITLEMENT_META: dict[str, dict[str, str]] = {
     "workspace_count": {"label": "Workspace count", "description": "Saved workspaces available to the tenant."},
@@ -38,6 +54,22 @@ ENTITLEMENT_META: dict[str, dict[str, str]] = {
     "api_access": {"label": "API access", "description": "Token-based API access."},
     "broker_execution": {"label": "Broker execution", "description": "Order entry and broker-side execution tooling."},
     "priority_support": {"label": "Priority support", "description": "Priority support and operator coverage."},
+    "strategy_lifecycle": {"label": "Strategy lifecycle", "description": "Productized strategy command center access."},
+    "strategy_versions": {"label": "Strategy versions", "description": "Version history and rollback capacity."},
+    "automation_basic": {"label": "Basic automation", "description": "Paper-first automation controls."},
+    "automation_advanced": {"label": "Advanced automation", "description": "Advanced automation and approval workflows."},
+    "readiness_scoring": {"label": "Readiness scoring", "description": "Strategy readiness scoring and blockers."},
+    "promotion_gates": {"label": "Promotion gates", "description": "Promotion workflows across paper and live stages."},
+    "risk_engine": {"label": "Risk engine", "description": "Strategy risk policies and pre-trade checks."},
+    "audit_replay": {"label": "Audit replay", "description": "Decision replay and evidence trails."},
+    "audit_exports": {"label": "Audit exports", "description": "Exportable audit bundles."},
+    "execution_quality": {"label": "Execution quality", "description": "Execution score, slippage, and fill analytics."},
+    "options_automation": {"label": "Options automation", "description": "Options automation workflow access."},
+    "live_canary": {"label": "Live canary", "description": "Live pilot canary and readiness controls."},
+    "live_authorizations": {"label": "Live authorizations", "description": "Signed live automation authorization records."},
+    "live_sessions": {"label": "Live sessions", "description": "Armed and supervised live trading sessions."},
+    "live_order_approvals": {"label": "Live order approvals", "description": "Operator approval queue for live order intents."},
+    "multi_account_controls": {"label": "Multi-account controls", "description": "Controls for more than one linked account."},
     "custom_domains": {"label": "Custom domains", "description": "Custom domain delivery and launch routing."},
     "branded_email": {"label": "Branded email", "description": "Branded email sender and delivery controls."},
     "onboarding_templates": {"label": "Onboarding templates", "description": "Tenant onboarding templates and launch presets."},
@@ -52,7 +84,13 @@ def _utc_now() -> datetime:
 
 def _normalize_plan_key(plan_key: str | None) -> str:
     key = str(plan_key or "").strip().lower()
-    return key if key in PLAN_ORDER else "starter"
+    if key in {"starter"}:
+        return "personal"
+    if key in {"professional", "team"}:
+        return "desk"
+    if key in {"personal", "pro", "desk", "enterprise", "white-label"}:
+        return key
+    return "personal"
 
 
 def _coerce_metadata(value: Any) -> dict[str, Any]:
@@ -104,13 +142,29 @@ def _starter_entitlements() -> dict[str, dict[str, Any]]:
         "advanced_indicators": _ent(enabled=False, limit=None),
         "tenant_branding": _ent(enabled=False, limit=None),
         "api_access": _ent(enabled=False, limit=None),
-        "broker_execution": _ent(enabled=False, limit=None),
+        "broker_execution": _ent(enabled=True, limit="manual"),
         "priority_support": _ent(enabled=False, limit=None),
         "custom_domains": _ent(enabled=False, limit=0),
         "branded_email": _ent(enabled=False, limit=0),
         "onboarding_templates": _ent(enabled=False, limit=0),
         "release_channels": _ent(enabled=False, limit=0),
         "partner_webhooks": _ent(enabled=False, limit=0),
+        "strategy_lifecycle": _ent(enabled=True, limit=1),
+        "strategy_versions": _ent(enabled=True, limit=1),
+        "automation_basic": _ent(enabled=True, limit="paper"),
+        "automation_advanced": _ent(enabled=False, limit=None),
+        "readiness_scoring": _ent(enabled=False, limit=None),
+        "promotion_gates": _ent(enabled=False, limit=None),
+        "risk_engine": _ent(enabled=False, limit=None),
+        "audit_replay": _ent(enabled=False, limit=None),
+        "audit_exports": _ent(enabled=False, limit=None),
+        "execution_quality": _ent(enabled=False, limit=None),
+        "options_automation": _ent(enabled=False, limit=None),
+        "live_canary": _ent(enabled=False, limit=None),
+        "live_authorizations": _ent(enabled=False, limit=0),
+        "live_sessions": _ent(enabled=False, limit=0),
+        "live_order_approvals": _ent(enabled=False, limit=0),
+        "multi_account_controls": _ent(enabled=False, limit=None),
     }
 
 
@@ -122,26 +176,61 @@ def _merge_entitlements(base: dict[str, dict[str, Any]], **updates: dict[str, An
 
 
 PLAN_CATALOG: dict[str, dict[str, Any]] = {
+    "personal": {
+        "key": "personal",
+        "name": "Personal",
+        "tagline": "Personal trading research desk with paper-first automation.",
+        "monthly_price": 29,
+        "annual_price": 249,
+        "seats_label": "1 operator",
+        "cta_label": "Start personal",
+        "public": True,
+        "recommended": False,
+        "display_order": 10,
+        "live_mode": "Paper-first research",
+        "target_persona": "Solo trader using a private research desk with paper automation.",
+        "billing_pitch": "Research, journaling, and paper-first automation with safety gates on by default.",
+        "proof_points": ["Paper evidence trail", "Research workspace", "Safety gates stay on"],
+        "support_model": "Standard support",
+        "featured_capabilities": ["Research desk", "Paper automation", "Journaling", "Safety ledger"],
+        "entitlements": _starter_entitlements(),
+    },
     "starter": {
         "key": "starter",
         "name": "Starter",
-        "tagline": "Single-desk setup for an early operator.",
+        "tagline": "Manual live trading and paper automation for one strategy lane.",
         "monthly_price": 99,
-        "annual_price": 948,
+        "annual_price": 990,
         "seats_label": "Up to 2 members",
-        "cta_label": "Start small",
-        "featured_capabilities": ["Core chart workspace", "Polling market updates", "Basic saved layouts"],
+        "cta_label": "Start controlled",
+        "public": True,
+        "recommended": False,
+        "display_order": 10,
+        "live_mode": "Manual live trading",
+        "target_persona": "Solo operator proving one paper-first strategy lane.",
+        "billing_pitch": "Low-cost entry into the control plane without live automation.",
+        "proof_points": ["Manual order flow", "Paper automation lane", "Basic evidence trail"],
+        "support_model": "Standard support",
+        "featured_capabilities": ["Manual live trading", "Paper automation", "One strategy lane", "No live automation"],
         "entitlements": _starter_entitlements(),
     },
     "pro": {
         "key": "pro",
         "name": "Pro",
-        "tagline": "Best fit for a serious solo trader or micro team.",
-        "monthly_price": 299,
-        "annual_price": 2988,
-        "seats_label": "Up to 5 members",
-        "cta_label": "Recommended",
-        "featured_capabilities": ["Realtime charting", "Advanced studies", "Brand-ready tenant settings"],
+        "tagline": "Advanced paper automation, readiness, and risk controls for serious iteration.",
+        "monthly_price": 79,
+        "annual_price": 699,
+        "seats_label": "Up to 3 members",
+        "cta_label": "Upgrade to Pro",
+        "public": True,
+        "recommended": False,
+        "display_order": 20,
+        "live_mode": "Paper-first + readiness",
+        "target_persona": "Operator who wants deeper readiness/risk tooling and higher automation limits.",
+        "billing_pitch": "Adds the operator-grade safety and readiness surfaces that keep paper automation honest.",
+        "proof_points": ["Readiness checks", "Risk controls", "Audit replay basics"],
+        "support_model": "Standard support",
+        "featured_capabilities": ["Advanced automation", "Readiness scoring", "Risk engine", "Audit replay"],
         "entitlements": _merge_entitlements(
             _starter_entitlements(),
             workspace_count=_ent(enabled=True, limit=10),
@@ -150,17 +239,80 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             realtime_streaming=_ent(enabled=True, limit=None),
             advanced_indicators=_ent(enabled=True, limit=None),
             tenant_branding=_ent(enabled=True, limit=None),
+            broker_execution=_ent(enabled=True, limit="assisted"),
+            strategy_lifecycle=_ent(enabled=True, limit=3),
+            strategy_versions=_ent(enabled=True, limit=3),
+            automation_basic=_ent(enabled=True, limit=None),
+            readiness_scoring=_ent(enabled=True, limit="basic"),
+            risk_engine=_ent(enabled=True, limit="basic"),
+            execution_quality=_ent(enabled=True, limit="summary"),
+            live_authorizations=_ent(enabled=True, limit=3),
+            live_sessions=_ent(enabled=False, limit=0),
+            live_order_approvals=_ent(enabled=True, limit=100),
+        ),
+    },
+    "professional": {
+        "key": "professional",
+        "name": "Professional",
+        "tagline": "Supervised live automation with readiness, risk, replay, and execution evidence.",
+        "monthly_price": 499,
+        "annual_price": 4990,
+        "seats_label": "Up to 10 members",
+        "cta_label": "Recommended",
+        "public": True,
+        "recommended": True,
+        "display_order": 30,
+        "live_mode": "Supervised automation",
+        "target_persona": "Professional trader or small desk moving from paper evidence to limited live automation.",
+        "billing_pitch": "The $499 tier sells proof, gates, and control instead of commodity connectivity.",
+        "proof_points": ["Readiness gates", "Risk engine", "Audit replay", "Execution quality"],
+        "support_model": "Named onboarding path",
+        "featured_capabilities": ["Supervised live automation", "Readiness gates", "Risk engine", "Audit replay", "Execution quality", "Kill switch", "Versioning", "10 strategies"],
+        "entitlements": _merge_entitlements(
+            _starter_entitlements(),
+            workspace_count=_ent(enabled=True, limit=15),
+            saved_layouts=_ent(enabled=True, limit=100),
+            organization_members=_ent(enabled=True, limit=10),
+            realtime_streaming=_ent(enabled=True, limit=None),
+            advanced_indicators=_ent(enabled=True, limit=None),
+            tenant_branding=_ent(enabled=True, limit=None),
+            api_access=_ent(enabled=True, limit=3),
+            broker_execution=_ent(enabled=True, limit=None),
+            priority_support=_ent(enabled=True, limit="standard"),
+            strategy_lifecycle=_ent(enabled=True, limit=10),
+            strategy_versions=_ent(enabled=True, limit=10),
+            automation_basic=_ent(enabled=True, limit=None),
+            automation_advanced=_ent(enabled=True, limit=None),
+            readiness_scoring=_ent(enabled=True, limit="full"),
+            promotion_gates=_ent(enabled=True, limit=None),
+            risk_engine=_ent(enabled=True, limit="full"),
+            audit_replay=_ent(enabled=True, limit=None),
+            audit_exports=_ent(enabled=True, limit=None),
+            execution_quality=_ent(enabled=True, limit="full"),
+            options_automation=_ent(enabled=True, limit=None),
+            live_canary=_ent(enabled=True, limit=None),
+            live_authorizations=_ent(enabled=True, limit=10),
+            live_sessions=_ent(enabled=True, limit=10),
+            live_order_approvals=_ent(enabled=True, limit=None),
         ),
     },
     "team": {
         "key": "team",
         "name": "Team",
-        "tagline": "Collaborative desk with API and execution features enabled.",
+        "tagline": "Multi-user approvals, multi-account live control, roles, and team audit logs.",
         "monthly_price": 899,
-        "annual_price": 8988,
+        "annual_price": 8990,
         "seats_label": "Up to 20 members",
         "cta_label": "Scale the desk",
-        "featured_capabilities": ["API integrations", "Execution workflows", "Team launch ops"],
+        "public": True,
+        "recommended": False,
+        "display_order": 40,
+        "live_mode": "Team-controlled automation",
+        "target_persona": "Small professional desk with reviewers, operators, and multiple linked accounts.",
+        "billing_pitch": "Adds the operating workflow needed when more than one person can approve risk.",
+        "proof_points": ["Multi-user approvals", "Multi-account controls", "Team audit logs"],
+        "support_model": "Priority support",
+        "featured_capabilities": ["Multi-user approvals", "Multi-account live control", "Role permissions", "Team audit logs", "Priority support", "25 strategies"],
         "entitlements": _merge_entitlements(
             _starter_entitlements(),
             workspace_count=_ent(enabled=True, limit=25),
@@ -175,19 +327,44 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             onboarding_templates=_ent(enabled=True, limit=5),
             release_channels=_ent(enabled=True, limit=2),
             partner_webhooks=_ent(enabled=True, limit=3),
+            strategy_lifecycle=_ent(enabled=True, limit=25),
+            strategy_versions=_ent(enabled=True, limit=50),
+            automation_basic=_ent(enabled=True, limit=None),
+            automation_advanced=_ent(enabled=True, limit=None),
+            readiness_scoring=_ent(enabled=True, limit="full"),
+            promotion_gates=_ent(enabled=True, limit=None),
+            risk_engine=_ent(enabled=True, limit="full"),
+            audit_replay=_ent(enabled=True, limit=None),
+            audit_exports=_ent(enabled=True, limit=None),
+            execution_quality=_ent(enabled=True, limit="full"),
+            options_automation=_ent(enabled=True, limit=None),
+            live_canary=_ent(enabled=True, limit=None),
+            live_authorizations=_ent(enabled=True, limit=25),
+            live_sessions=_ent(enabled=True, limit=25),
+            live_order_approvals=_ent(enabled=True, limit=None),
+            multi_account_controls=_ent(enabled=True, limit=None),
         ),
     },
     "enterprise": {
         "key": "enterprise",
         "name": "Enterprise",
-        "tagline": "Operationally hardened tenant with launch controls.",
+        "tagline": "Custom policies, reporting, retention, and dedicated support for control-plane rollouts.",
         "monthly_price": 2499,
-        "annual_price": 24988,
+        "annual_price": 24990,
         "seats_label": "Up to 50 members",
-        "cta_label": "Go enterprise",
-        "featured_capabilities": ["Custom domains", "Branded email", "Release lanes"],
+        "cta_label": "Talk to sales",
+        "public": True,
+        "recommended": False,
+        "display_order": 50,
+        "live_mode": "Custom control plane",
+        "target_persona": "Firm or partner that needs custom controls and reporting around live automation.",
+        "billing_pitch": "For teams that need custom control-plane policy, retention, and support commitments.",
+        "proof_points": ["Custom policies", "Custom reporting", "Custom retention", "Dedicated support"],
+        "support_model": "Dedicated support",
+        "price_prefix": "from",
+        "featured_capabilities": ["Custom policies", "Custom reporting", "Custom retention", "Dedicated support"],
         "entitlements": _merge_entitlements(
-            PLAN_CATALOG["team"]["entitlements"] if "team" in locals() else _starter_entitlements(),
+            _starter_entitlements(),
             workspace_count=_ent(enabled=True, limit=60),
             saved_layouts=_ent(enabled=True, limit=300),
             organization_members=_ent(enabled=True, limit=50),
@@ -197,16 +374,60 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             onboarding_templates=_ent(enabled=True, limit=10),
             release_channels=_ent(enabled=True, limit=4),
             partner_webhooks=_ent(enabled=True, limit=10),
+            strategy_lifecycle=_ent(enabled=True, limit=None),
+            strategy_versions=_ent(enabled=True, limit=None),
+            automation_basic=_ent(enabled=True, limit=None),
+            automation_advanced=_ent(enabled=True, limit=None),
+            readiness_scoring=_ent(enabled=True, limit="full"),
+            promotion_gates=_ent(enabled=True, limit=None),
+            risk_engine=_ent(enabled=True, limit="full"),
+            audit_replay=_ent(enabled=True, limit=None),
+            audit_exports=_ent(enabled=True, limit=None),
+            execution_quality=_ent(enabled=True, limit="full"),
+            options_automation=_ent(enabled=True, limit=None),
+            live_canary=_ent(enabled=True, limit=None),
+            live_authorizations=_ent(enabled=True, limit=None),
+            live_sessions=_ent(enabled=True, limit=None),
+            live_order_approvals=_ent(enabled=True, limit=None),
+            multi_account_controls=_ent(enabled=True, limit=None),
+        ),
+    },
+    "desk": {
+        "key": "desk",
+        "name": "Desk",
+        "tagline": "Operator workflow with audit, readiness, and execution evidence.",
+        "monthly_price": 199,
+        "annual_price": 1799,
+        "seats_label": "Up to 10 members",
+        "cta_label": "Upgrade to Desk",
+        "public": True,
+        "recommended": True,
+        "display_order": 30,
+        "live_mode": "Operator desk",
+        "target_persona": "Small desk that wants multi-workspace visibility and richer evidence tooling.",
+        "billing_pitch": "The desk tier sells control, evidence, and operator workflow—not hype.",
+        "proof_points": ["Audit replay", "Execution quality", "Readiness scoring", "Promotion gates"],
+        "support_model": "Priority support",
+        "featured_capabilities": ["Audit replay", "Execution quality", "Readiness scoring", "Promotion gates", "Priority support"],
+        "entitlements": _merge_entitlements(
+            _starter_entitlements(),
+            organization_members=_ent(enabled=True, limit=10),
+            priority_support=_ent(enabled=True, limit=None),
         ),
     },
     "white-label": {
         "key": "white-label",
         "name": "White-label",
-        "tagline": "Full platform resale and launch-ops package.",
+        "tagline": "Legacy internal plan for custom control-plane resale and launch operations.",
         "monthly_price": 4999,
         "annual_price": 49988,
         "seats_label": "Up to 100 members",
         "cta_label": "Launch white-label",
+        "public": False,
+        "recommended": False,
+        "display_order": 90,
+        "live_mode": "Internal legacy plan",
+        "billing_pitch": "Legacy/internal commercial package retained for compatibility.",
         "featured_capabilities": ["Unlimited branding", "White-label delivery", "Highest integration tier"],
         "entitlements": _merge_entitlements(
             _starter_entitlements(),
@@ -224,6 +445,23 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             onboarding_templates=_ent(enabled=True, limit=25),
             release_channels=_ent(enabled=True, limit=8),
             partner_webhooks=_ent(enabled=True, limit=25),
+            # UNSPECIFIED: white-label keeps its custom tier behavior; productization entitlements inherit enterprise-grade access for now.
+            strategy_lifecycle=_ent(enabled=True, limit=None),
+            strategy_versions=_ent(enabled=True, limit=None),
+            automation_basic=_ent(enabled=True, limit=None),
+            automation_advanced=_ent(enabled=True, limit=None),
+            readiness_scoring=_ent(enabled=True, limit="full"),
+            promotion_gates=_ent(enabled=True, limit=None),
+            risk_engine=_ent(enabled=True, limit="full"),
+            audit_replay=_ent(enabled=True, limit=None),
+            audit_exports=_ent(enabled=True, limit=None),
+            execution_quality=_ent(enabled=True, limit="full"),
+            options_automation=_ent(enabled=True, limit=None),
+            live_canary=_ent(enabled=True, limit=None),
+            live_authorizations=_ent(enabled=True, limit=None),
+            live_sessions=_ent(enabled=True, limit=None),
+            live_order_approvals=_ent(enabled=True, limit=None),
+            multi_account_controls=_ent(enabled=True, limit=None),
         ),
     },
 }
@@ -239,16 +477,52 @@ PLAN_CATALOG["enterprise"]["entitlements"] = _merge_entitlements(
     onboarding_templates=_ent(enabled=True, limit=10),
     release_channels=_ent(enabled=True, limit=4),
     partner_webhooks=_ent(enabled=True, limit=10),
+    strategy_lifecycle=_ent(enabled=True, limit=None),
+    strategy_versions=_ent(enabled=True, limit=None),
+    automation_basic=_ent(enabled=True, limit=None),
+    automation_advanced=_ent(enabled=True, limit=None),
+    readiness_scoring=_ent(enabled=True, limit="full"),
+    promotion_gates=_ent(enabled=True, limit=None),
+    risk_engine=_ent(enabled=True, limit="full"),
+    audit_replay=_ent(enabled=True, limit=None),
+    audit_exports=_ent(enabled=True, limit=None),
+    execution_quality=_ent(enabled=True, limit="full"),
+    options_automation=_ent(enabled=True, limit=None),
+    live_canary=_ent(enabled=True, limit=None),
+    multi_account_controls=_ent(enabled=True, limit=None),
+)
+
+PLAN_CATALOG["desk"]["entitlements"] = _merge_entitlements(
+    PLAN_CATALOG["team"]["entitlements"],
+    organization_members=_ent(enabled=True, limit=20),
+    priority_support=_ent(enabled=True, limit=None),
 )
 
 
 def get_plan_definition(plan_key: str | None) -> dict[str, Any]:
+    raw_key = str(plan_key or "").strip().lower()
+    if raw_key in PLAN_CATALOG:
+        return PLAN_CATALOG[raw_key]
     return PLAN_CATALOG[_normalize_plan_key(plan_key)]
 
 
 def build_plan_payload(plan_key: str | None) -> dict[str, Any]:
     plan = get_plan_definition(plan_key)
-    return {key: plan[key] for key in ("key", "name", "tagline", "monthly_price", "annual_price", "seats_label", "cta_label", "featured_capabilities")}
+    payload = {key: plan[key] for key in ("key", "name", "tagline", "monthly_price", "annual_price", "seats_label", "cta_label", "featured_capabilities")}
+    for key in (
+        "public",
+        "recommended",
+        "display_order",
+        "live_mode",
+        "target_persona",
+        "billing_pitch",
+        "proof_points",
+        "support_model",
+        "price_prefix",
+    ):
+        if key in plan:
+            payload[key] = plan[key]
+    return payload
 
 
 def list_billing_plans() -> dict[str, Any]:
@@ -424,9 +698,67 @@ def resolve_tenant_entitlements(tenant: Tenant) -> dict[str, Any]:
     return {"items": items, "count": len(items)}
 
 
+def _internal_owned_api_enabled_for_user(current_user: Any) -> bool:
+    if not bool(getattr(settings, "internal_owned_api_enabled", False)):
+        return False
+
+    provider = str(getattr(current_user, "provider", "") or "").strip().lower()
+    mode = str(getattr(current_user, "mode", "") or "").strip().lower()
+    if provider not in _INTERNAL_OWNED_API_PROVIDERS and mode not in {"demo", "local"}:
+        return False
+
+    broker_mode = str(getattr(settings, "broker_mode", "") or "").strip().lower()
+    paper_provider = str(getattr(settings, "paper_broker_provider", "") or "").strip().lower()
+    execution_adapter = str(getattr(settings, "execution_adapter", "") or "").strip().lower()
+    return any(value in _INTERNAL_PAPER_MODES for value in (broker_mode, paper_provider, execution_adapter))
+
+
+def _apply_internal_owned_api_entitlements(entitlements: dict[str, Any], current_user: Any) -> dict[str, Any]:
+    if not _internal_owned_api_enabled_for_user(current_user):
+        return entitlements
+
+    items: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for item in entitlements.get("items") or []:
+        next_item = dict(item)
+        key = str(next_item.get("key") or "").strip()
+        seen_keys.add(key)
+        if key in _INTERNAL_OWNED_API_ENTITLEMENTS:
+            next_item["enabled"] = True
+            next_item["source"] = "internal_owned_api"
+            next_item["metadata"] = {
+                **_coerce_metadata(next_item.get("metadata")),
+                "broker_mode": getattr(settings, "broker_mode", "internal_paper"),
+                "provider": "internal_owned_api",
+                "paper_only": True,
+            }
+        items.append(next_item)
+
+    for key in sorted(_INTERNAL_OWNED_API_ENTITLEMENTS - seen_keys):
+        meta = ENTITLEMENT_META.get(key, {})
+        items.append(
+            {
+                "key": key,
+                "label": meta.get("label", key.replace("_", " ").title()),
+                "description": meta.get("description", ""),
+                "enabled": True,
+                "limit": None,
+                "source": "internal_owned_api",
+                "metadata": {
+                    "broker_mode": getattr(settings, "broker_mode", "internal_paper"),
+                    "provider": "internal_owned_api",
+                    "paper_only": True,
+                },
+            }
+        )
+
+    items.sort(key=lambda item: item["key"])
+    return {"items": items, "count": len(items)}
+
+
 def get_billing_entitlements(db: Session, current_user: Any) -> dict[str, Any]:
     tenant = _resolve_tenant(db, current_user)
-    return resolve_tenant_entitlements(tenant)
+    return _apply_internal_owned_api_entitlements(resolve_tenant_entitlements(tenant), current_user)
 
 
 def has_entitlement(db: Session, current_user: Any, entitlement_key: str) -> bool:
@@ -446,6 +778,47 @@ def enforce_entitlement_limit(db: Session, current_user: Any, entitlement_key: s
     limit = _parse_limit(entry.get("limit"))
     if limit is not None and int(requested_total) > limit:
         raise ValidationError(f"This tenant has reached the plan limit for {resource_label}.")
+
+
+def increment_entitlement_usage(
+    db: Session,
+    current_user: Any,
+    entitlement_key: str,
+    *,
+    amount: int = 1,
+    period_key: str | None = None,
+) -> dict[str, Any]:
+    tenant = _resolve_tenant(db, current_user)
+    entry = require_entitlement(db, current_user, entitlement_key)
+    normalized_period = str(period_key or datetime.now(timezone.utc).strftime("%Y-%m")).strip()
+    row = db.execute(
+        select(EntitlementUsage).where(
+            EntitlementUsage.tenant_id == tenant.id,
+            EntitlementUsage.period_key == normalized_period,
+            EntitlementUsage.metric_key == entitlement_key,
+        )
+    ).scalar_one_or_none()
+    limit = _parse_limit(entry.get("limit"))
+    if row is None:
+        row = EntitlementUsage(
+            tenant_id=tenant.id,
+            period_key=normalized_period,
+            metric_key=entitlement_key,
+            used_count=0,
+            limit_count=limit,
+        )
+        db.add(row)
+    row.used_count = int(row.used_count or 0) + max(0, int(amount or 0))
+    row.limit_count = limit
+    row.updated_at = _utc_now()
+    db.flush()
+    return {
+        "tenant_id": tenant.id,
+        "period_key": row.period_key,
+        "metric_key": row.metric_key,
+        "used_count": row.used_count,
+        "limit_count": row.limit_count,
+    }
 
 
 def _stripe_client() -> Any | None:
@@ -487,11 +860,13 @@ def _serialize_subscription(subscription: SubscriptionRecord) -> dict[str, Any]:
     metadata = _coerce_metadata(subscription.metadata_json)
     provider = str(subscription.provider or "internal-demo").strip() or "internal-demo"
     managed_mode = str(metadata.get("managed_mode") or ("stripe" if provider == "stripe" else "demo")).strip().lower()
+    raw_plan_key = str(subscription.plan_key or "").strip().lower()
+    serialized_plan_key = raw_plan_key if raw_plan_key in PLAN_CATALOG else _normalize_plan_key(subscription.plan_key)
     return {
         "id": subscription.id,
         "provider": provider,
         "status": str(subscription.status or "inactive").strip().lower() or "inactive",
-        "plan_key": _normalize_plan_key(subscription.plan_key),
+        "plan_key": serialized_plan_key,
         "external_customer_id": subscription.external_customer_id,
         "external_subscription_id": subscription.external_subscription_id,
         "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
@@ -768,7 +1143,7 @@ def get_billing_summary(db: Session, current_user: Any) -> dict[str, Any]:
         "plan": build_plan_payload(tenant.plan_key),
         "subscription": _serialize_subscription(subscription),
         "usage": _build_usage_snapshot(tenant, current_user),
-        "entitlements": resolve_tenant_entitlements(tenant),
+        "entitlements": _apply_internal_owned_api_entitlements(resolve_tenant_entitlements(tenant), current_user),
         "sync": sync_snapshot,
         "recovery": recovery_snapshot,
         "events": event_snapshot,
@@ -850,7 +1225,8 @@ def create_billing_checkout_session(
     success_url: str | None = None,
     cancel_url: str | None = None,
 ) -> dict[str, Any]:
-    normalized_plan_key = _normalize_plan_key(plan_key)
+    requested_plan_key = str(plan_key or "").strip().lower()
+    normalized_plan_key = requested_plan_key if requested_plan_key in PLAN_CATALOG else _normalize_plan_key(plan_key)
     normalized_cycle = str(billing_cycle or "monthly").strip().lower()
     tenant = _resolve_tenant(db, current_user)
     subscription = ensure_subscription_record(db, tenant)

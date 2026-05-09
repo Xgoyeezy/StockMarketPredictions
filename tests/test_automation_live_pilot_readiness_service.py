@@ -279,6 +279,7 @@ class AutomationLivePilotReadinessServiceTests(unittest.TestCase):
                     "_build_personal_account_summary",
                     return_value={"connected": False, "status": "unavailable"},
                 ),
+                patch.object(automation_live_pilot_readiness_service, "_utc_now", return_value=FIXED_NOW),
                 patch.object(trade_automation_service, "open_trade_from_request") as open_trade_mock,
                 patch.object(trade_automation_service, "sync_pending_orders_from_broker") as sync_orders_mock,
                 patch.object(automation_paper_order_lifecycle_soak_service, "run_paper_order_lifecycle_soak") as soak_mock,

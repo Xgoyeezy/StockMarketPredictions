@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { usePreferences } from '../context/PreferencesContext'
 import { useAuth } from '../context/useAuth'
 import { appConfig } from '../config/appConfig'
-import { recordRecentTicker } from '../api/client'
+import { getOrganizationTradeAutomationWatchdog, recordRecentTicker } from '../api/client'
 import {
   getSurfaceLabel,
   getTradingStyleProfile,
@@ -18,77 +18,13 @@ import {
   getAccountProfileOptions,
   normalizeAccountProfile,
 } from '../utils/accountProfileModel'
+import { getShellNavItems, getShellNavShortcuts } from '../utils/navigationModel'
 import ActionBar from './ActionBar'
 import Button from './Button'
 import Chip from './Chip'
 import TickerInput from './TickerInput'
 
 const QUICK_OPEN_INPUT_ID = 'shell-quick-open-input'
-
-function getShellNavItems(personalMode, activeAccountProfile) {
-  const normalizedAccountProfile = normalizeAccountProfile(activeAccountProfile)
-  const settingsItem =
-    normalizedAccountProfile === 'brokerage'
-      ? { to: '/settings', label: 'Brokerage', kicker: 'Acct' }
-      : { to: '/settings', label: personalMode ? 'Desk setup' : 'Account', kicker: personalMode ? 'Desk' : 'Acct' }
-  if (personalMode) {
-    return [
-      { to: '/', label: 'Desk', kicker: 'Live' },
-      { to: '/watchlist', label: 'Watchlist', kicker: 'Scan' },
-      { to: '/compare', label: 'Compare', kicker: 'Rank' },
-      { to: '/trades', label: 'Trades', kicker: 'Route' },
-      { to: '/portfolio', label: 'Portfolio', kicker: 'Risk' },
-      { to: '/strategy-desks', label: 'Desks', kicker: 'Quant' },
-      { to: '/strategy-desks/systematic-equities', label: 'Systematic', kicker: 'Desk' },
-      { to: '/journal', label: 'Journal', kicker: 'Review' },
-      { to: '/alerts', label: 'Alerts', kicker: 'Watch' },
-      { to: '/notes', label: 'Notes', kicker: 'Plan' },
-      { to: '/education', label: 'Playbook', kicker: 'Run' },
-      settingsItem,
-    ]
-  }
-
-  return [
-    { to: '/', label: 'Operations', kicker: 'Ops' },
-    { to: '/watchlist', label: 'Market watch', kicker: 'Scan' },
-    { to: '/compare', label: 'Analysis', kicker: 'Rank' },
-    { to: '/trades', label: 'Execution ops', kicker: 'Route' },
-    { to: '/portfolio', label: 'Exposure', kicker: 'Risk' },
-    { to: '/strategy-desks', label: 'Strategy desks', kicker: 'Quant' },
-    { to: '/strategy-desks/systematic-equities', label: 'Systematic', kicker: 'Desk' },
-    { to: '/journal', label: 'Audit log', kicker: 'Review' },
-    { to: '/alerts', label: 'Alerts', kicker: 'Watch' },
-    { to: '/notes', label: 'Runbook', kicker: 'Plan' },
-    { to: '/education', label: 'Operator guide', kicker: 'Guide' },
-    settingsItem,
-    { to: '/workspaces', label: 'Organizations', kicker: 'Org' },
-  ]
-}
-
-function getShellNavShortcuts(personalMode, activeAccountProfile) {
-  return getShellNavItems(personalMode, activeAccountProfile).map((item) => {
-    const keyMap = {
-      '/': 'D',
-      '/watchlist': 'W',
-      '/compare': 'C',
-      '/trades': 'T',
-      '/portfolio': 'P',
-      '/strategy-desks': 'Q',
-      '/strategy-desks/systematic-equities': 'Y',
-      '/journal': 'J',
-      '/alerts': 'A',
-      '/notes': 'N',
-      '/education': 'G',
-      '/settings': 'S',
-      '/workspaces': 'O',
-    }
-    return {
-      to: item.to,
-      label: item.label,
-      keys: ['Alt', 'Shift', keyMap[item.to] || 'D'],
-    }
-  })
-}
 
 function getShellShortcutGroups(personalMode, shellNavShortcuts) {
   return [
@@ -112,7 +48,7 @@ function getShellShortcutGroups(personalMode, shellNavShortcuts) {
       ],
     },
     {
-      title: personalMode ? 'Desk only' : 'Operations only',
+      title: personalMode ? 'Desk only' : 'Trader workspace',
       items: [
         { label: 'Toggle plan, position, and radar drawers', keys: ['1 / 2 / 3'] },
         { label: 'Toggle tape', keys: ['T'] },
@@ -145,6 +81,42 @@ function isEditableTarget(target) {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
 }
 
+function formatSafetyCheckedAge(checkedAt) {
+  const timestamp = Date.parse(String(checkedAt || ''))
+  if (!Number.isFinite(timestamp)) return 'not checked yet'
+  const ageSeconds = Math.max(Math.round((Date.now() - timestamp) / 1000), 0)
+  if (ageSeconds < 5) return 'checked just now'
+  if (ageSeconds < 60) return `checked ${ageSeconds}s ago`
+  const ageMinutes = Math.floor(ageSeconds / 60)
+  return `checked ${ageMinutes}m ago`
+}
+
+function clampPercent(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.min(parsed, 100))
+}
+
+function formatCompactNumber(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return '--'
+  const absolute = Math.abs(parsed)
+  if (absolute >= 1000000) {
+    const digits = absolute >= 10000000 ? 0 : 1
+    return `${(parsed / 1000000).toFixed(digits)}M`
+  }
+  if (absolute >= 1000) {
+    const digits = absolute >= 100000 ? 0 : 1
+    return `${(parsed / 1000).toFixed(digits)}k`
+  }
+  return parsed.toLocaleString()
+}
+
+function findShellComponent(components, key) {
+  if (!Array.isArray(components)) return null
+  return components.find((item) => item && item.key === key) || null
+}
+
 export default function AppShell({ appName, appTagline, children }) {
   const { preferences, setPreference } = usePreferences()
   const { session } = useAuth()
@@ -154,6 +126,7 @@ export default function AppShell({ appName, appTagline, children }) {
   const isAuthenticated = Boolean(session?.authenticated)
   const [quickTicker, setQuickTicker] = useState('')
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [safetyState, setSafetyState] = useState(null)
   const lastFocusedElementRef = useRef(null)
   const brandName = personalMode
     ? appName
@@ -164,13 +137,14 @@ export default function AppShell({ appName, appTagline, children }) {
   const activeAccountProfile = normalizeAccountProfile(preferences?.activeAccountProfile)
   const activeAccountProfileDefinition = getAccountProfileDefinition(activeAccountProfile)
   const accountProfileOptions = useMemo(() => getAccountProfileOptions(), [])
+  const activePermissionMap = appConfig.showAdminSurfaces ? (session?.active_tenant?.permission_map || {}) : {}
   const shellNavItems = useMemo(
-    () => getShellNavItems(personalMode, activeAccountProfile),
-    [activeAccountProfile, personalMode],
+    () => getShellNavItems({ permissionMap: activePermissionMap }),
+    [activePermissionMap],
   )
   const shellNavShortcuts = useMemo(
-    () => getShellNavShortcuts(personalMode, activeAccountProfile),
-    [activeAccountProfile, personalMode],
+    () => getShellNavShortcuts(shellNavItems),
+    [shellNavItems],
   )
   const shellShortcutGroups = useMemo(
     () => getShellShortcutGroups(personalMode, shellNavShortcuts),
@@ -194,6 +168,47 @@ export default function AppShell({ appName, appTagline, children }) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || '')
     .join('')
+  const safetyCheckedAgeLabel = formatSafetyCheckedAge(safetyState?.generated_at || safetyState?.checked_at)
+  const continuousOpsComponent = findShellComponent(safetyState?.components, 'continuous_ops')
+  const continuousOpsMetadata = continuousOpsComponent?.metadata || {}
+  const rawEvidenceMillionTarget =
+    safetyState?.evidence_million_target ||
+    safetyState?.evidence_million ||
+    (continuousOpsMetadata.evidence_observed_event_count !== undefined
+      ? {
+          observed_event_count: continuousOpsMetadata.evidence_observed_event_count,
+          remaining_event_count: continuousOpsMetadata.evidence_remaining_event_count,
+          target_event_count: 100000000,
+          rate_per_hour: continuousOpsMetadata.evidence_rate_per_hour,
+          eta_hours: continuousOpsMetadata.evidence_eta_hours,
+          eta_days: continuousOpsMetadata.evidence_eta_days,
+        }
+      : null)
+  const evidenceMillionTarget = rawEvidenceMillionTarget
+    ? {
+        ...rawEvidenceMillionTarget,
+        rate_per_hour: rawEvidenceMillionTarget.rate_per_hour ?? continuousOpsMetadata.evidence_rate_per_hour,
+        eta_hours: rawEvidenceMillionTarget.eta_hours ?? continuousOpsMetadata.evidence_eta_hours,
+        eta_days: rawEvidenceMillionTarget.eta_days ?? continuousOpsMetadata.evidence_eta_days,
+      }
+    : null
+  const hasEvidenceMillionTarget = Boolean(evidenceMillionTarget && typeof evidenceMillionTarget === 'object')
+  const evidenceObservedCount = Number(evidenceMillionTarget?.observed_event_count || 0)
+  const evidenceTargetCount = Number(evidenceMillionTarget?.target_event_count || 100000000)
+  const evidenceProgressPct = clampPercent(
+    evidenceMillionTarget?.progress_pct ?? (evidenceTargetCount > 0 ? (evidenceObservedCount / evidenceTargetCount) * 100 : 0),
+  )
+  const evidenceEtaDays = Number(evidenceMillionTarget?.eta_days)
+  const evidenceEtaHours = Number(evidenceMillionTarget?.eta_hours)
+  const evidenceEtaLabel = Number.isFinite(evidenceEtaDays)
+    ? `ETA ${evidenceEtaDays.toFixed(1)}d`
+    : Number.isFinite(evidenceEtaHours)
+      ? `ETA ${(evidenceEtaHours / 24).toFixed(1)}d`
+      : 'ETA collecting'
+  const evidenceRatePerHour = Number(evidenceMillionTarget?.rate_per_hour)
+  const evidenceRateLabel = Number.isFinite(evidenceRatePerHour)
+    ? `${formatCompactNumber(evidenceRatePerHour)}/hr`
+    : 'rate pending'
 
   function navigateShell(to) {
     const currentParams = new URLSearchParams(location.search)
@@ -211,7 +226,7 @@ export default function AppShell({ appName, appTagline, children }) {
   function handleAccountProfileChange(event) {
     const nextProfile = normalizeAccountProfile(event.target.value)
     setPreference('activeAccountProfile', nextProfile)
-    if (nextProfile === 'brokerage' || location.pathname === '/settings') {
+    if (location.pathname === '/settings') {
       navigateShell('/settings')
     }
   }
@@ -265,7 +280,7 @@ export default function AppShell({ appName, appTagline, children }) {
     }
     nextParams.set('ticker', normalizedTicker)
     navigate({
-      pathname: '/',
+      pathname: '/app',
       search: nextParams.toString() ? `?${nextParams.toString()}` : '',
     })
     try {
@@ -285,6 +300,38 @@ export default function AppShell({ appName, appTagline, children }) {
     })
     return undefined
   }, [shortcutsOpen])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setSafetyState(null)
+      return undefined
+    }
+    let cancelled = false
+
+    async function loadSafetyState() {
+      try {
+        const payload = await getOrganizationTradeAutomationWatchdog()
+        if (!cancelled) setSafetyState(payload)
+      } catch {
+        if (!cancelled) {
+          setSafetyState({
+            status: 'degraded',
+            label: 'Needs attention',
+            tone: 'warning',
+            blocker: 'Market Watchdog is unavailable.',
+            next_action: 'Check API health before starting unattended paper automation.',
+          })
+        }
+      }
+    }
+
+    loadSafetyState()
+    const interval = window.setInterval(loadSafetyState, 60000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [isAuthenticated])
 
   useEffect(() => {
     if (!isAuthenticated) return undefined
@@ -351,7 +398,7 @@ export default function AppShell({ appName, appTagline, children }) {
               <div className="ui-shell__brand">
               <div className="ui-shell__brand-mark" aria-hidden="true">{brandMark}</div>
               <div className="ui-shell__brand-copy">
-                <div className="ui-kicker">{personalMode ? 'Own-account operator desk' : 'Platform operations'}</div>
+                <div className="ui-kicker">{personalMode ? 'Own-account operator desk' : 'Trading control workspace'}</div>
                 <h1 className="ui-shell__brand-name">{brandName}</h1>
                 <p className="ui-shell__brand-tagline">{brandTagline}</p>
               </div>
@@ -376,7 +423,7 @@ export default function AppShell({ appName, appTagline, children }) {
                 </select>
               </div>
               <Chip tone={isAuthenticated ? 'positive' : 'warning'} size="sm">
-                {isAuthenticated ? (personalMode ? 'Desk live' : 'Ops live') : 'Local demo'}
+                {isAuthenticated ? (personalMode ? 'Desk live' : 'Workspace live') : 'Sign-in ready'}
               </Chip>
               <Chip
                 tone={
@@ -399,7 +446,7 @@ export default function AppShell({ appName, appTagline, children }) {
                 </Chip>
               ) : null}
               <Chip tone="neutral" size="sm">
-                {preferences?.compactTables ? (personalMode ? 'Dense desk' : 'Dense ops') : (personalMode ? 'Comfort desk' : 'Comfort ops')}
+                {preferences?.compactTables ? 'Dense desk' : 'Comfort desk'}
               </Chip>
               <Chip tone="neutral" size="sm">
                 {preferences?.rememberLastWorkflowSurface ? `Resume ${getSurfaceLabel(resolveHomeSurface())}` : `Home ${startupLabel}`}
@@ -427,7 +474,7 @@ export default function AppShell({ appName, appTagline, children }) {
                       inputId={QUICK_OPEN_INPUT_ID}
                       value={quickTicker}
                       onChange={setQuickTicker}
-                      placeholder={personalMode ? 'Load ticker into desk' : 'Load ticker into operations'}
+                      placeholder="Load ticker into desk"
                       ariaLabel="Quick open ticker"
                     />
                   </div>
@@ -460,8 +507,66 @@ export default function AppShell({ appName, appTagline, children }) {
                   </ActionBar>
                 </form>
               </div>
+              <div
+                className={joinClasses(
+                  'ui-shell__safety-banner',
+                  `ui-shell__safety-banner--${String(safetyState?.status || 'degraded').replace(/[^a-z0-9_-]/gi, '')}`,
+                )}
+                role="status"
+                aria-live="polite"
+              >
+                <div className="ui-shell__safety-main">
+                  <span className="ui-shell__safety-kicker">Market watchdog</span>
+                  <strong>{safetyState?.label || 'Needs attention'}</strong>
+                  <span>{safetyState?.blocker || 'Alpaca paper route, worker heartbeat, desk scans, and risk gates are being monitored.'}</span>
+                  <span className="ui-muted">{safetyCheckedAgeLabel}</span>
+                </div>
+                {hasEvidenceMillionTarget ? (
+                  <div className="ui-shell__safety-promotion" aria-label="Evidence 100M observed-event progress">
+                    <div className="ui-shell__safety-promotion-copy">
+                      <span>Evidence {formatCompactNumber(evidenceObservedCount)} / {formatCompactNumber(evidenceTargetCount)}</span>
+                      <span>{evidenceProgressPct.toFixed(2)}% to 1M observed events</span>
+                    </div>
+                    <div className="ui-shell__safety-promotion-meter" aria-hidden="true">
+                      <span style={{ width: `${evidenceProgressPct}%` }} />
+                    </div>
+                    <div className="ui-shell__safety-promotion-copy ui-shell__safety-promotion-copy--counts">
+                      <span>{evidenceEtaLabel}</span>
+                      <span>{evidenceRateLabel}</span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="ui-shell__safety-action">
+                  <span>{safetyState?.next_action || 'Review Market Watchdog before starting unattended automation.'}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const target = safetyState?.links?.daily_ledger || '/api/orgs/trade-automation/daily-ledger'
+                      window.open(target, '_blank', 'noopener,noreferrer')
+                    }}
+                  >
+                    Ledger
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const target = safetyState?.links?.candidate_diagnostics || '/api/orgs/trade-automation/candidate-diagnostics'
+                      window.open(target, '_blank', 'noopener,noreferrer')
+                    }}
+                  >
+                    Diagnostics
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => navigateShell('/live')}>
+                    Live console
+                  </Button>
+                </div>
+              </div>
               <div className="ui-shell__nav-label">Navigation</div>
-              <nav className="ui-shell__nav" aria-label={personalMode ? 'Desk navigation' : 'Platform operations navigation'} aria-describedby="desk-masthead">
+              <nav className="ui-shell__nav" aria-label="Trader workspace navigation" aria-describedby="desk-masthead">
                 {shellNavItems.map((item) => (
                   <NavLink
                     key={item.to}
@@ -498,7 +603,7 @@ export default function AppShell({ appName, appTagline, children }) {
                   <div className="ui-kicker">Keyboard shortcuts</div>
                   <h2 className="ui-shell-shortcuts__title" id="shell-shortcuts-title">Move faster without leaving the workstation flow.</h2>
                   <p className="ui-shell-shortcuts__subtitle">
-                    Shell shortcuts handle navigation and quick open. {personalMode ? 'Desk-only shortcuts' : 'Operations-only shortcuts'} stay local to the active surface once you are inside the control loop.
+                    Shell shortcuts handle navigation and quick open. Desk shortcuts stay local to the active surface once you are inside the control loop.
                   </p>
                 </div>
                 <Button id="shell-shortcuts-close" type="button" variant="ghost" size="sm" onClick={closeShortcuts}>

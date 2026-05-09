@@ -627,6 +627,150 @@ def build_limited_live_cap_ladder_snapshot(state: dict[str, Any] | None) -> dict
     }
 
 
+def _runtime_report(runtime: dict[str, Any], key: str) -> dict[str, Any]:
+    value = runtime.get(key)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _report_status(report: dict[str, Any]) -> str:
+    return str(report.get("status") or report.get("state") or "unknown").strip().lower()
+
+
+def _report_blockers(report: dict[str, Any]) -> list[str]:
+    raw = report.get("blockers")
+    if isinstance(raw, list):
+        return [str(item) for item in raw if str(item).strip()]
+    if raw:
+        return [str(raw)]
+    return []
+
+
+def _event_failure_detected(runtime: dict[str, Any]) -> bool:
+    for key in (
+        "last_order_event_status",
+        "last_order_persistence_status",
+        "last_broker_ledger_status",
+        "last_trade_automation_finalize_status",
+    ):
+        value = str(runtime.get(key) or "").strip().lower()
+        if value in {"failed", "error", "blocked"}:
+            return True
+    return _coerce_int(runtime.get("worker_error_streak"), 0, minimum=0) >= 3
+
+
+def _market_data_stale(runtime: dict[str, Any], settings: dict[str, Any]) -> tuple[bool, list[str]]:
+    warnings: list[str] = []
+    last_option_execution = runtime.get("last_option_execution")
+    if isinstance(last_option_execution, dict):
+        quote_age = _coerce_float(last_option_execution.get("option_quote_age_seconds"), 0.0)
+        max_age = _coerce_float(settings.get("loss_containment_stale_quote_seconds"), 120.0, minimum=1.0)
+        if quote_age > max_age:
+            warnings.append(f"Latest option quote age {quote_age:.0f}s exceeds stale-data limit {max_age:.0f}s.")
+        if last_option_execution.get("option_spread_pct") is None:
+            warnings.append("Latest option execution evidence is missing spread data.")
+    option_block_reason = str(runtime.get("option_execution_block_reason") or "").strip().lower()
+    if option_block_reason in {"stale_option_quote", "option_quote_missing", "missing_spread", "spread_too_wide"}:
+        warnings.append(f"Latest option execution gate blocked entries for {option_block_reason}.")
+    return bool(warnings), warnings
+
+
+def build_limited_live_hard_fault_snapshot(
+    state: dict[str, Any] | None,
+    *,
+    live_state: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Collect hard safety faults that should disable runtime allowances."""
+
+    state = state or {}
+    now = now or _utc_now()
+    runtime = dict(state.get("runtime") or {})
+    settings = normalize_limited_live_ladder_settings(state.get("settings"))
+    live_settings = dict((live_state or {}).get("settings") or {})
+
+    blockers: list[str] = []
+    warnings: list[str] = []
+    signals: list[dict[str, Any]] = []
+
+    def add_blocker(key: str, detail: str) -> None:
+        blockers.append(detail)
+        signals.append({"key": key, "severity": "blocker", "detail": detail})
+
+    def add_warning(key: str, detail: str) -> None:
+        warnings.append(detail)
+        signals.append({"key": key, "severity": "warning", "detail": detail})
+
+    state_control_state = _state_control_status(state)
+    if state_control_state == "halt":
+        add_blocker("state_control_halt", "State control is halted.")
+    elif state_control_state == "de_risk":
+        add_warning("state_control_derisk", "State control is in de-risk mode.")
+
+    if _coerce_bool(dict(state.get("settings") or {}).get("kill_switch"), False) or _coerce_bool(
+        live_settings.get("kill_switch"),
+        False,
+    ):
+        add_blocker("active_kill_switch", "A paper or live kill switch is active.")
+
+    for key, label in (
+        ("limited_live_broker_reconciliation_last_report", "Limited-live broker reconciliation"),
+        ("limited_live_session_closeout_last_report", "Limited-live session closeout"),
+        ("limited_live_rollout_gate_last_report", "Limited-live rollout gate"),
+        ("limited_live_cap_expansion_gate_last_report", "Limited-live cap expansion gate"),
+        ("limited_live_next_tier_cap_gate_last_report", "Limited-live next-tier gate"),
+    ):
+        report = _runtime_report(runtime, key)
+        status = _report_status(report)
+        report_blockers = _report_blockers(report)
+        if status in {"blocked", "error", "failed", "halt"}:
+            add_blocker(key, f"{label} is {status}.")
+        for blocker in report_blockers:
+            lowered = blocker.lower()
+            if any(
+                token in lowered
+                for token in (
+                    "broker/local",
+                    "mismatch",
+                    "cap breach",
+                    "non-limit",
+                    "uncontrolled live",
+                    "order event",
+                    "terminal evidence",
+                )
+            ):
+                add_blocker(key, f"{label}: {blocker}")
+
+    exit_watchdog = _runtime_report(runtime, "exit_watchdog_last_report")
+    if exit_watchdog:
+        stuck_exit_count = _coerce_int(exit_watchdog.get("stuck_exit_count"), 0, minimum=0)
+        if stuck_exit_count > 0 or _coerce_bool(exit_watchdog.get("entries_blocked"), False):
+            add_blocker("exit_watchdog_stuck", "Exit execution watchdog has unconfirmed defensive exits.")
+        elif str(exit_watchdog.get("status") or "").strip().lower() == "warning":
+            add_warning("exit_watchdog_warning", "Exit execution watchdog has warnings.")
+
+    market_stale, market_warnings = _market_data_stale(runtime, settings)
+    if market_stale:
+        for warning in market_warnings:
+            add_blocker("market_data_freshness", warning)
+
+    if _event_failure_detected(runtime):
+        add_blocker("order_event_failure", "Recent order-event or worker persistence failed.")
+
+    status = "blocked" if blockers else ("warning" if warnings else "clear")
+    return serialize_value(
+        {
+            "status": status,
+            "should_disable_allowances": bool(blockers),
+            "blockers": blockers,
+            "warnings": warnings,
+            "signals": signals,
+            "state_control_status": state_control_state,
+            "safety_lock_status": _safety_lock_status(state, live_state),
+            "evaluated_at": _serialize_datetime(now),
+        }
+    )
+
+
 def build_limited_live_approval_ledger_snapshot(state: dict[str, Any] | None) -> dict[str, Any]:
     runtime = dict((state or {}).get("runtime") or {})
     entries: list[dict[str, Any]] = []

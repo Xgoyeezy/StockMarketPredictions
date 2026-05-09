@@ -24,6 +24,13 @@ from backend.schemas import (
 )
 from backend.services.exceptions import NotFoundError, ValidationError
 from backend.services.execution.alpaca_client import build_alpaca_paper_client
+from backend.services.execution.tradier_client import (
+    TradierApiError,
+    build_tradier_live_market_data_client,
+    build_tradier_paper_client,
+    normalize_tradier_balances,
+    normalize_tradier_option_contract,
+)
 from backend.services.market_data.hybrid_adapter import AlpacaMarketDataClient
 from backend.services.market_service import analyze_market
 from backend.services.options_validation_service import export_options_validation
@@ -241,8 +248,9 @@ def _extract_contract_candidate(
     rejection_reasons: list[str] = []
     if required_right and right != required_right:
         rejection_reasons.append(f"Signal requires {required_right}.")
-    if str(feed or "").strip().lower() != "opra":
-        rejection_reasons.append("OPRA real-time options feed is required for automation.")
+    normalized_feed = str(feed or "").strip().lower()
+    if normalized_feed not in {"opra", "tradier_realtime"}:
+        rejection_reasons.append("Real-time options quotes are required for automation.")
     if quote_age_seconds is None:
         rejection_reasons.append("Missing option quote timestamp.")
     elif quote_age_seconds > settings.options_quote_max_age_seconds:
@@ -293,7 +301,7 @@ def _extract_contract_candidate(
         "distance_pct": distance_pct,
         "premium_notional": round(premium_notional, 2),
         "feed": feed,
-        "source": "alpaca_options_chain",
+        "source": "tradier_options_chain" if normalized_feed == "tradier_realtime" else "alpaca_options_chain",
         "ready_to_execute": not rejection_reasons,
         "rejection_reasons": rejection_reasons,
         "selection_score": round(float(selection_score), 6),
@@ -311,7 +319,65 @@ def _build_alpaca_options_client() -> AlpacaMarketDataClient:
     )
 
 
+def _options_data_provider() -> str:
+    provider = str(getattr(settings, "options_data_provider", "free_delayed") or "free_delayed").strip().lower()
+    return provider if provider in {"free_delayed", "alpaca", "tradier"} else "free_delayed"
+
+
+def _options_broker_provider() -> str:
+    provider = str(getattr(settings, "options_broker_provider", "internal") or "internal").strip().lower()
+    if provider in {"internal", "internal_paper", "internal_simulator"}:
+        return "internal"
+    return provider if provider in {"alpaca", "tradier"} else "internal"
+
+
+def _options_feed_label() -> str:
+    data_provider = _options_data_provider()
+    if data_provider == "free_delayed":
+        return "free_delayed"
+    return "tradier_realtime" if data_provider == "tradier" else str(settings.alpaca_options_feed or "opra").strip().lower() or "opra"
+
+
+def _options_data_source_label() -> str:
+    data_provider = _options_data_provider()
+    if data_provider == "free_delayed":
+        return "free_delayed_options_research"
+    return "tradier_options_chain" if data_provider == "tradier" else "alpaca_options_chain"
+
+
+def _options_feed_required_label() -> str:
+    data_provider = _options_data_provider()
+    if data_provider == "tradier":
+        return "tradier_realtime"
+    if data_provider == "alpaca":
+        return "opra"
+    return "licensed_realtime_options_feed"
+
+
 def _account_summary() -> dict[str, Any]:
+    if _options_broker_provider() == "internal":
+        return {
+            "effective_funds": 100_000.0,
+            "funds_source": "internal_simulated_balance",
+            "equity": 100_000.0,
+            "cash": 100_000.0,
+            "buying_power": 100_000.0,
+            "option_buying_power": 100_000.0,
+            "provider": "internal_paper",
+        }
+    if _options_broker_provider() == "tradier":
+        client = build_tradier_paper_client()
+        balances = normalize_tradier_balances(client.get_account_balances())
+        funds = balances.get("option_buying_power") or balances.get("buying_power") or balances.get("cash") or balances.get("equity")
+        return {
+            "effective_funds": float(funds or 0.0),
+            "funds_source": "tradier_option_buying_power" if balances.get("option_buying_power") is not None else "tradier_paper_balance",
+            "equity": balances.get("equity"),
+            "cash": balances.get("cash"),
+            "buying_power": balances.get("buying_power"),
+            "option_buying_power": balances.get("option_buying_power"),
+            "provider": "tradier",
+        }
     client = build_alpaca_paper_client()
     account = client.get_account()
     funds = None
@@ -328,6 +394,7 @@ def _account_summary() -> dict[str, Any]:
         "portfolio_value": _coerce_float(account.get("portfolio_value")),
         "cash": _coerce_float(account.get("cash")),
         "buying_power": _coerce_float(account.get("buying_power")),
+        "provider": "alpaca",
     }
 
 
@@ -439,12 +506,70 @@ def _fetch_candidates_for_ticker(
     return candidates, blockers, {"signal_right": required_right, "underlying_price": underlying_price}
 
 
-def _serialize_scan_run(row: OptionAutomationScanRun | None) -> dict[str, Any]:
+def _expiration_in_dte_window(expiration: str, scan_started_at: datetime) -> bool:
+    expiration_ts = pd.to_datetime(expiration, errors="coerce", utc=True)
+    if pd.isna(expiration_ts):
+        return False
+    dte_days = int((expiration_ts.normalize() - pd.Timestamp(scan_started_at).normalize()).days)
+    return int(settings.options_min_dte_days or 0) <= dte_days <= int(settings.options_max_dte_days or 0)
+
+
+def _fetch_tradier_candidates_for_ticker(
+    *,
+    client: Any,
+    ticker: str,
+    current_user: Any,
+    feed: str,
+    scan_started_at: datetime,
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+    blockers: list[str] = []
+    required_right: str | None = None
+    analysis: dict[str, Any] = {}
+    try:
+        required_right, analysis = _signal_right_for_ticker(ticker, current_user)
+    except Exception as exc:
+        blockers.append(f"Signal unavailable: {exc}")
+
+    underlying_price = _coerce_float(analysis.get("live_price")) or _coerce_float((analysis.get("report") or {}).get("close"))
+    if underlying_price is None:
+        try:
+            quotes = client.get_quotes([ticker])
+            if quotes:
+                underlying_price = _coerce_float(quotes[0].get("last") or quotes[0].get("bid") or quotes[0].get("ask"))
+        except Exception:
+            underlying_price = None
+
+    expirations = [
+        item
+        for item in client.get_option_expirations(ticker)
+        if _expiration_in_dte_window(item, scan_started_at)
+    ][:6]
+    if not expirations:
+        blockers.append("No Tradier option expirations are inside the configured DTE window.")
+
+    candidates: list[dict[str, Any]] = []
+    for expiration in expirations:
+        for row in client.get_option_chain(ticker, expiration, greeks=True):
+            candidate = _extract_contract_candidate(
+                ticker=ticker,
+                row=normalize_tradier_option_contract(row),
+                underlying_price=underlying_price,
+                required_right=required_right,
+                feed=feed,
+                scan_started_at=scan_started_at,
+            )
+            if candidate is not None:
+                candidate["signal_right"] = required_right
+                candidates.append(candidate)
+    return candidates, blockers, {"signal_right": required_right, "underlying_price": underlying_price, "expirations": expirations}
+
+
+def _serialize_scan_run(row: OptionAutomationScanRun | None, *, include_candidates: bool = True) -> dict[str, Any]:
     if row is None:
         return {
             "latest_scan_run_id": None,
             "status": "idle",
-            "feed": settings.alpaca_options_feed,
+            "feed": _options_feed_label(),
             "scan_interval_seconds": int(settings.options_scan_interval_seconds or 30),
             "ticker_count": 0,
             "candidate_count": 0,
@@ -455,7 +580,8 @@ def _serialize_scan_run(row: OptionAutomationScanRun | None) -> dict[str, Any]:
             "created_at": None,
             "updated_at": None,
         }
-    return {
+    candidates = list((row.candidates_json or {}).get("items") or []) if include_candidates else []
+    payload = {
         "latest_scan_run_id": row.id,
         "status": row.status,
         "feed": row.feed,
@@ -466,22 +592,81 @@ def _serialize_scan_run(row: OptionAutomationScanRun | None) -> dict[str, Any]:
         "blocked_reason": row.blocked_reason,
         "requested_tickers": list((row.requested_tickers_json or {}).get("tickers") or []),
         "summary": dict(row.summary_json or {}),
-        "candidates": list((row.candidates_json or {}).get("items") or []),
+        "candidates": candidates,
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }
+    if not include_candidates:
+        payload["candidates_omitted"] = True
+    return payload
+
+
+def _scan_run_matches_active_provider(row: OptionAutomationScanRun | None) -> bool:
+    if row is None:
+        return False
+    active_feed = _options_feed_label()
+    if str(row.feed or "").strip().lower() != active_feed:
+        return False
+    summary = dict(row.summary_json or {})
+    data_provider = str(summary.get("options_data_provider") or "").strip().lower()
+    if data_provider and data_provider != _options_data_provider():
+        return False
+    data_source = str(summary.get("data_source") or "").strip().lower()
+    if data_source and data_source != _options_data_source_label():
+        return False
+    return True
+
+
+def _active_scan_summary_defaults() -> dict[str, Any]:
+    data_provider = _options_data_provider()
+    return {
+        "scope": "personal_paper",
+        "execution_intent": "internal_paper",
+        "data_source": _options_data_source_label(),
+        "feed": _options_feed_label(),
+        "feed_required": _options_feed_required_label(),
+        "options_data_provider": data_provider,
+        "options_broker_provider": _options_broker_provider(),
+        "broker_mode": "internal_paper" if _options_broker_provider() == "internal" else "broker_paper",
+        "licensed_realtime_options_data": bool(getattr(settings, "licensed_realtime_options_data", False)),
+        "options_automation_ready": False,
+    }
+
+
+def _options_data_blocked_reason(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "licensed_realtime_options_feed_required":
+        return "Licensed real-time options data is required before options auto-entry, auto-exit, or current bid/ask liquidity gates can be marked ready."
+    if normalized == "credentials_missing":
+        if _options_data_provider() == "tradier":
+            return "Tradier live options data credentials are missing. Real-time options data is required for paper options automation."
+        return "Options data credentials are missing. Real-time options data is required for paper options automation."
+    if normalized == "broker_credentials_missing":
+        return "Tradier paper execution credentials are missing. Paper options lifecycle evidence requires sandbox order access."
+    if normalized == "stale_quotes":
+        return "Options quotes are stale. Fresh real-time options quotes are required for paper options automation."
+    if normalized == "blocked_wrong_feed":
+        return "The configured options feed is not valid for paper options automation."
+    if normalized == "not_entitled":
+        return "The configured options data account is not entitled for real-time options data."
+    return "Real-time options data is not ready for paper options automation."
 
 
 def _build_policy_snapshot() -> dict[str, Any]:
     return {
         "scope": "personal_paper",
-        "execution_intent": "broker_paper",
+        "execution_intent": "internal_paper" if _options_broker_provider() == "internal" else "broker_paper",
         "instrument_type": "listed_option",
         "option_strategy": "long_option",
         "supported_rights": sorted(SUPPORTED_OPTION_RIGHTS),
         "limit_orders_only": True,
         "live_routing_enabled": False,
-        "brokerage_linked_routing_enabled": False,
+        "brokerage_linked_routing_enabled": False if _options_broker_provider() == "internal" else _options_broker_provider() == "tradier",
+        "broker_provider": _options_broker_provider(),
+        "broker_mode": "internal_paper" if _options_broker_provider() == "internal" else "broker_paper",
+        "data_provider": _options_data_provider(),
+        "feed_required": _options_feed_required_label(),
+        "licensed_realtime_options_data": bool(getattr(settings, "licensed_realtime_options_data", False)),
         "short_premium_enabled": False,
         "spreads_enabled": False,
         "quote_max_age_seconds": int(settings.options_quote_max_age_seconds or 30),
@@ -839,7 +1024,10 @@ def _build_options_validation_artifact(
 
     blockers: list[str] = []
     if opra_status != "ready":
-        blockers.append("OPRA real-time options feed is not ready for personal-paper automation.")
+        if opra_status == "licensed_realtime_options_feed_required":
+            blockers.append(_options_data_blocked_reason(opra_status))
+        else:
+            blockers.append("Real-time options data is not ready for personal-paper automation.")
     sell_blockers = []
     for item in open_positions:
         if bool(item.get("sell_ready")):
@@ -865,7 +1053,11 @@ def _build_options_validation_artifact(
 
     if readiness_state == "blocked":
         if opra_status != "ready":
-            next_step = "Resolve the OPRA options-feed blocker before relying on scheduled paper options."
+            next_step = (
+                "Add a licensed real-time options feed before enabling options auto-entry or auto-exit."
+                if opra_status == "licensed_realtime_options_feed_required"
+                else "Resolve the real-time options data blocker before relying on scheduled paper options."
+            )
         elif broker_sync_stale:
             next_step = "Run the option lifecycle sync and verify broker/order linkage before widening scope."
         elif sell_blockers:
@@ -882,6 +1074,13 @@ def _build_options_validation_artifact(
     latest_runtime_blocker = str(automation_runtime.get("last_options_blocker") or "").strip() or None
     return {
         "validation_scope": "personal_paper",
+        "options_data_status": opra_status,
+        "options_data_provider": _options_data_provider(),
+        "options_broker_provider": _options_broker_provider(),
+        "broker_mode": "internal_paper" if _options_broker_provider() == "internal" else "broker_paper",
+        "real_money_execution_enabled": False,
+        "licensed_realtime_options_data": bool(getattr(settings, "licensed_realtime_options_data", False)),
+        "options_automation_ready": readiness_state == "ready" and opra_status == "ready",
         "readiness_state": readiness_state,
         "readiness_label": _readiness_label(readiness_state),
         "required_clean_cycles": REQUIRED_CLEAN_SCHEDULED_OPTION_CYCLES,
@@ -1124,6 +1323,26 @@ def _summarize_options_data_http_error(exc: HTTPError, *, feed: str) -> tuple[st
 def _derive_opra_entitlement_status(*, feed: str, blocked_reason: str | None) -> str:
     normalized_feed = str(feed or "").strip().lower()
     reason = str(blocked_reason or "").strip().lower()
+    if _options_data_provider() == "free_delayed":
+        return "licensed_realtime_options_feed_required"
+    if _options_data_provider() == "tradier":
+        if not settings.tradier_live_token or not settings.tradier_live_account_id:
+            return "credentials_missing"
+        if _options_broker_provider() == "tradier" and (not settings.tradier_paper_token or not settings.tradier_paper_account_id):
+            return "broker_credentials_missing"
+        if "stale" in reason:
+            return "stale_quotes"
+        if "tradier" in reason and reason:
+            return "not_ready"
+        return "ready"
+    if normalized_feed == "tradier_realtime":
+        if "credentials" in reason:
+            return "credentials_missing"
+        if "stale" in reason:
+            return "stale_quotes"
+        if "tradier" in reason and reason:
+            return "not_ready"
+        return "ready"
     if normalized_feed != "opra":
         return "blocked_wrong_feed"
     if not reason:
@@ -1153,8 +1372,24 @@ def get_options_automation_snapshot(db: Session, *, current_user: Any) -> dict[s
         .order_by(OptionAutomationScanRun.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
+    previous_scan: dict[str, Any] | None = None
+    if row is not None and not _scan_run_matches_active_provider(row):
+        previous_scan = _serialize_scan_run(row, include_candidates=False)
+        row = None
     snapshot = _serialize_scan_run(row)
+    if previous_scan is not None:
+        snapshot["previous_scan"] = previous_scan
+    summary = dict(snapshot.get("summary") or {})
+    for key, value in _active_scan_summary_defaults().items():
+        summary.setdefault(key, value)
+    snapshot["summary"] = summary
     snapshot["policy"] = _build_policy_snapshot()
+    snapshot["options_data_provider"] = _options_data_provider()
+    snapshot["options_broker_provider"] = _options_broker_provider()
+    snapshot["broker_mode"] = "internal_paper" if _options_broker_provider() == "internal" else "broker_paper"
+    snapshot["real_money_execution_enabled"] = False
+    snapshot["licensed_realtime_options_data"] = bool(getattr(settings, "licensed_realtime_options_data", False))
+    snapshot["data_source"] = _options_data_source_label()
     automation_snapshot = get_tenant_trade_automation_snapshot(db, current_user=current_user, scope="personal_paper")
     automation_runtime = dict(automation_snapshot.get("runtime") or {})
     automation_settings = dict(automation_snapshot.get("settings") or {})
@@ -1181,6 +1416,9 @@ def get_options_automation_snapshot(db: Session, *, current_user: Any) -> dict[s
     latest_paper_exit = _latest_event_snapshot(events, EXIT_EVENT_TYPES)
     latest_broker_sync = _latest_event_snapshot(events, SYNC_EVENT_TYPES)
     opra_status = _derive_opra_entitlement_status(feed=str(snapshot.get("feed") or ""), blocked_reason=snapshot.get("blocked_reason"))
+    if opra_status != "ready" and str(snapshot.get("status") or "").strip().lower() == "idle":
+        snapshot["status"] = "blocked"
+        snapshot["blocked_reason"] = _options_data_blocked_reason(opra_status)
     validation_artifact = _build_options_validation_artifact(
         snapshot=snapshot,
         events=events,
@@ -1211,6 +1449,13 @@ def get_options_automation_snapshot(db: Session, *, current_user: Any) -> dict[s
     )
     snapshot["lifecycle"] = {
         "opra_entitlement_status": opra_status,
+        "options_data_status": opra_status,
+        "options_data_provider": _options_data_provider(),
+        "options_broker_provider": _options_broker_provider(),
+        "broker_mode": snapshot["broker_mode"],
+        "real_money_execution_enabled": False,
+        "licensed_realtime_options_data": bool(getattr(settings, "licensed_realtime_options_data", False)),
+        "options_automation_ready": validation_artifact["readiness_state"] == "ready" and opra_status == "ready",
         "latest_scan": latest_scan,
         "latest_paper_execution": latest_paper_execution,
         "latest_quote_refresh": latest_quote_refresh,
@@ -1238,6 +1483,7 @@ def get_options_automation_snapshot(db: Session, *, current_user: Any) -> dict[s
     snapshot["validation_artifact"] = serialize_value(validation_artifact)
     snapshot["readiness_state"] = validation_artifact["readiness_state"]
     snapshot["readiness_label"] = validation_artifact["readiness_label"]
+    snapshot["options_automation_ready"] = bool(validation_artifact["readiness_state"] == "ready" and opra_status == "ready")
     snapshot["clean_entry_count"] = int(validation_artifact.get("clean_entry_count") or 0)
     snapshot["clean_exit_count"] = int(validation_artifact.get("clean_exit_count") or 0)
     snapshot["required_clean_cycles"] = int(validation_artifact.get("required_clean_cycles") or REQUIRED_CLEAN_SCHEDULED_OPTION_CYCLES)
@@ -1309,7 +1555,10 @@ def run_options_automation_scan(
     automation_trigger = str(request.automation_trigger or "manual").strip().lower() or "manual"
     tickers = _resolve_scan_tickers(db, current_user, request)
     scan_started_at = _utc_now()
-    feed = str(settings.alpaca_options_feed or "opra").strip().lower() or "opra"
+    data_provider = _options_data_provider()
+    broker_provider = _options_broker_provider()
+    feed = _options_feed_label()
+    data_source = _options_data_source_label()
     scan_interval = _resolve_scan_interval(db, current_user)
     account = {"effective_funds": 0.0, "funds_source": "unavailable"}
     try:
@@ -1317,25 +1566,55 @@ def run_options_automation_scan(
     except Exception as exc:
         account = {"effective_funds": 0.0, "funds_source": "unavailable", "error": str(exc)}
 
-    client = _build_alpaca_options_client()
+    client = None
     candidates: list[dict[str, Any]] = []
     blockers_by_ticker: dict[str, list[str]] = {}
     metadata_by_ticker: dict[str, Any] = {}
     status = "completed"
     blocked_reason = None
-    if not client.is_configured:
+    if data_provider == "free_delayed":
         status = "blocked"
-        blocked_reason = "Alpaca paper data credentials are not configured."
+        blocked_reason = _options_data_blocked_reason("licensed_realtime_options_feed_required")
+        blockers_by_ticker = {ticker: [blocked_reason] for ticker in tickers}
+        metadata_by_ticker = {
+            ticker: {
+                "data_source": data_source,
+                "feed": feed,
+                "automation_ready": False,
+                "reason": "free_delayed_data_cannot_satisfy_current_options_bid_ask_gates",
+            }
+            for ticker in tickers
+        }
+    elif broker_provider == "tradier" and (not settings.tradier_paper_token or not settings.tradier_paper_account_id):
+        status = "blocked"
+        blocked_reason = "Tradier paper execution credentials are required for the paper options lifecycle."
     else:
+        client = build_tradier_live_market_data_client() if data_provider == "tradier" else _build_alpaca_options_client()
+    if status != "blocked" and client is not None and not client.is_configured:
+        status = "blocked"
+        if data_provider == "tradier":
+            blocked_reason = "Tradier live market-data credentials are required for real-time options automation."
+        else:
+            blocked_reason = "Alpaca paper data credentials are not configured."
+    elif status != "blocked" and client is not None:
         for ticker in tickers:
             try:
-                ticker_candidates, ticker_blockers, ticker_metadata = _fetch_candidates_for_ticker(
-                    client=client,
-                    ticker=ticker,
-                    current_user=current_user,
-                    feed=feed,
-                    scan_started_at=scan_started_at,
-                )
+                if data_provider == "tradier":
+                    ticker_candidates, ticker_blockers, ticker_metadata = _fetch_tradier_candidates_for_ticker(
+                        client=client,
+                        ticker=ticker,
+                        current_user=current_user,
+                        feed=feed,
+                        scan_started_at=scan_started_at,
+                    )
+                else:
+                    ticker_candidates, ticker_blockers, ticker_metadata = _fetch_candidates_for_ticker(
+                        client=client,
+                        ticker=ticker,
+                        current_user=current_user,
+                        feed=feed,
+                        scan_started_at=scan_started_at,
+                    )
                 candidates.extend(ticker_candidates)
                 if ticker_blockers:
                     blockers_by_ticker[ticker] = ticker_blockers
@@ -1344,6 +1623,10 @@ def run_options_automation_scan(
                 status = "blocked"
                 blocked_reason, blocker_detail = _summarize_options_data_http_error(exc, feed=feed)
                 blockers_by_ticker[ticker] = [blocker_detail]
+            except TradierApiError as exc:
+                status = "blocked"
+                blocked_reason = f"Tradier options data request failed: {exc}"
+                blockers_by_ticker[ticker] = [blocked_reason]
             except Exception as exc:
                 blockers_by_ticker[ticker] = [str(exc)]
 
@@ -1365,11 +1648,16 @@ def run_options_automation_scan(
 
     summary = {
         "scope": "personal_paper",
-        "execution_intent": "broker_paper",
-        "data_source": "alpaca_options_chain",
+        "execution_intent": "internal_paper" if broker_provider == "internal" else "broker_paper",
+        "data_source": data_source,
         "feed": feed,
-        "feed_required": "opra",
-        "options_paper_ready": ready_count > 0 and feed == "opra",
+        "feed_required": _options_feed_required_label(),
+        "options_paper_ready": ready_count > 0 and feed in {"opra", "tradier_realtime"},
+        "options_automation_ready": ready_count > 0 and feed in {"opra", "tradier_realtime"},
+        "licensed_realtime_options_data": bool(getattr(settings, "licensed_realtime_options_data", False)),
+        "broker_mode": "internal_paper" if broker_provider == "internal" else "broker_paper",
+        "options_data_provider": data_provider,
+        "options_broker_provider": broker_provider,
         "scan_started_at": _iso(scan_started_at),
         "scan_interval_seconds": scan_interval,
         "scanned_contract_count": total_candidate_count,
@@ -1474,13 +1762,14 @@ def execute_options_paper(
         db.commit()
         raise ValidationError("No ready long-option paper candidate is available for execution.")
     account = _account_summary()
+    execution_intent = "internal_paper" if _options_broker_provider() == "internal" else "broker_paper"
     results: list[dict[str, Any]] = []
     for candidate in ready_candidates[: max(1, int(request.max_candidates or 1))]:
         open_request = OpenTradeRequest(
             ticker=str(candidate["underlying"]),
             account_target_type="personal",
             execution_mode="automated_entry",
-            execution_intent="broker_paper",
+            execution_intent=execution_intent,
             instrument_type="listed_option",
             option_strategy="long_option",
             option_right=str(candidate["right"]),
@@ -1523,7 +1812,7 @@ def execute_options_paper(
                 "contract_symbol": candidate["contract_symbol"],
                 "trade_id": record.get("trade_id"),
                 "order_id": record.get("order_id"),
-                "execution_intent": "broker_paper",
+                "execution_intent": execution_intent,
                 "scope": "personal_paper",
                 "entry_limit_price": candidate.get("entry_limit_price"),
                 "mid": candidate.get("mid"),
@@ -1547,7 +1836,7 @@ def execute_options_paper(
     return {
         "scan_run_id": row.id,
         "status": "dry_run" if request.dry_run else "submitted",
-        "execution_intent": "broker_paper",
+        "execution_intent": execution_intent,
         "scope": "personal_paper",
         "items": results,
     }
@@ -1562,6 +1851,7 @@ def refresh_options_positions(
     tenant = _resolve_tenant_for_current_user(db, current_user)
     request = request or OptionsAutomationRefreshRequest()
     automation_trigger = str(request.automation_trigger or "manual").strip().lower() or "manual"
+    execution_intent = "internal_paper" if _options_broker_provider() == "internal" else "broker_paper"
     refresh_started_at = _utc_now()
     open_positions = _option_open_positions(current_user)
     if request.trade_id:
@@ -1593,13 +1883,38 @@ def refresh_options_positions(
         return {
             "status": "blocked",
             "scope": "personal_paper",
-            "execution_intent": "broker_paper",
+            "execution_intent": execution_intent,
             "refreshed_at": _iso(refresh_started_at),
             "refreshed_count": 0,
             "sell_ready_count": 0,
             "blocked_count": 0,
             "items": [],
             "reason": "No open long option paper positions are available for quote refresh.",
+        }
+
+    if _options_data_provider() == "free_delayed":
+        reason = _options_data_blocked_reason("licensed_realtime_options_feed_required")
+        record_domain_event(
+            db,
+            tenant_id=tenant.id,
+            event_type="options.position_quote_refresh_blocked",
+            aggregate_type="options_automation",
+            aggregate_id=None,
+            payload={"reason": "licensed_realtime_options_feed_required", "automation_trigger": automation_trigger},
+            metadata={"automation_trigger": automation_trigger},
+        )
+        db.commit()
+        get_options_automation_snapshot(db, current_user=current_user)
+        return {
+            "status": "blocked",
+            "scope": "personal_paper",
+            "execution_intent": execution_intent,
+            "refreshed_at": _iso(refresh_started_at),
+            "refreshed_count": 0,
+            "sell_ready_count": 0,
+            "blocked_count": int(len(open_positions)),
+            "items": [],
+            "reason": reason,
         }
 
     client = _build_alpaca_options_client()
@@ -1639,7 +1954,7 @@ def refresh_options_positions(
     return {
         "status": "completed" if sell_ready_count else "blocked",
         "scope": "personal_paper",
-        "execution_intent": "broker_paper",
+        "execution_intent": execution_intent,
         "refreshed_at": _iso(refresh_started_at),
         "refreshed_count": len(items),
         "sell_ready_count": sell_ready_count,
@@ -1657,6 +1972,7 @@ def close_options_paper(
     tenant = _resolve_tenant_for_current_user(db, current_user)
     request = request or OptionsAutomationCloseRequest()
     automation_trigger = str(request.automation_trigger or "manual").strip().lower() or "manual"
+    execution_intent = "internal_paper" if _options_broker_provider() == "internal" else "broker_paper"
     all_open_trades = _scoped_open_trades(current_user)
     option_positions = _option_open_positions(current_user)
     if option_positions.empty:
@@ -1738,6 +2054,19 @@ def close_options_paper(
     target_index = matches.index[0]
     target_row = matches.loc[target_index].to_dict()
     now = _utc_now()
+    if _options_data_provider() == "free_delayed":
+        reason = _options_data_blocked_reason("licensed_realtime_options_feed_required")
+        record_domain_event(
+            db,
+            tenant_id=tenant.id,
+            event_type="options.paper_exit_blocked",
+            aggregate_type="option_position",
+            aggregate_id=resolve_trade_identifier(target_row),
+            payload={"reason": "licensed_realtime_options_feed_required", "automation_trigger": automation_trigger},
+            metadata={"automation_trigger": automation_trigger},
+        )
+        db.commit()
+        raise ValidationError(reason)
     refresh = _refresh_option_quote_for_close(target_row, now=now)
     client = _build_alpaca_options_client()
     underlying_price = _current_underlying_price(
@@ -1820,7 +2149,7 @@ def close_options_paper(
     return {
         "status": "submitted",
         "scope": "personal_paper",
-        "execution_intent": "broker_paper",
+        "execution_intent": execution_intent,
         "trade_id": position_snapshot["trade_id"],
         "contract_symbol": position_snapshot["contract_symbol"],
         "close_limit_price": float(sell_limit_price),

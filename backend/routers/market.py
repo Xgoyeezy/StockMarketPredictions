@@ -5,6 +5,7 @@ import logging
 import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, WebSocket
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -38,10 +39,15 @@ from backend.services.realtime_market_service import (
     parse_stream_tickers,
     stream_market_data,
 )
+from backend.services.serialization import serialize_value
 from backend.services.tenant_service import _dispatch_partner_webhook_event, _resolve_tenant_for_current_user, _resolve_user_for_current_user
 
 router = APIRouter(prefix="/market", tags=["market"])
 logger = logging.getLogger(__name__)
+
+
+def _json_envelope(payload: dict) -> JSONResponse:
+    return JSONResponse(content={"ok": True, "data": serialize_value(payload), "meta": {}})
 _MARKET_SIGNAL_SQLITE_LOCK_RETRY_ATTEMPTS = 3
 _MARKET_SIGNAL_SQLITE_LOCK_RETRY_DELAY_SECONDS = 0.2
 
@@ -165,6 +171,8 @@ def _queue_market_signal_ready_event(
     payload: dict,
     tickers: list[str] | None = None,
 ) -> None:
+    if background_tasks is not None and surface in {"chart", "dashboard"}:
+        return
     event_payload = _build_market_signal_ready_event(
         current_user,
         surface=surface,
@@ -209,7 +217,7 @@ def chart_payload(
     regular_hours_only: bool = Query(default=False),
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> ApiEnvelope:
+) -> ApiEnvelope | JSONResponse:
     resolved_points_limit = int(_query_default(points_limit, 300))
     resolved_regular_hours_only = bool(_query_default(regular_hours_only, False))
     request = ChartRequest(
@@ -221,6 +229,8 @@ def chart_payload(
     payload = get_chart_payload(request)
     payload = apply_chart_entitlements(payload, advanced_indicators_enabled=has_entitlement(db, current_user, "advanced_indicators"))
     _queue_market_signal_ready_event(background_tasks, db, current_user, surface="chart", payload=payload, tickers=[request.ticker])
+    if background_tasks is not None:
+        return _json_envelope(payload)
     return envelope(payload)
 
 
@@ -276,7 +286,7 @@ def dashboard(
     linked_account_id: str | None = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> ApiEnvelope:
+) -> ApiEnvelope | JSONResponse:
     broker_execution_enabled = _broker_execution_enabled(db, current_user)
     payload = apply_dashboard_entitlements(
         get_dashboard_snapshot(
@@ -290,6 +300,8 @@ def dashboard(
         broker_execution_enabled=broker_execution_enabled,
     )
     _queue_market_signal_ready_event(background_tasks, db, current_user, surface="dashboard", payload=payload)
+    if background_tasks is not None:
+        return _json_envelope(payload)
     return envelope(payload)
 
 
@@ -328,14 +340,14 @@ async def stream(
     websocket: WebSocket,
     tickers: str = Query(default=""),
     channels: str = Query(default="trades,quotes"),
-    db: Session = Depends(get_db),
 ) -> None:
-    current_user = build_demo_user(websocket, db)
-    realtime_entitled = has_entitlement(db, current_user, "realtime_streaming")
+    with SessionLocal() as db:
+        current_user = build_demo_user(websocket, db)
+        realtime_entitled = has_entitlement(db, current_user, "realtime_streaming")
     await stream_market_data(
         websocket,
         tickers=parse_stream_tickers(tickers),
         channels=parse_stream_channels(channels),
         realtime_entitled=realtime_entitled,
-        entitlement_reason="Upgrade this tenant to Pro or above to unlock tick-by-tick streaming.",
+        entitlement_reason="Streaming is not enabled for the active tenant.",
     )

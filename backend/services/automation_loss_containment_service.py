@@ -469,6 +469,7 @@ def _build_position_evaluations(
                 }
             )
 
+        stale_quote_blocks_auto_close = False
         if quote_age is None:
             warnings.append(
                 {
@@ -478,6 +479,7 @@ def _build_position_evaluations(
                 }
             )
         elif quote_age >= float(settings["loss_containment_stale_quote_seconds"]):
+            stale_quote_blocks_auto_close = True
             blockers.append(
                 {
                     "key": "stale_quote",
@@ -511,7 +513,9 @@ def _build_position_evaluations(
                     "reason": reason,
                     "current_r": evaluation["current_r"],
                     "unrealized_pnl": evaluation["unrealized_pnl"],
-                    "auto_close_eligible": True,
+                    "auto_close_eligible": not stale_quote_blocks_auto_close,
+                    "stale_quote_blocks_auto_close": stale_quote_blocks_auto_close,
+                    "requires_fresh_quote": stale_quote_blocks_auto_close,
                 }
             )
     return evaluations, blockers, warnings, defensive_actions
@@ -537,7 +541,7 @@ def build_loss_containment_report(
     equity_base = max(
         _coerce_float(
             effective_funds,
-            _coerce_float(state.get("__actual_funds"), _coerce_float(state.get("__effective_funds"), _coerce_float(settings_state.get("account_size"), 10000.0))),
+            _coerce_float(state.get("__actual_funds"), _coerce_float(state.get("__effective_funds"), _coerce_float(settings_state.get("account_size"), 100000.0))),
         ),
         1.0,
     )
@@ -591,7 +595,12 @@ def build_loss_containment_report(
         )
     )
     for item in defensive_actions:
-        item["auto_close_eligible"] = bool(auto_close_allowed and allowed_scope)
+        item["auto_close_eligible"] = bool(
+            auto_close_allowed
+            and allowed_scope
+            and not bool(item.get("stale_quote_blocks_auto_close"))
+        )
+    auto_close_required = any(bool(item.get("auto_close_eligible")) for item in defensive_actions)
 
     if not settings["loss_containment_enabled"]:
         status = "disabled"
@@ -599,7 +608,7 @@ def build_loss_containment_report(
     elif not allowed_scope:
         status = "not_applicable"
         label = "Paper scope only"
-    elif defensive_actions and auto_close_allowed:
+    elif auto_close_required:
         status = "action_required"
         label = "Defensive exit required"
     elif blockers:
@@ -632,7 +641,7 @@ def build_loss_containment_report(
         {
             "field": "position_management",
             "before": "monitored stop/target actions",
-            "effective": "defensive paper exits" if auto_close_allowed and defensive_actions else "monitor only",
+            "effective": "defensive paper exits" if auto_close_required else "monitor only",
             "reason": "Paper defensive exits reuse existing safe close mechanics.",
         },
     ]
@@ -924,7 +933,7 @@ def run_loss_containment_review(
         state.get("__actual_funds"),
         _coerce_float(
             state.get("__effective_funds"),
-            _coerce_float((state.get("settings") or {}).get("account_size"), 10000.0),
+            _coerce_float((state.get("settings") or {}).get("account_size"), 100000.0),
         ),
     )
     _ = linked_account

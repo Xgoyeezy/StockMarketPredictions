@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { activateOrganization, getAuthConfig, getAuthSession, logout } from '../api/client'
+import { activateOrganization, getAuthConfig, getAuthSession, login, logout, probeBackendHealthz } from '../api/client'
 import { AuthContext } from './authContextObject'
 import { appConfig } from '../config/appConfig'
 const DEFAULT_THEME = {
@@ -9,7 +9,22 @@ const DEFAULT_THEME = {
   surfaceColor: '#111111',
   textColor: '#F5F5F5',
 }
-const DEMO_PERMISSIONS = [
+const CUSTOMER_DEMO_PERMISSIONS = [
+  'audit.export',
+  'automation.manage',
+  'execution_analytics.read',
+  'live.approve',
+  'live.manage',
+  'live.read',
+  'market.read',
+  'readiness.evaluate',
+  'risk.manage',
+  'strategy.manage',
+  'tenant.read',
+  'trade.execute',
+  'workspace.write',
+]
+const ADMIN_DEMO_PERMISSIONS = [
   'market.read',
   'platform.admin',
   'tenant.change_status',
@@ -27,12 +42,13 @@ const DEMO_PERMISSIONS = [
   'trade.execute',
   'workspace.write',
 ]
+const DEMO_PERMISSIONS = appConfig.showAdminSurfaces ? ADMIN_DEMO_PERMISSIONS : CUSTOMER_DEMO_PERMISSIONS
 
 function buildDemoAuthConfig(currentSession = null, currentConfig = null) {
   const environment = currentConfig?.environment || currentSession?.environment || 'development'
   const cookieName = currentConfig?.local_session?.cookie_name || 'stocksignals_session'
   const maxAgeSeconds = currentConfig?.local_session?.max_age_seconds || 60 * 60 * 24 * 14
-  const defaultPlan = currentConfig?.local_session?.default_plan || 'starter'
+  const defaultPlan = currentConfig?.local_session?.default_plan || 'personal'
 
   return {
     enabled: false,
@@ -74,6 +90,7 @@ function buildDemoSession(currentSession = null, authConfig = null) {
     : 'Organization trading workspace'
   const defaultDeskSlug = personalMode ? 'own-account-desk' : 'systematic-equities'
   const defaultPlan = personalMode ? 'personal' : 'pro'
+  const customerPreview = appConfig.customerReadyMode && !appConfig.showAdminSurfaces
   const fallbackOrganization =
     currentSession?.active_tenant ||
     currentSession?.memberships?.find((membership) => membership?.tenant)?.tenant ||
@@ -89,8 +106,8 @@ function buildDemoSession(currentSession = null, authConfig = null) {
       auth_subject: currentSession?.user?.auth_subject || 'demo-trader',
       email: currentSession?.user?.email || (personalMode ? 'trader@personal-desk.local' : 'demo@stocksignals.local'),
       name: currentSession?.user?.name || (personalMode ? 'Personal Trader' : 'Demo Trader'),
-      role: currentSession?.user?.role || 'owner',
-      platform_role: currentSession?.user?.platform_role || 'admin',
+      role: currentSession?.user?.role || (customerPreview ? 'operator' : 'owner'),
+      platform_role: currentSession?.user?.platform_role || (customerPreview ? 'trader' : 'admin'),
       permissions: currentSession?.user?.permissions || DEMO_PERMISSIONS,
       permission_map: currentSession?.user?.permission_map || permissionMap,
     },
@@ -101,7 +118,7 @@ function buildDemoSession(currentSession = null, authConfig = null) {
         name: fallbackOrganization?.name || defaultDeskName,
         status: fallbackOrganization?.status || 'active',
         plan_key: fallbackOrganization?.plan_key || defaultPlan,
-        role: currentSession?.active_tenant?.role || 'owner',
+        role: currentSession?.active_tenant?.role || (customerPreview ? 'operator' : 'owner'),
         permissions: currentSession?.active_tenant?.permissions || DEMO_PERMISSIONS,
         permission_map: currentSession?.active_tenant?.permission_map || permissionMap,
         brand_settings:
@@ -113,6 +130,73 @@ function buildDemoSession(currentSession = null, authConfig = null) {
       },
     api_token: currentSession?.api_token || null,
     memberships: currentSession?.memberships || [],
+  }
+}
+
+function buildOfflineSession(currentSession = null) {
+  const permissionMap = {}
+  const personalMode = appConfig.personalMode
+  const defaultDeskName = personalMode ? appConfig.appName : 'Systematic Equities Desk'
+  const defaultDeskTagline = personalMode ? appConfig.appTagline : 'Organization trading workspace'
+  const defaultDeskSlug = personalMode ? 'own-account-desk' : 'systematic-equities'
+  const defaultPlan = personalMode ? 'personal' : 'pro'
+
+  return {
+    authenticated: false,
+    mode: 'offline',
+    provider: currentSession?.provider || 'backend-unavailable',
+    environment: currentSession?.environment || 'development',
+    user: {
+      id: currentSession?.user?.id || null,
+      auth_subject: currentSession?.user?.auth_subject || null,
+      email: currentSession?.user?.email || null,
+      name: currentSession?.user?.name || null,
+      role: currentSession?.user?.role || null,
+      platform_role: currentSession?.user?.platform_role || null,
+      permissions: [],
+      permission_map: permissionMap,
+    },
+    active_tenant: currentSession?.active_tenant || {
+      id: null,
+      slug: defaultDeskSlug,
+      name: defaultDeskName,
+      status: 'active',
+      plan_key: defaultPlan,
+      role: 'viewer',
+      permissions: [],
+      permission_map: permissionMap,
+      brand_settings: {
+        app_name: defaultDeskName,
+        app_tagline: defaultDeskTagline,
+      },
+    },
+    api_token: null,
+    memberships: [],
+  }
+}
+
+function applyCustomerReadySession(session = null) {
+  if (!session || !appConfig.customerReadyMode || appConfig.showAdminSurfaces) return session
+  const permissionMap = Object.fromEntries(CUSTOMER_DEMO_PERMISSIONS.map((permission) => [permission, true]))
+  return {
+    ...session,
+    mode: session.mode === 'demo' ? 'customer_preview' : session.mode,
+    provider: session.provider === 'local-demo' ? 'customer-access' : session.provider,
+    user: {
+      ...(session.user || {}),
+      role: (session.user || {}).role === 'owner' ? 'operator' : (session.user || {}).role,
+      platform_role: ['admin', 'platform_admin'].includes(String((session.user || {}).platform_role || '').toLowerCase()) ? 'trader' : (session.user || {}).platform_role,
+      permissions: CUSTOMER_DEMO_PERMISSIONS,
+      permission_map: permissionMap,
+    },
+    active_tenant: session.active_tenant
+      ? {
+          ...session.active_tenant,
+          role: session.active_tenant.role === 'owner' ? 'operator' : session.active_tenant.role,
+          permissions: CUSTOMER_DEMO_PERMISSIONS,
+          permission_map: permissionMap,
+        }
+      : session.active_tenant,
   }
 }
 
@@ -247,6 +331,7 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState('')
   const authConfigRef = useRef(authConfig)
   const sessionRef = useRef(session)
+  const offlineLoopRef = useRef(null)
 
   useEffect(() => {
     authConfigRef.current = authConfig
@@ -259,17 +344,39 @@ export function AuthProvider({ children }) {
   const refreshSession = useCallback(() => {
     return getAuthSession()
       .then((data) => {
-        const nextSession = data?.authenticated ? data : buildDemoSession(data, authConfigRef.current)
+        const nextSession = applyCustomerReadySession(data?.authenticated ? data : buildDemoSession(data, authConfigRef.current))
         setSession(nextSession)
         setError('')
         return nextSession
       })
       .catch((err) => {
-        const nextSession = buildDemoSession(sessionRef.current, authConfigRef.current)
-        setSession(nextSession)
-        setError('')
-        return nextSession
+        const allowDemoFallback = authConfigRef.current?.mode === 'demo' || sessionRef.current?.mode === 'demo'
+        const nextSession = allowDemoFallback
+          ? buildDemoSession(sessionRef.current, authConfigRef.current)
+          : buildOfflineSession(sessionRef.current)
+        const presentedSession = applyCustomerReadySession(nextSession)
+        setSession(presentedSession)
+        if (!allowDemoFallback) {
+          setError((current) => current || (err?.response?.data?.detail || err?.message || 'Backend is starting or unavailable.'))
+        } else {
+          setError('')
+        }
+        return presentedSession
       })
+  }, [])
+
+  const waitForBackend = useCallback(async ({ maxWaitMs = 10000 } = {}) => {
+    const startedAt = Date.now()
+    const delays = [200, 400, 800, 1600, 2000]
+    let attempt = 0
+    while (Date.now() - startedAt < maxWaitMs) {
+      const probe = await probeBackendHealthz({ timeoutMs: 8000 })
+      if (probe?.ok) return true
+      const delay = delays[Math.min(attempt, delays.length - 1)]
+      attempt += 1
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+    return false
   }, [])
 
   const refreshAuthSurface = useCallback(() => {
@@ -289,9 +396,18 @@ export function AuthProvider({ children }) {
         }
 
         if (!nextSession?.authenticated) {
-          nextSession = buildDemoSession(nextSession, nextConfig)
+          const allowDemoFallback =
+            useDemoFallbackConfig
+            || nextSession?.mode === 'demo'
+            || authConfigRef.current?.mode === 'demo'
+            || sessionRef.current?.mode === 'demo'
+          nextSession = applyCustomerReadySession(allowDemoFallback ? buildDemoSession(nextSession, nextConfig) : buildOfflineSession(nextSession))
           setSession(nextSession)
-          setError('')
+          if (!allowDemoFallback) {
+            setError((current) => current || 'Backend is starting or unavailable.')
+          } else {
+            setError('')
+          }
         }
 
         if (useDemoFallbackConfig) {
@@ -314,8 +430,18 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false))
   }, [refreshSession])
 
-  const signIn = useCallback(async () => {
-    const nextSession = buildDemoSession(sessionRef.current, authConfigRef.current)
+  const signIn = useCallback(async (payload = {}) => {
+    const config = authConfigRef.current
+    const supportsLogin = Boolean(config?.supports_login)
+    const mode = String(config?.mode || '').toLowerCase()
+    if (supportsLogin && mode !== 'demo') {
+      const sessionPayload = await login(payload)
+      const nextSession = applyCustomerReadySession(sessionPayload)
+      setSession(nextSession)
+      setError('')
+      return nextSession
+    }
+    const nextSession = applyCustomerReadySession(buildDemoSession(sessionRef.current, authConfigRef.current))
     setSession(nextSession)
     setError('')
     return nextSession
@@ -329,7 +455,7 @@ export function AuthProvider({ children }) {
       } catch {
         // auth is intentionally bypassed; ignore logout transport failures
       }
-      const nextSession = buildDemoSession(sessionRef.current, authConfigRef.current)
+      const nextSession = applyCustomerReadySession(buildDemoSession(sessionRef.current, authConfigRef.current))
       setSession(nextSession)
       setError('')
       return nextSession
@@ -339,7 +465,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const beginProviderLogin = useCallback(async () => {
-    const nextSession = buildDemoSession(sessionRef.current, authConfigRef.current)
+    const nextSession = applyCustomerReadySession(buildDemoSession(sessionRef.current, authConfigRef.current))
     setSession(nextSession)
     setError('')
     return nextSession
@@ -356,8 +482,38 @@ export function AuthProvider({ children }) {
   }, [refreshSession])
 
   useEffect(() => {
-    refreshAuthSurface().catch(() => {})
-  }, [refreshAuthSurface])
+    let cancelled = false
+
+    const run = async () => {
+      const reachable = await waitForBackend({ maxWaitMs: 30000 })
+      if (cancelled) return
+
+      if (!reachable) {
+        setSession((current) => current || applyCustomerReadySession(buildOfflineSession(sessionRef.current)))
+        setError((current) => current || 'Backend is starting or unavailable.')
+        setLoading(false)
+
+        if (offlineLoopRef.current) {
+          clearTimeout(offlineLoopRef.current)
+        }
+        offlineLoopRef.current = setTimeout(() => {
+          refreshAuthSurface().catch(() => {})
+        }, 2000)
+        return
+      }
+
+      refreshAuthSurface().catch(() => {})
+    }
+
+    run()
+    return () => {
+      cancelled = true
+      if (offlineLoopRef.current) {
+        clearTimeout(offlineLoopRef.current)
+        offlineLoopRef.current = null
+      }
+    }
+  }, [refreshAuthSurface, waitForBackend])
 
   useEffect(() => {
     applyOrganizationTheme(session?.active_tenant || null)

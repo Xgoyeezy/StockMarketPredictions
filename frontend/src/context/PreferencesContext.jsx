@@ -16,12 +16,18 @@ import {
   normalizeAccountProfile,
   normalizePrimaryBrokerageLinkedAccountId,
 } from '../utils/accountProfileModel'
+import {
+  DEFAULT_VISUAL_FOCUS_MODE,
+  normalizeFocusRailKey,
+  normalizePinnedFocusRails,
+  normalizeVisualFocusMode,
+} from '../utils/focusApertureModel'
 
 const PreferencesContext = createContext(null)
 
 const LEGACY_PREFERENCES_STORAGE_KEY = 'sos-preferences'
 const PREFERENCES_STORAGE_KEY = 'sos-preferences-v2'
-const LOCAL_DESK_PROFILE_VERSION = 16
+const LOCAL_DESK_PROFILE_VERSION = 17
 const supportedIntervals = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d'])
 const supportedOrderTypes = new Set(['market', 'limit', 'stop_market', 'stop_limit', 'trailing_stop'])
 const supportedExecutionIntents = new Set(['desk', 'broker_paper', 'broker_live'])
@@ -43,9 +49,12 @@ const defaultPreferences = {
   showWorkflowStatusStrip: true,
   showWorkflowGuides: true,
   showArrivalBanners: true,
+  visualFocusMode: DEFAULT_VISUAL_FOCUS_MODE,
+  pinnedFocusRails: ['risk', 'automation'],
+  expandedFocusRail: '',
   activeAccountProfile: ACCOUNT_PROFILE_FALLBACK,
   primaryBrokerageLinkedAccountId: PRIMARY_BROKERAGE_LINKED_ACCOUNT_FALLBACK,
-  defaultAccountSize: 1000,
+  defaultAccountSize: 100000,
   defaultRiskPercent: 0.5,
   defaultOrderType: 'limit',
   defaultExecutionIntent: 'desk',
@@ -165,6 +174,18 @@ function normalizePreferences(rawPreferences) {
       current.showArrivalBanners !== undefined
         ? Boolean(current.showArrivalBanners)
         : defaultPreferences.showArrivalBanners,
+    visualFocusMode: normalizeVisualFocusMode(
+      current.visualFocusMode,
+      defaultPreferences.visualFocusMode,
+    ),
+    pinnedFocusRails: normalizePinnedFocusRails(
+      current.pinnedFocusRails,
+      defaultPreferences.pinnedFocusRails,
+    ),
+    expandedFocusRail: normalizeFocusRailKey(
+      current.expandedFocusRail,
+      defaultPreferences.expandedFocusRail,
+    ),
     activeAccountProfile: normalizeAccountProfile(
       current.activeAccountProfile,
       defaultPreferences.activeAccountProfile,
@@ -174,7 +195,7 @@ function normalizePreferences(rawPreferences) {
       defaultPreferences.primaryBrokerageLinkedAccountId,
     ),
     defaultAccountSize: Math.min(
-      Math.max(Number(current.defaultAccountSize ?? defaultPreferences.defaultAccountSize) || defaultPreferences.defaultAccountSize, 10),
+      Math.max(Number(current.defaultAccountSize ?? defaultPreferences.defaultAccountSize) || defaultPreferences.defaultAccountSize, 100000),
       1000000,
     ),
     defaultRiskPercent: Math.min(
@@ -304,7 +325,14 @@ function preferencesNeedSync(current, normalized) {
   const currentKeys = Object.keys(current)
   const normalizedKeys = Object.keys(normalized)
   if (currentKeys.length !== normalizedKeys.length) return true
-  return normalizedKeys.some((key) => current[key] !== normalized[key])
+  return normalizedKeys.some((key) => {
+    const currentValue = current[key]
+    const normalizedValue = normalized[key]
+    if (Array.isArray(currentValue) || Array.isArray(normalizedValue)) {
+      return JSON.stringify(currentValue || []) !== JSON.stringify(normalizedValue || [])
+    }
+    return currentValue !== normalizedValue
+  })
 }
 
 export function PreferencesProvider({ children }) {

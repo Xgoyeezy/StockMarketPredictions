@@ -9,6 +9,11 @@ import {
   getBillingPlans,
   getBillingSummary,
   getOrganizationAnalytics,
+  getOrganizationTradeAutomation,
+  getOrganizationTradeAutomationAlpacaPaperReadiness,
+  getOrganizationTradeAutomationMarketSession,
+  getOrganizationTradeAutomationProductionTrust,
+  getOrganizationTradeAutomationSafetyState,
   getOrganizationDelivery,
   getOrganizationFeatureFlags,
   getOrganizationOnboarding,
@@ -39,6 +44,7 @@ import {
 import { useToast } from '../context/ToastContext'
 import { usePreferences } from '../context/PreferencesContext'
 import { useAuth } from '../context/useAuth'
+import { appConfig } from '../config/appConfig'
 import ActionBar from '../components/ActionBar'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
@@ -48,7 +54,10 @@ import { SelectField, TextAreaField, TextField, ToggleField } from '../component
 import { formatInlineMeta } from '../components/InlineMeta'
 import Kicker from '../components/Kicker'
 import LinkedBrokerageAccountsSection from '../components/LinkedBrokerageAccountsSection'
+import ExecutionProviderDiagnosticsSection from '../components/ExecutionProviderDiagnosticsSection'
 import PageIntro from '../components/PageIntro'
+import PricingComparisonTable from '../components/pricing/PricingComparisonTable'
+import PricingTierCard from '../components/pricing/PricingTierCard'
 import SectionCard from '../components/SectionCard'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
@@ -76,6 +85,7 @@ import {
   getStyleIntervalOptions,
 } from '../utils/intradayModel'
 import { getAccountProfileDefinition, normalizeAccountProfile } from '../utils/accountProfileModel'
+import { normalizePricingPlans } from '../utils/pricingModel'
 
 const DEFAULT_ORGANIZATION_FORM = {
   name: '',
@@ -481,6 +491,12 @@ export default function SettingsPage() {
   const [organizations, setOrganizations] = useState({ items: [], count: 0 })
   const [billingSummary, setBillingSummary] = useState(null)
   const [plans, setPlans] = useState({ items: [], count: 0 })
+  const [launchChecklistSnapshot, setLaunchChecklistSnapshot] = useState({
+    automation: null,
+    marketSession: null,
+    safety: null,
+    alpaca: null,
+  })
   const [billingBusyKey, setBillingBusyKey] = useState('')
   const [billingRecoveryBusyKey, setBillingRecoveryBusyKey] = useState('')
   const [billingCycle, setBillingCycle] = useState('monthly')
@@ -630,6 +646,31 @@ export default function SettingsPage() {
     )
   }
   async function loadSaasSurface() {
+    if (appConfig.customerReadyMode) {
+      const results = await Promise.allSettled([
+        getBillingSummary(),
+        getBillingPlans(),
+      ])
+      const [billingResult, plansResult] = results
+      if (billingResult.status === 'fulfilled') setBillingSummary(billingResult.value)
+      if (plansResult.status === 'fulfilled') setPlans(plansResult.value)
+      const failures = results.filter((result) => result.status === 'rejected')
+      if (failures.length) {
+        const leadFailure =
+          failures[0]?.reason?.response?.data?.detail ||
+          failures[0]?.reason?.message ||
+          'Some account settings failed to refresh.'
+        setSaasSurfaceIssue({
+          tone: failures.length === results.length ? 'negative' : 'info',
+          title: failures.length === results.length ? 'Account setup unavailable' : 'Account setup refresh incomplete',
+          description: leadFailure,
+        })
+        return
+      }
+      setSaasSurfaceIssue(null)
+      return
+    }
+
     const results = await Promise.allSettled([
       getOrganizations(),
       getBillingSummary(),
@@ -699,6 +740,24 @@ export default function SettingsPage() {
     setSaasSurfaceIssue(null)
   }
 
+  async function loadLaunchChecklistSurface() {
+    const results = await Promise.allSettled([
+      getOrganizationTradeAutomation(),
+      getOrganizationTradeAutomationMarketSession(),
+      getOrganizationTradeAutomationSafetyState({ force: true }),
+      getOrganizationTradeAutomationAlpacaPaperReadiness(),
+      getOrganizationTradeAutomationProductionTrust(),
+    ])
+    const [automationResult, marketSessionResult, safetyResult, alpacaResult, productionTrustResult] = results
+    setLaunchChecklistSnapshot({
+      automation: automationResult.status === 'fulfilled' ? automationResult.value : null,
+      marketSession: marketSessionResult.status === 'fulfilled' ? marketSessionResult.value : null,
+      safety: safetyResult.status === 'fulfilled' ? safetyResult.value : null,
+      alpaca: alpacaResult.status === 'fulfilled' ? alpacaResult.value : null,
+      productionTrust: productionTrustResult.status === 'fulfilled' ? productionTrustResult.value : null,
+    })
+  }
+
   useEffect(() => {
     loadSaasSurface().catch((error) => {
       setSaasSurfaceIssue({
@@ -706,6 +765,9 @@ export default function SettingsPage() {
         title: 'Control plane unavailable',
         description: error?.response?.data?.detail || error?.message || 'Failed to load SaaS settings.',
       })
+    })
+    loadLaunchChecklistSurface().catch(() => {
+      setLaunchChecklistSnapshot((current) => current)
     })
   }, [])
 
@@ -727,13 +789,31 @@ export default function SettingsPage() {
         description: error?.response?.data?.detail || error?.message || 'Failed to load SaaS settings.',
       })
     })
+    loadLaunchChecklistSurface().catch(() => {
+      setLaunchChecklistSnapshot((current) => current)
+    })
   }
 
   const activeOrganization = billingSummary?.tenant || session?.active_tenant || null
   const activePermissionMap = session?.active_tenant?.permission_map || {}
+  const launchAutomation = launchChecklistSnapshot.automation || {}
+  const launchMarketSession = launchChecklistSnapshot.marketSession || {}
+  const launchSafety = launchChecklistSnapshot.safety || {}
+  const launchAlpaca = launchChecklistSnapshot.alpaca || {}
+  const launchProductionTrust = launchChecklistSnapshot.productionTrust || launchMarketSession.production_trust || {}
+  const launchProductionOnboarding = launchProductionTrust.onboarding || launchMarketSession.onboarding_checklist || {}
+  const launchEvidenceQuality = launchProductionTrust.evidence_quality || launchMarketSession.evidence_quality || {}
+  const launchSettingsProof = launchMarketSession.expected_settings_proof || {}
+  const launchEntryWindow = launchMarketSession.entry_window_explainer || {}
+  const launchKillSwitchOff =
+    !Boolean(launchAutomation?.settings?.kill_switch) &&
+    !['killed'].includes(String(launchSafety.status || '').toLowerCase())
+  const launchDesks = launchMarketSession.desks || {}
+  const launchDeskCount = launchDesks.active_armed_count ?? launchDesks.count ?? null
   const entitlements = billingSummary?.entitlements?.items || []
   const usage = billingSummary?.usage || {}
   const checkout = billingSummary?.checkout || {}
+  const publicPricingPlans = normalizePricingPlans(plans)
   const billingSync = billingSummary?.sync || { status: 'demo', message: 'Billing state unavailable.' }
   const billingEvents = billingSummary?.events || { items: [], count: 0, status_counts: {} }
   const billingRecovery = billingSummary?.recovery || {
@@ -876,7 +956,7 @@ export default function SettingsPage() {
 
   async function handleBillingRecovery(action) {
     if (!canManageBilling) {
-      pushToast('Your current role cannot run billing recovery actions.', 'error')
+      pushToast('Your current role cannot run billing sync actions.', 'error')
       return
     }
     try {
@@ -886,9 +966,9 @@ export default function SettingsPage() {
         setBillingSummary(payload.summary)
       }
       await loadSaasSurface()
-      pushToast(payload.message || 'Billing recovery queued.', 'info')
+      pushToast(payload.message || 'Billing sync queued.', 'info')
     } catch (error) {
-      pushToast(error?.response?.data?.detail || error.message || 'Failed to queue billing recovery.', 'error')
+      pushToast(error?.response?.data?.detail || error.message || 'Failed to queue billing sync.', 'error')
     } finally {
       setBillingRecoveryBusyKey('')
     }
@@ -1511,13 +1591,327 @@ export default function SettingsPage() {
     }
   }
 
+  if (appConfig.customerReadyMode) {
+    return (
+      <>
+        <PageIntro
+          kicker="Account setup"
+          title="Settings"
+          description="Manage linked Alpaca accounts, billing plan visibility, trading defaults, and live safety defaults without exposing admin operations."
+          badge={activeOrganization?.slug || 'customer-workspace'}
+        />
+        {saasSurfaceIssue ? (
+          saasSurfaceIssue.tone === 'negative' ? (
+            <ErrorState
+              title={saasSurfaceIssue.title}
+              description={saasSurfaceIssue.description}
+              actionLabel="Refresh account setup"
+              onAction={handleRefreshSaasSurface}
+            />
+          ) : (
+            <FeedbackState
+              tone={saasSurfaceIssue.tone}
+              eyebrow="Account setup"
+              title={saasSurfaceIssue.title}
+              description={saasSurfaceIssue.description}
+              actions={[{ label: 'Refresh account setup', onAction: handleRefreshSaasSurface, variant: 'solid' }]}
+              role="status"
+            />
+          )
+        ) : null}
+
+        <section className="metrics-grid metrics-grid--compact">
+          <MetricCard
+            label="Workspace"
+            value={activeOrganization?.name || 'Trading workspace'}
+            helper={activeOrganization?.slug || 'customer'}
+          />
+          <MetricCard
+            label="Plan"
+            value={(billingSummary?.plan?.name || activeOrganization?.plan_key || 'Professional').toString()}
+            helper={billingSummary?.subscription?.status || 'active'}
+          />
+          <MetricCard
+            label="Account profile"
+            value={activeAccountProfileDefinition.badgeLabel}
+            helper={activeAccountProfileDefinition.settingsTitle}
+          />
+          <MetricCard
+            label="Trading style"
+            value={getTradingStyleLabel(preferences.tradingStyle)}
+            helper={preferences.tradingStyle === 'intraday' ? intradayPresetProfile.shortLabel : `${preferences.defaultInterval} default`}
+          />
+        </section>
+
+        <LinkedBrokerageAccountsSection
+          title="Linked Alpaca accounts"
+          subtitle="Connect Alpaca paper or live accounts for account setup. Trading remains controlled by risk gates, approval rules, and the selected execution profile."
+          showBrokerageBinding
+        />
+
+        <ExecutionProviderDiagnosticsSection />
+
+        <SectionCard
+          title="Launch checklist"
+          subtitle="Customer-safe checks for a purchased workspace before relying on unattended Alpaca paper automation."
+          actions={(
+            <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/live', '_blank', 'noopener,noreferrer')}>
+              Open live console
+            </Button>
+          )}
+        >
+          <div className="metrics-grid metrics-grid--compact">
+            {[
+              {
+                label: 'Alpaca paper linked',
+                value: launchAlpaca.status ? String(launchAlpaca.status) : 'Loading',
+                tone: launchAlpaca.status === 'ready' ? 'positive' : launchAlpaca.status === 'blocked' ? 'negative' : 'warning',
+                helper: launchAlpaca.account_heartbeat?.available
+                  ? 'Alpaca paper account heartbeat is visible.'
+                  : 'Linked accounts handle custody, statements, and execution.',
+              },
+              {
+                label: 'Automation armed',
+                value: launchAutomation?.settings?.enabled === false ? 'Off' : launchAutomation?.settings?.armed === false ? 'Not armed' : 'Review',
+                tone: launchAutomation?.settings?.enabled === false || launchAutomation?.settings?.armed === false ? 'warning' : 'neutral',
+                helper: launchEntryWindow.next_action || 'Verify armed state in the Market Watchdog before the market opens.',
+              },
+              {
+                label: 'Kill switch',
+                value: launchKillSwitchOff ? 'Off' : 'On',
+                tone: launchKillSwitchOff ? 'positive' : 'negative',
+                helper: launchKillSwitchOff ? 'Kill switch is clear in the latest safety snapshot.' : 'The system never clears it by itself; operator proof is required.',
+              },
+              {
+                label: 'Risk caps',
+                value: `${launchSettingsProof.passed_count ?? 0}/${launchSettingsProof.count ?? 0}`,
+                tone: launchSettingsProof.status === 'ready' ? 'positive' : 'warning',
+                helper: launchSettingsProof.next_action || 'Daily loss, notional, cooldown, duplicate-order, and paper-route gates stay authoritative.',
+              },
+              {
+                label: 'Desks',
+                value: launchDeskCount == null ? 'Loading' : `${launchDeskCount} active`,
+                tone: Number(launchDeskCount || 0) >= 5 ? 'positive' : 'warning',
+                helper: 'Fast scalper, stat arb, intraday momentum, swing, and macro report through Market Ops.',
+              },
+              {
+                label: 'Entry window',
+                value: launchEntryWindow.state ? launchEntryWindow.state.replaceAll('_', ' ') : 'Loading',
+                tone: launchEntryWindow.entry_allowed ? 'positive' : 'neutral',
+                helper: launchEntryWindow.plain_language || 'Market closed is a session state, not a broken system.',
+              },
+              {
+                label: 'Production trust',
+                value: launchProductionTrust.status ? String(launchProductionTrust.status).replaceAll('_', ' ') : 'Loading',
+                tone: launchProductionTrust.status === 'ready' ? 'positive' : launchProductionTrust.status === 'blocked' ? 'negative' : 'warning',
+                helper: launchProductionTrust.next_action || 'Alerts, support bundle, replay proof, provider reliability, and release validation are tracked in Market Watchdog.',
+              },
+              {
+                label: 'Trust onboarding',
+                value: `${launchProductionOnboarding.completed_count ?? 0}/${launchProductionOnboarding.total_count ?? 0}`,
+                tone: launchProductionOnboarding.status === 'ready' ? 'positive' : 'warning',
+                helper: 'This checklist cannot enable live trading; it only proves the paper environment is customer-ready.',
+              },
+              {
+                label: 'Evidence quality',
+                value: `${Number(launchEvidenceQuality.quality_score || 0).toFixed(0)}%`,
+                tone: launchEvidenceQuality.status === 'ready' ? 'positive' : 'warning',
+                helper: 'Evidence 100M tracks useful, stale, duplicate, blocker, missed-move, AI, and session-proof events.',
+              },
+            ].map((item) => (
+              <MetricCard key={`launch-checklist:${item.label}`} {...item} />
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Billing plan"
+          subtitle="Compare the purchased plan against the product ladder. Premium value comes from controls, evidence, auditability, and operating workflow."
+          actions={(
+            <>
+              <Button type="button" variant="ghost" size="sm" onClick={handleRefreshSaasSurface}>
+                Refresh plan
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/pricing', '_blank', 'noopener,noreferrer')}>
+                Public pricing
+              </Button>
+            </>
+          )}
+        >
+          <div className="pricing-settings-intro">
+            <div>
+              <Kicker as="div">Paper-validated live automation control</Kicker>
+              <h3>{billingSummary?.plan?.name || 'Professional'} plan active</h3>
+              <p>
+                The plan comparison stays visible for operators while billing operations, delivery routing,
+                and support internals are handled outside the standard customer workspace.
+              </p>
+            </div>
+            <StatusBadge tone="positive">{billingSummary?.subscription?.status || 'Active'}</StatusBadge>
+          </div>
+          <div className="analysis-form analysis-form--wide">
+            <SelectField value={billingCycle} onChange={(event) => setBillingCycle(event.target.value)}>
+              <option value="monthly">Monthly billing</option>
+              <option value="annual">Annual billing</option>
+            </SelectField>
+          </div>
+          <div className="pricing-tier-grid pricing-tier-grid--settings">
+            {publicPricingPlans.map((plan) => (
+              <PricingTierCard
+                key={plan.key}
+                plan={plan}
+                billingCycle={billingCycle}
+                isActive={plan.key === billingSummary?.plan?.key}
+                busy={billingBusyKey === plan.key}
+                disabled={!canManageBilling}
+                onAction={handlePlanChange}
+              />
+            ))}
+          </div>
+          <PricingComparisonTable plans={publicPricingPlans} />
+        </SectionCard>
+
+        <SectionCard title="Trading defaults" subtitle="Browser preferences for the customer workstation. These do not bypass risk gates or paper-route safety.">
+          <div className="ui-field-grid ui-field-grid--settings">
+            <TextField
+              label="Default ticker"
+              value={preferences.defaultTicker}
+              onChange={(e) => setPreference('defaultTicker', e.target.value.toUpperCase())}
+              placeholder="Default ticker"
+            />
+            <SelectField
+              label="Default interval"
+              hint={`${getTradingStyleLabel(preferences.tradingStyle)} mode keeps ${orderedIntervalOptions.slice(0, 3).join(', ')} closest to the front of the workflow.`}
+              value={preferences.defaultInterval}
+              onChange={(e) => setPreference('defaultInterval', e.target.value)}
+            >
+              {orderedIntervalOptions.map((interval) => (
+                <option key={interval} value={interval}>{interval}</option>
+              ))}
+            </SelectField>
+            <TextField
+              label="Default horizon"
+              hint={defaultIntervalModel.recommendedDetail}
+              type="number"
+              min="1"
+              max="50"
+              value={preferences.defaultHorizon}
+              onChange={(e) => setPreference('defaultHorizon', Number(e.target.value))}
+            />
+            <TextField
+              label="Polling cadence"
+              type="number"
+              min="5000"
+              step="1000"
+              value={preferences.pollingMs}
+              onChange={(e) => setPreference('pollingMs', Number(e.target.value))}
+            />
+          </div>
+          <ActionBar className="settings-action-bar">
+            <Button type="button" variant="solid" onClick={saveNotice}>Save</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={async () => {
+                await clearRecentTickers()
+                pushToast('Recent ticker history cleared.', 'info')
+              }}
+            >
+              Clear recents
+            </Button>
+            <Button
+              type="button"
+              variant="subtle"
+              onClick={() => {
+                resetPreferences()
+                pushToast('Preferences reset to defaults.', 'info')
+              }}
+            >
+              Reset
+            </Button>
+          </ActionBar>
+        </SectionCard>
+
+        <SectionCard title="Live safety defaults" subtitle="Customer-visible workflow controls. Admin rollout, token, webhook, and support operations stay out of this view.">
+          <ActionBar className="settings-action-bar">
+            <Button type="button" variant={preferences.tradingStyle === 'swing' ? 'solid' : 'ghost'} onClick={() => applyTradingStylePreset('swing')}>
+              Apply swing defaults
+            </Button>
+            <Button type="button" variant={preferences.tradingStyle === 'intraday' ? 'solid' : 'ghost'} onClick={() => applyTradingStylePreset('intraday')}>
+              Apply intraday defaults
+            </Button>
+            {preferences.tradingStyle === 'intraday' ? (
+              <Button type="button" variant="ghost" onClick={() => applyTradingStylePreset('intraday', intradayPreset)}>
+                Apply {intradayPresetProfile.shortLabel} preset
+              </Button>
+            ) : null}
+          </ActionBar>
+          <div className="ui-field-grid ui-field-grid--settings">
+            <SelectField
+              label="Trading style"
+              value={preferences.tradingStyle}
+              onChange={(e) => setPreference('tradingStyle', e.target.value)}
+            >
+              {TRADING_STYLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </SelectField>
+            {preferences.tradingStyle === 'intraday' ? (
+              <SelectField
+                label="Intraday preset"
+                value={intradayPreset}
+                onChange={(e) => setPreference('intradayPreset', normalizeIntradayPreset(e.target.value, DEFAULT_INTRADAY_PRESET))}
+              >
+                {INTRADAY_PRESET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </SelectField>
+            ) : null}
+            <SelectField
+              label="Startup surface"
+              value={preferences.startupSurface}
+              onChange={(e) => setPreference('startupSurface', e.target.value)}
+            >
+              {STARTUP_SURFACE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="Review surface"
+              value={preferences.defaultReviewSurface}
+              onChange={(e) => setPreference('defaultReviewSurface', e.target.value)}
+            >
+              {REVIEW_SURFACE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </SelectField>
+            <ToggleField
+              label="Resume last workflow surface"
+              checked={preferences.rememberLastWorkflowSurface}
+              onChange={(e) => setPreference('rememberLastWorkflowSurface', e.target.checked)}
+            />
+            <ToggleField
+              label="Show workflow status strip"
+              checked={preferences.showWorkflowStatusStrip}
+              onChange={(e) => setPreference('showWorkflowStatusStrip', e.target.checked)}
+            />
+          </div>
+        </SectionCard>
+
+        <TradeAutomationSection />
+
+        {renderIntradayMarketModelSection()}
+      </>
+    )
+  }
+
   return (
     <>
       <PageIntro
         kicker="Brokerage account"
         title={activeAccountProfileDefinition.settingsTitle}
         description={activeAccountProfileDefinition.settingsDescription}
-        badge={activeOrganization?.slug || 'brokerage profile'}
+        badge={activeOrganization?.slug || 'Alpaca profile'}
       />
       {saasSurfaceIssue ? (
         saasSurfaceIssue.tone === 'negative' ? (
@@ -1711,8 +2105,8 @@ export default function SettingsPage() {
               ))}
               {!(billingRecovery.recent_jobs || []).length ? (
                 <EmptyState
-                  title="No recovery jobs"
-                  description="No billing recovery jobs have run for this organization yet."
+                  title="No billing sync jobs"
+                  description="No billing sync jobs have run for this organization yet."
                 />
               ) : null}
             </div>
@@ -1964,7 +2358,7 @@ export default function SettingsPage() {
               <FeedbackState
                 compact
                 tone="negative"
-                eyebrow="Launch ops"
+                eyebrow="Desk setup"
                 title="Launch blockers active"
                 description={(analyticsSnapshot.launch_ops.blockers || []).join(' ')}
                 actions={[{ label: 'Refresh control plane', onAction: handleRefreshSaasSurface, variant: 'ghost' }]}
@@ -3057,7 +3451,7 @@ export default function SettingsPage() {
                 ? canManageDelivery
                   ? `Use this as the organization delivery control plane. Next actions: ${customDomainDelivery.next_action || 'configure the domain'} | ${brandedEmailDelivery.next_action || 'configure the sender stack'} | ${authRoutingDelivery.next_action || 'configure organization auth routing'}. Save delivery after staging provider records so login routing updates with the rest of the organization delivery stack.`
                   : 'Your current role can view delivery readiness but cannot change organization domains or sender settings.'
-                : 'Custom domains and branded sender identity are not enabled for this organization yet. Turn them on in feature rollout controls or move the organization to Enterprise / White Label.'}
+                : 'Custom domains and branded sender identity are not enabled for this organization yet. Turn them on in admin rollout controls or move the organization to Enterprise.'}
             </div>
           </form>
         </div>
@@ -3065,47 +3459,37 @@ export default function SettingsPage() {
 
       <SectionCard
         title="Plan catalog"
-        subtitle="Plans now move through the checkout flow first, with demo fallback until Stripe keys and prices are live."
+        subtitle="Public plan positioning for the premium live trading control plane. The price is tied to controls, evidence, workflow, and support."
       >
-        <div className="plan-grid">
-          {plans.items.map((plan) => {
-            const isActive = plan.key === billingSummary?.plan?.key
-            const displayPrice = billingCycle === 'annual' ? plan.annual_price : plan.monthly_price
-            return (
-              <article key={plan.key} className={`plan-card ${isActive ? 'plan-card--active' : ''}`}>
-                <div className="plan-card__top">
-                  <div>
-                  <Kicker as="div">{plan.cta_label}</Kicker>
-                    <h3>{plan.name}</h3>
-                    <p>{plan.tagline}</p>
-                  </div>
-                  <div className="plan-price-block">
-                    <strong>{formatMoney(displayPrice)}</strong>
-                    <span>{displayPrice ? billingCycle === 'annual' ? '/yr' : '/mo' : 'contact'}</span>
-                  </div>
-                </div>
-                <div className="plan-card__meta">
-                  <span>{plan.seats_label}</span>
-                  <span>{plan.entitlement_count} entitlements</span>
-                </div>
-                <ul className="plan-feature-list">
-                  {plan.featured_capabilities.map((feature) => (
-                    <li key={feature}>{feature}</li>
-                  ))}
-                </ul>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canManageBilling || isActive || billingBusyKey === plan.key}
-                  onClick={() => handlePlanChange(plan.key)}
-                >
-                  {isActive ? 'Current plan' : billingBusyKey === plan.key ? 'Starting checkout...' : plan.cta_label}
-                </Button>
-              </article>
-            )
-          })}
+        <div className="pricing-settings-intro">
+          <div>
+            <Kicker as="div">Paper-validated live automation control</Kicker>
+            <h3>Price supervised operation, not commodity connectivity.</h3>
+            <p>
+              Starter and Pro keep live trading explicit and approval-led. Professional is the recommended $499 tier
+              because it adds readiness gates, risk policy enforcement, audit replay, execution quality, and kill-switch control.
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/pricing', '_blank', 'noopener,noreferrer')}>
+            Open public pricing
+          </Button>
         </div>
+
+        <div className="pricing-tier-grid pricing-tier-grid--settings">
+          {publicPricingPlans.map((plan) => (
+            <PricingTierCard
+              key={plan.key}
+              plan={plan}
+              billingCycle={billingCycle}
+              isActive={plan.key === billingSummary?.plan?.key}
+              busy={billingBusyKey === plan.key}
+              disabled={!canManageBilling}
+              onAction={handlePlanChange}
+            />
+          ))}
+        </div>
+
+        <PricingComparisonTable plans={publicPricingPlans} />
       </SectionCard>
 
       <SectionCard
@@ -3196,7 +3580,7 @@ export default function SettingsPage() {
               <FeedbackState
                 compact
                 tone="negative"
-                eyebrow="Launch ops"
+                eyebrow="Desk setup"
                 title="Launch blockers active"
                 description={(supportSnapshot.launch_ops.blockers || []).join(' ')}
                 actions={[{ label: 'Refresh control plane', onAction: handleRefreshSaasSurface, variant: 'ghost' }]}
@@ -3681,7 +4065,7 @@ export default function SettingsPage() {
 
       <SectionCard
         title="API access"
-        subtitle="Issue organization-scoped service tokens for partner automations, backend integrations, and scripted platform operations."
+        subtitle="Issue organization-scoped service tokens for partner automations, backend integrations, and scripted desk setup."
         actions={(
           <StatusBadge tone={apiTokensSummary.enabled ? 'positive' : 'negative'}>
             {apiTokensSummary.enabled ? `${apiTokensSummary.active_count ?? 0} active token${(apiTokensSummary.active_count ?? 0) === 1 ? '' : 's'}` : 'Disabled'}
@@ -4107,7 +4491,7 @@ export default function SettingsPage() {
       </SectionCard>
 
       <SectionCard
-        title="Feature rollout controls"
+        title="Admin rollout controls"
         subtitle="Per-organization overrides layered on top of plan defaults so you can turn pilots up or down without changing the catalog."
         actions={(
           <StatusBadge tone="neutral">

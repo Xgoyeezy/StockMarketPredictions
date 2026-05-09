@@ -113,7 +113,7 @@ def get_session_profile(
             size_cap_ratio=1.0 if normalized_mode == "regular" else 0.0,
             min_edge_to_cost_ratio=2.5,
             max_spread_bps=25.0,
-            min_cooldown_minutes=20,
+            min_cooldown_minutes=5,
             max_daily_entries=None,
             detail="Listed options remain regular-session only; extended-hours equity routing does not apply.",
         )
@@ -132,7 +132,7 @@ def get_session_profile(
             size_cap_ratio=0.0,
             min_edge_to_cost_ratio=2.5,
             max_spread_bps=25.0,
-            min_cooldown_minutes=20,
+            min_cooldown_minutes=5,
             max_daily_entries=0,
             detail="Regular-hours-only mode is waiting for the next core session.",
         )
@@ -151,7 +151,7 @@ def get_session_profile(
             size_cap_ratio=0.35,
             min_edge_to_cost_ratio=4.0,
             max_spread_bps=12.5,
-            min_cooldown_minutes=45,
+            min_cooldown_minutes=5,
             max_daily_entries=2,
             detail="Pre-market equities can route with limit DAY_EXT orders only, smaller size, and stricter edge/liquidity checks.",
         )
@@ -169,7 +169,7 @@ def get_session_profile(
             size_cap_ratio=0.25,
             min_edge_to_cost_ratio=5.0,
             max_spread_bps=10.0,
-            min_cooldown_minutes=60,
+            min_cooldown_minutes=5,
             max_daily_entries=1,
             detail="After-hours equities can route with limit DAY_EXT orders only and the most conservative size and liquidity settings.",
         )
@@ -187,7 +187,7 @@ def get_session_profile(
             size_cap_ratio=1.0,
             min_edge_to_cost_ratio=2.5,
             max_spread_bps=25.0,
-            min_cooldown_minutes=20,
+            min_cooldown_minutes=5,
             max_daily_entries=None,
             detail="Regular-session equity routing uses the normal risk envelope.",
         )
@@ -204,7 +204,7 @@ def get_session_profile(
         size_cap_ratio=0.0,
         min_edge_to_cost_ratio=5.0,
         max_spread_bps=10.0,
-        min_cooldown_minutes=60,
+        min_cooldown_minutes=5,
         max_daily_entries=0,
         detail="Closed-session mode keeps monitoring and planning alive while blocking new entries.",
     )

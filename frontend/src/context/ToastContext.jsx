@@ -10,6 +10,18 @@ function makeToast(message, tone = 'info') {
   }
 }
 
+function normalizeToastMessage(input) {
+  if (input == null) return ''
+  if (typeof input === 'string') return input
+  if (typeof input === 'object') {
+    const title = typeof input.display_title === 'string' ? input.display_title : ''
+    const detail = typeof input.display_detail === 'string' ? input.display_detail : typeof input.message === 'string' ? input.message : ''
+    const combined = title && detail ? `${title}: ${detail}` : title || detail
+    return combined || 'Request failed.'
+  }
+  return String(input)
+}
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
 
@@ -18,7 +30,7 @@ export function ToastProvider({ children }) {
   }, [])
 
   const pushToast = useCallback((message, tone = 'info') => {
-    const toast = makeToast(message, tone)
+    const toast = makeToast(normalizeToastMessage(message), tone)
     setToasts((current) => [...current, toast])
     window.setTimeout(() => {
       setToasts((current) => current.filter((item) => item.id !== toast.id))

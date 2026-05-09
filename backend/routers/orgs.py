@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.core.auth import CurrentUser, get_current_user
@@ -15,6 +17,7 @@ from backend.schemas import (
     AiPaperExecutionRequest,
     AiTradePlanRequest,
     BacktestRunRequest,
+    InternalBrokerPaperOrderRequest,
     OrganizationActivateRequest,
     OrganizationApiTokenCreateRequest,
     OrganizationApiTokenRevokeRequest,
@@ -31,6 +34,8 @@ from backend.schemas import (
     OrganizationStatusUpdateRequest,
     OrganizationTemplateApplyRequest,
     OrganizationTradeAutomationActionRequest,
+    OrganizationTradeAutomationDeskScanRequest,
+    OrganizationTradeAutomationDeskUpdateRequest,
     OrganizationTradeAutomationUpdateRequest,
     OrganizationWebhookActionRequest,
     OrganizationWebhookCreateRequest,
@@ -60,6 +65,16 @@ from backend.services.options_automation_service import (
     run_options_automation_scan,
     sync_options_automation,
 )
+from backend.services.internal_broker_router_service import (
+    cancel_internal_broker_router_order,
+    get_internal_broker_router_snapshot,
+    list_internal_broker_router_audit,
+    list_internal_broker_router_fills,
+    list_internal_broker_router_orders,
+    submit_internal_broker_router_order,
+    sync_internal_broker_router,
+)
+from backend.services.execution.diagnostics_service import get_execution_provider_diagnostics
 from backend.services.portfolio_target_execution.service import (
     execute_portfolio_targets,
     get_portfolio_target_execution,
@@ -78,9 +93,56 @@ from backend.services.strategy_engine.service import (
     run_strategy_desk,
     update_strategy_desk,
 )
+from backend.services.trading_safety_service import (
+    build_hft_watchdog_latest,
+    build_trade_automation_safety_state,
+    build_trading_safety_daily_summary,
+    compact_trading_safety_ledger,
+    read_trading_safety_ledger,
+)
+from backend.services.evidence_edge_analytics import (
+    get_evidence_edge_blockers,
+    get_evidence_edge_engines,
+    get_evidence_edge_recommendations,
+    get_evidence_edge_setups,
+    get_evidence_edge_summary,
+)
+from backend.services.evidence_reward_engine import (
+    get_evidence_reward_ai,
+    get_evidence_reward_blockers,
+    get_evidence_reward_candidates,
+    get_evidence_reward_engines,
+    get_evidence_reward_regimes,
+    get_evidence_reward_setups,
+    get_evidence_reward_summary,
+)
+from backend.services.alpaca_paper_readiness_service import build_alpaca_paper_readiness_snapshot
 from backend.services.trade_automation_service import (
+    export_tenant_trade_automation_support_bundle,
+    export_tenant_trade_automation_desk,
+    get_tenant_trade_automation_alert_delivery_status,
+    get_tenant_trade_automation_ai_evidence_review_status,
+    get_tenant_trade_automation_candidate_diagnostics,
+    get_tenant_trade_automation_deep_analysis_status,
+    get_tenant_trade_automation_desk_candidate_diagnostics,
+    get_tenant_trade_automation_evidence_quality,
+    get_tenant_trade_automation_market_day_report,
+    get_tenant_trade_automation_market_session,
+    get_tenant_trade_automation_no_trade_report,
+    get_tenant_trade_automation_position_promotion,
+    get_tenant_trade_automation_production_trust,
+    get_tenant_trade_automation_replay_report,
     get_tenant_trade_automation_snapshot,
+    get_tenant_trade_automation_watchdog,
+    import_tenant_trade_automation_desk,
+    is_trade_automation_executable_desk_key,
+    list_tenant_trade_automation_desks,
+    reset_tenant_trade_automation_desk_runtime,
     run_tenant_trade_automation_action,
+    scan_tenant_trade_automation_desk,
+    test_tenant_trade_automation_alert_delivery,
+    trade_automation_write_guard,
+    update_tenant_trade_automation_desk,
     update_tenant_trade_automation_settings,
 )
 from backend.services.tenant_service import (
@@ -191,6 +253,7 @@ def update_organization_branding(
 def get_organization_trade_automation(
     scope: str | None = Query(default=None),
     scope_key: str | None = Query(default=None),
+    profile_key: str | None = Query(default=None),
     linked_account_id: str | None = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -200,10 +263,526 @@ def get_organization_trade_automation(
             db,
             current_user=current_user,
             scope=scope,
-            scope_key=scope_key,
+            scope_key=scope_key or profile_key,
             linked_account_id=linked_account_id,
         )
     )
+
+
+@router.get("/trade-automation/candidate-diagnostics", response_model=ApiEnvelope)
+def get_organization_trade_automation_candidate_diagnostics(
+    scope: str | None = Query(default=None),
+    scope_key: str | None = Query(default=None),
+    profile_key: str | None = Query(default=None),
+    linked_account_id: str | None = Query(default=None),
+    refresh: bool = Query(default=False),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(
+        get_tenant_trade_automation_candidate_diagnostics(
+            db,
+            current_user=current_user,
+            scope=scope,
+            scope_key=scope_key or profile_key,
+            linked_account_id=linked_account_id,
+            refresh=refresh,
+        )
+    )
+
+
+@router.get("/trade-automation/safety-state", response_model=ApiEnvelope)
+def get_organization_trade_automation_safety_state(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(build_trade_automation_safety_state(db, current_user=current_user))
+
+
+@router.get("/trade-automation/daily-ledger", response_model=ApiEnvelope)
+def get_organization_trade_automation_daily_ledger(
+    day: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    cursor: int | None = Query(default=None, ge=0),
+    event_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    tenant_slug: str | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    try:
+        payload = read_trading_safety_ledger(
+            day=day,
+            limit=limit,
+            cursor=cursor,
+            event_type=event_type,
+            status=status,
+            tenant_slug=tenant_slug,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD") from exc
+    return envelope(payload)
+
+
+@router.get("/trade-automation/daily-safety-summary", response_model=ApiEnvelope)
+def get_organization_trade_automation_daily_safety_summary(
+    day: str | None = Query(default=None),
+    tenant_slug: str | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    try:
+        payload = build_trading_safety_daily_summary(day=day, tenant_slug=tenant_slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD") from exc
+    return envelope(payload)
+
+
+@router.post("/trade-automation/daily-ledger/compact", response_model=ApiEnvelope)
+def post_organization_trade_automation_daily_ledger_compact(
+    day: str | None = Query(default=None),
+    tenant_slug: str | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    try:
+        payload = compact_trading_safety_ledger(day=day, tenant_slug=tenant_slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD") from exc
+    return envelope(payload)
+
+
+@router.get("/trade-automation/hft-watchdog/latest", response_model=ApiEnvelope)
+def get_organization_trade_automation_hft_watchdog_latest(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(build_hft_watchdog_latest())
+
+
+@router.get("/trade-automation/alpaca-paper-readiness", response_model=ApiEnvelope)
+def get_organization_trade_automation_alpaca_paper_readiness(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(build_alpaca_paper_readiness_snapshot())
+
+
+@router.get("/trade-automation/deep-analysis/status", response_model=ApiEnvelope)
+def get_organization_trade_automation_deep_analysis_status(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_deep_analysis_status(db, current_user=current_user))
+
+
+@router.get("/trade-automation/ai-evidence-review/status", response_model=ApiEnvelope)
+def get_organization_trade_automation_ai_evidence_review_status(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_ai_evidence_review_status(db, current_user=current_user))
+
+
+@router.get("/trade-automation/market-session", response_model=ApiEnvelope)
+def get_organization_trade_automation_market_session(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_market_session(db, current_user=current_user))
+
+
+@router.get("/trade-automation/watchdog", response_model=ApiEnvelope)
+def get_organization_trade_automation_watchdog(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_watchdog(db, current_user=current_user))
+
+
+@router.get("/trade-automation/production-trust", response_model=ApiEnvelope)
+def get_organization_trade_automation_production_trust(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_production_trust(db, current_user=current_user))
+
+
+@router.get("/trade-automation/alert-delivery/status", response_model=ApiEnvelope)
+def get_organization_trade_automation_alert_delivery_status(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_alert_delivery_status(db, current_user=current_user))
+
+
+@router.post("/trade-automation/alert-delivery/test", response_model=ApiEnvelope)
+def post_organization_trade_automation_alert_delivery_test(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(test_tenant_trade_automation_alert_delivery(db, current_user=current_user))
+
+
+@router.post("/trade-automation/support-bundle/export", response_model=ApiEnvelope)
+def post_organization_trade_automation_support_bundle_export(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(export_tenant_trade_automation_support_bundle(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-quality", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_quality(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_evidence_quality(db, current_user=current_user))
+
+
+@router.get("/trade-automation/replay-report", response_model=ApiEnvelope)
+def get_organization_trade_automation_replay_report(
+    day: str | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_replay_report(db, current_user=current_user, day=day))
+
+
+@router.get("/trade-automation/evidence-edge/summary", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_edge_summary(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_edge_summary(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-edge/blockers", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_edge_blockers(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_edge_blockers(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-edge/setups", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_edge_setups(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_edge_setups(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-edge/engines", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_edge_engines(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_edge_engines(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-edge/recommendations", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_edge_recommendations(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_edge_recommendations(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/summary", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_summary(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_summary(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/candidates", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_candidates(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_candidates(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/blockers", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_blockers(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_blockers(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/engines", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_engines(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_engines(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/setups", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_setups(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_setups(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/ai", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_ai(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_ai(db, current_user=current_user))
+
+
+@router.get("/trade-automation/evidence-reward/regimes", response_model=ApiEnvelope)
+def get_organization_trade_automation_evidence_reward_regimes(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_evidence_reward_regimes(db, current_user=current_user))
+
+
+@router.get("/trade-automation/no-trade-report", response_model=ApiEnvelope)
+def get_organization_trade_automation_no_trade_report(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_no_trade_report(db, current_user=current_user))
+
+
+@router.get("/trade-automation/market-day-report", response_model=ApiEnvelope)
+def get_organization_trade_automation_market_day_report(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_market_day_report(db, current_user=current_user))
+
+
+@router.get("/trade-automation/position-promotion", response_model=ApiEnvelope)
+def get_organization_trade_automation_position_promotion(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(get_tenant_trade_automation_position_promotion(db, current_user=current_user))
+
+
+@router.get("/trade-automation/desks", response_model=ApiEnvelope)
+def get_organization_trade_automation_desks(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(list_tenant_trade_automation_desks(db, current_user=current_user))
+
+
+@router.patch("/trade-automation/desks/{desk_key}", response_model=ApiEnvelope)
+def patch_organization_trade_automation_desk(
+    desk_key: str,
+    payload: OrganizationTradeAutomationDeskUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    with trade_automation_write_guard():
+        return envelope(
+            update_tenant_trade_automation_desk(
+                db,
+                current_user=current_user,
+                desk_key=desk_key,
+                updates=payload,
+            )
+        )
+
+
+@router.get("/trade-automation/desks/{desk_key}/export", response_model=ApiEnvelope)
+def get_organization_trade_automation_desk_export(
+    desk_key: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(export_tenant_trade_automation_desk(db, current_user=current_user, desk_key=desk_key))
+
+
+@router.post("/trade-automation/desks/{desk_key}/import", response_model=ApiEnvelope)
+def post_organization_trade_automation_desk_import(
+    desk_key: str,
+    payload: dict[str, Any] | None = Body(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    with trade_automation_write_guard():
+        return envelope(import_tenant_trade_automation_desk(db, current_user=current_user, desk_key=desk_key, payload=payload or {}))
+
+
+@router.post("/trade-automation/desks/{desk_key}/reset", response_model=ApiEnvelope)
+def post_organization_trade_automation_desk_reset(
+    desk_key: str,
+    payload: dict[str, Any] | None = Body(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    with trade_automation_write_guard():
+        return envelope(
+            reset_tenant_trade_automation_desk_runtime(
+                db,
+                current_user=current_user,
+                desk_key=desk_key,
+                note=str((payload or {}).get("note") or "").strip() or None,
+            )
+        )
+
+
+@router.post("/trade-automation/desks/{desk_key}/scan", response_model=ApiEnvelope)
+def post_organization_trade_automation_desk_scan(
+    desk_key: str,
+    payload: OrganizationTradeAutomationDeskScanRequest = OrganizationTradeAutomationDeskScanRequest(),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    if not is_trade_automation_executable_desk_key(desk_key):
+        return envelope(
+            scan_tenant_trade_automation_desk(
+                db,
+                current_user=current_user,
+                desk_key=desk_key,
+                force=bool(payload.force),
+            )
+        )
+    with trade_automation_write_guard():
+        return envelope(
+            scan_tenant_trade_automation_desk(
+                db,
+                current_user=current_user,
+                desk_key=desk_key,
+                force=bool(payload.force),
+            )
+        )
+
+
+@router.get("/trade-automation/desks/{desk_key}/candidate-diagnostics", response_model=ApiEnvelope)
+def get_organization_trade_automation_desk_candidate_diagnostics(
+    desk_key: str,
+    refresh: bool = Query(default=False),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiEnvelope:
+    return envelope(
+        get_tenant_trade_automation_desk_candidate_diagnostics(
+            db,
+            current_user=current_user,
+            desk_key=desk_key,
+            refresh=refresh,
+        )
+    )
+
+
+@router.get("/internal-broker-router", response_model=ApiEnvelope)
+def get_organization_internal_broker_router(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(get_internal_broker_router_snapshot())
+
+
+@router.post("/internal-broker-router/sync", response_model=ApiEnvelope)
+def sync_organization_internal_broker_router(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(sync_internal_broker_router())
+
+
+@router.get("/internal-broker-router/orders", response_model=ApiEnvelope)
+def get_organization_internal_broker_router_orders(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_orders())
+
+
+@router.post("/internal-broker-router/orders", response_model=ApiEnvelope)
+def submit_organization_internal_broker_router_order(
+    payload: InternalBrokerPaperOrderRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(submit_internal_broker_router_order(payload))
+
+
+@router.post("/internal-broker-router/orders/{broker_order_id}/cancel", response_model=ApiEnvelope)
+def cancel_organization_internal_broker_router_order(
+    broker_order_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(cancel_internal_broker_router_order(broker_order_id))
+
+
+@router.get("/internal-broker-router/fills", response_model=ApiEnvelope)
+def get_organization_internal_broker_router_fills(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_fills(limit=limit))
+
+
+@router.get("/internal-broker-router/audit", response_model=ApiEnvelope)
+def get_organization_internal_broker_router_audit(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_audit(limit=limit))
+
+
+@router.get("/paper-execution-router", response_model=ApiEnvelope)
+def get_organization_paper_execution_router(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(get_internal_broker_router_snapshot())
+
+
+@router.post("/paper-execution-router/sync", response_model=ApiEnvelope)
+def sync_organization_paper_execution_router(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(sync_internal_broker_router())
+
+
+@router.get("/paper-execution-router/orders", response_model=ApiEnvelope)
+def get_organization_paper_execution_router_orders(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_orders())
+
+
+@router.post("/paper-execution-router/orders", response_model=ApiEnvelope)
+def submit_organization_paper_execution_router_order(
+    payload: InternalBrokerPaperOrderRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(submit_internal_broker_router_order(payload))
+
+
+@router.post("/paper-execution-router/orders/{broker_order_id}/cancel", response_model=ApiEnvelope)
+def cancel_organization_paper_execution_router_order(
+    broker_order_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(cancel_internal_broker_router_order(broker_order_id))
+
+
+@router.get("/paper-execution-router/fills", response_model=ApiEnvelope)
+def get_organization_paper_execution_router_fills(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_fills(limit=limit))
+
+
+@router.get("/paper-execution-router/audit", response_model=ApiEnvelope)
+def get_organization_paper_execution_router_audit(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(list_internal_broker_router_audit(limit=limit))
+
+
+@router.get("/execution/diagnostics", response_model=ApiEnvelope)
+def get_organization_execution_diagnostics(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApiEnvelope:
+    return envelope(get_execution_provider_diagnostics())
 
 
 @router.get("/strategy-desks", response_model=ApiEnvelope)
@@ -471,7 +1050,8 @@ def update_organization_trade_automation(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ApiEnvelope:
-    return envelope(update_tenant_trade_automation_settings(db, current_user=current_user, updates=payload))
+    with trade_automation_write_guard():
+        return envelope(update_tenant_trade_automation_settings(db, current_user=current_user, updates=payload))
 
 
 @router.post("/trade-automation/actions", response_model=ApiEnvelope)
@@ -480,7 +1060,8 @@ def run_organization_trade_automation_action(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ApiEnvelope:
-    return envelope(run_tenant_trade_automation_action(db, current_user=current_user, request=payload))
+    with trade_automation_write_guard():
+        return envelope(run_tenant_trade_automation_action(db, current_user=current_user, request=payload))
 
 
 @router.get("/delivery", response_model=ApiEnvelope)

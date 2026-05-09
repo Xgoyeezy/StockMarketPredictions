@@ -94,16 +94,22 @@ class EventDrivenDesk(StrategyDesk):
                 expected_holding_period=signal.expected_holding_period,
                 risk_estimate=signal.risk_estimate,
                 required_capital=round(capital_base * weight, 2),
-                metadata={"research_only": True},
+                metadata={"paper_route": True},
             )
             for symbol in active
         )
 
     def validate_signal(self, signal: DeskSignal, risk_state: dict[str, Any]) -> DeskValidationResult:
+        active_events = list(signal.components.get("active_events") or [])
+        allowed = bool(active_events and signal.confidence_score >= 0.50)
         return DeskValidationResult(
             desk_key=self.desk_key,
-            allowed=False,
-            reason="research_only",
-            detail="Event-driven desk remains research/backtest-only until event and exit handling pass paper validation.",
-            metrics={"active_events": len(signal.components.get("active_events") or []), "confidence_score": signal.confidence_score},
+            allowed=allowed,
+            reason="accepted" if allowed else "no_active_event_edge",
+            detail=(
+                "Event-driven candidates cleared paper-routing catalyst gates."
+                if allowed
+                else "Event-driven desk found no active catalyst edge strong enough for paper routing."
+            ),
+            metrics={"active_events": len(active_events), "confidence_score": signal.confidence_score},
         )

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { clearRecentTickers, getTradeSummary } from '../api/client'
+import {
+  clearRecentTickers,
+  createBillingCheckoutSession,
+  getBillingPlans,
+  getBillingSummary,
+  getTradeSummary,
+} from '../api/client'
 import ActionBar from '../components/ActionBar'
 import Button from '../components/Button'
 import FeedbackState from '../components/FeedbackState'
@@ -9,6 +15,8 @@ import PageIntro from '../components/PageIntro'
 import SectionCard from '../components/SectionCard'
 import TickerHub from '../components/TickerHub'
 import LinkedBrokerageAccountsSection from '../components/LinkedBrokerageAccountsSection'
+import PricingComparisonTable from '../components/pricing/PricingComparisonTable'
+import PricingTierCard from '../components/pricing/PricingTierCard'
 import TradeAutomationSection from '../components/TradeAutomationSection'
 import { useToast } from '../context/ToastContext'
 import { usePreferences } from '../context/PreferencesContext'
@@ -45,11 +53,12 @@ import {
   normalizeAccountProfile,
   resolveAccountProfileExecutionIntent,
 } from '../utils/accountProfileModel'
+import { normalizePricingPlans } from '../utils/pricingModel'
 
 function formatExecutionIntentLabel(value) {
   const normalized = String(value || 'desk').trim().toLowerCase()
-  if (normalized === 'broker_live') return 'Broker live'
-  if (normalized === 'broker_paper') return 'Broker paper'
+  if (normalized === 'broker_live') return 'Alpaca live'
+  if (normalized === 'broker_paper') return 'Alpaca paper'
   return 'Desk only'
 }
 
@@ -79,6 +88,12 @@ export default function OwnAccountSettingsPage() {
     defaultExecutionIntent: preferences.defaultExecutionIntent,
   })
   const [localTradeSummary, setLocalTradeSummary] = useState(null)
+  const [billingSummary, setBillingSummary] = useState(null)
+  const [billingPlans, setBillingPlans] = useState(null)
+  const [billingBusyKey, setBillingBusyKey] = useState('')
+  const [billingCycle, setBillingCycle] = useState('monthly')
+  const permissionMap = session?.active_tenant?.permission_map || {}
+  const canManageBilling = Boolean(permissionMap['tenant.manage_billing'] || permissionMap['tenant.owner'] || permissionMap['tenant.admin'])
 
   const operatorSurfaceSummary = buildSurfaceSummary({
     tradingStyle: preferences.tradingStyle,
@@ -146,12 +161,43 @@ export default function OwnAccountSettingsPage() {
         : activePersonalExecutionIntent === 'broker_paper'
           ? 'warning'
           : 'info'
+  const publicPricingPlans = normalizePricingPlans(billingPlans)
 
   useEffect(() => {
     getTradeSummary()
       .then((payload) => setLocalTradeSummary(payload))
       .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    Promise.all([getBillingSummary(), getBillingPlans()])
+      .then(([summary, plans]) => {
+        setBillingSummary(summary)
+        setBillingPlans(plans)
+      })
+      .catch(() => undefined)
+  }, [])
+
+  async function handlePlanChange(planKey) {
+    if (!canManageBilling) {
+      pushToast('Plan changes are managed by the account owner. This comparison remains available for review.', 'info')
+      return
+    }
+    try {
+      setBillingBusyKey(planKey)
+      const checkout = await createBillingCheckoutSession({ plan_key: planKey, billing_cycle: billingCycle })
+      if (checkout.summary) setBillingSummary(checkout.summary)
+      if (checkout.url) {
+        window.location.href = checkout.url
+        return
+      }
+      pushToast(checkout.message || `Checkout started for ${planKey}.`, checkout.mode === 'sales' ? 'info' : 'success')
+    } catch (error) {
+      pushToast(error?.response?.data?.detail || error.message || 'Failed to start checkout.', 'error')
+    } finally {
+      setBillingBusyKey('')
+    }
+  }
 
   function applyTradingStylePreset(tradingStyle, presetOverride = intradayPreset) {
     const preset = buildTradingStylePreset(tradingStyle, presetOverride)
@@ -241,10 +287,10 @@ export default function OwnAccountSettingsPage() {
   return (
     <>
       <PageIntro
-        kicker="Personal trading system"
+        kicker="Trader operator settings"
         title={activeAccountProfileDefinition.settingsTitle}
         description={activeAccountProfileDefinition.settingsDescription}
-        helper={`Operational pages currently use ${selectedExecutionRouteLabel.toLowerCase()} as the active personal route while this profile is selected.`}
+        helper={`Customer trading pages currently use ${selectedExecutionRouteLabel.toLowerCase()} as the active personal route while this profile is selected.`}
         badge={activeAccountProfileDefinition.badgeLabel}
         actions={(
           <Button type="button" variant="subtle" onClick={() => pushToast('Preferences save automatically in this browser.', 'success')}>
@@ -300,7 +346,7 @@ export default function OwnAccountSettingsPage() {
             helper={promotionGateSummary?.action || promotionGateSummary?.detail}
           />
           <MetricCard
-            label="Broker-live readiness"
+            label="Live readiness"
             value={rolloutReadiness.label}
             tone={rolloutReadiness.tone}
             helper={rolloutReadiness.nextCheckDetail}
@@ -308,16 +354,57 @@ export default function OwnAccountSettingsPage() {
         </section>
       </SectionCard>
 
+      <SectionCard
+        title="Plan and billing"
+        subtitle="Compare live-control tiers without exposing billing sync, recovery jobs, or provider event trails."
+        actions={(
+          <ActionBar compact>
+            <Button type="button" variant={billingCycle === 'monthly' ? 'solid' : 'ghost'} size="sm" onClick={() => setBillingCycle('monthly')}>
+              Monthly
+            </Button>
+            <Button type="button" variant={billingCycle === 'annual' ? 'solid' : 'ghost'} size="sm" onClick={() => setBillingCycle('annual')}>
+              Annual
+            </Button>
+          </ActionBar>
+        )}
+      >
+        <div className="pricing-settings-intro">
+          <div>
+            <div className="ui-kicker">Paper-validated live automation control</div>
+            <h3>{billingSummary?.plan?.name ? `${billingSummary.plan.name} is active` : 'Choose the control tier that matches your live workflow.'}</h3>
+            <p>
+              Starter keeps live trading manual. Pro adds assisted approvals. Professional is the recommended
+              supervised automation tier with readiness gates, risk checks, audit replay, execution evidence,
+              versioning, and kill-switch controls.
+            </p>
+          </div>
+        </div>
+        <div className="pricing-tier-grid pricing-tier-grid--settings">
+          {publicPricingPlans.map((plan) => (
+            <PricingTierCard
+              key={plan.key}
+              plan={plan}
+              billingCycle={billingCycle}
+              isActive={plan.key === billingSummary?.plan?.key}
+              busy={billingBusyKey === plan.key}
+              disabled={!canManageBilling}
+              onAction={handlePlanChange}
+            />
+          ))}
+        </div>
+        <PricingComparisonTable plans={publicPricingPlans} />
+      </SectionCard>
+
       <TradeAutomationSection
         mode="personal"
         title="Autonomous desk"
-        subtitle="Run the workstation as an unattended paper-first desk. Use prep, paper autopilot, or a tightly scoped live pilot without leaving the personal settings flow."
+        subtitle="Run the workstation as a paper-first desk. Use prep, paper automation, or tightly controlled live authorization without leaving the personal settings flow."
         eyebrow="Autonomous mode"
       />
 
       <LinkedBrokerageAccountsSection
-        title="Linked Alpaca accounts"
-        subtitle="Keep env-backed personal routes separate from OAuth-linked brokerage accounts. Use this area for account binding and review gates, not a client advisory workflow."
+        title="Alpaca accounts"
+        subtitle="Keep env-backed personal routes separate from connected Alpaca accounts. Use this area for account binding and live-control review gates."
       />
 
       <SectionCard title="Desk basics" subtitle="Secondary workstation defaults for symbols, polling cadence, and board density.">
@@ -541,7 +628,7 @@ export default function OwnAccountSettingsPage() {
         subtitle="Local stop-loss and take-profit rules for the desk. These preset the ticket and your routine, but they do not auto-send exits."
       >
         <div className="ui-field-grid ui-field-grid--settings">
-          <TextField label="Default account size" hint="Starting account base for ticket sizing." type="number" min="10" step="10" value={preferences.defaultAccountSize} onChange={(e) => setPreference('defaultAccountSize', Number(e.target.value))} />
+          <TextField label="Default account size" hint="Starting account base for ticket sizing." type="number" min="100000" step="1000" value={preferences.defaultAccountSize} onChange={(e) => setPreference('defaultAccountSize', Number(e.target.value))} />
           <TextField label="Default risk %" hint={preferences.tradingStyle === 'intraday' ? 'Intraday defaults are cleanest near 0.25% risk and should usually stay at or below 0.50%.' : 'Starting risk budget per trade.'} type="number" min="0.1" max="10" step="0.1" value={preferences.defaultRiskPercent} onChange={(e) => setPreference('defaultRiskPercent', Number(e.target.value))} />
           <SelectField label="Default order type" hint={preferences.tradingStyle === 'intraday' ? 'Intraday mode works best with priced orders so same-session fills stay controlled.' : 'Safer starting route for the ticket.'} value={preferences.defaultOrderType} onChange={(e) => setPreference('defaultOrderType', e.target.value)}>
             <option value="limit">Limit</option>
@@ -550,10 +637,10 @@ export default function OwnAccountSettingsPage() {
             <option value="stop_market">Stop market</option>
             <option value="trailing_stop">Trailing stop</option>
           </SelectField>
-            <SelectField label="Default execution route" hint={`${preferences.tradingStyle === 'intraday' ? 'Start same-session routing on desk or broker paper first, then move to broker live only after broker-live readiness is clear.' : 'Send tickets to the local desk, broker paper, or broker live once broker-live readiness is clear.'} The global profile selector can still force personal paper or personal live on the trading pages.`} value={preferences.defaultExecutionIntent} onChange={(e) => setPreference('defaultExecutionIntent', e.target.value)}>
+            <SelectField label="Default execution route" hint={`${preferences.tradingStyle === 'intraday' ? 'Start same-session routing on desk or Alpaca paper first, then move to Alpaca live only after live readiness is clear.' : 'Send tickets to the local desk, Alpaca paper, or Alpaca live once live readiness is clear.'} The global profile selector can still force personal paper or personal live on the trading pages.`} value={preferences.defaultExecutionIntent} onChange={(e) => setPreference('defaultExecutionIntent', e.target.value)}>
             <option value="desk">Desk only</option>
-            <option value="broker_paper">Broker paper</option>
-            <option value="broker_live">Broker live</option>
+            <option value="broker_paper">Alpaca paper</option>
+            <option value="broker_live">Alpaca live</option>
           </SelectField>
           <ToggleField label="Regular hours only" hint={`${marketModelSummary.sessionModel.regularHoursOnly ? 'Keep same-day routing in the core session.' : 'Allow after-hours routing when the setup justifies it.'}`} checked={preferences.regularHoursOnly} onChange={(e) => setPreference('regularHoursOnly', e.target.checked)} />
           <TextField label="Breakeven after" hint="Move the stop to breakeven after this many R." type="number" min="0.5" max="10" step="0.5" value={preferences.breakevenAfterR} onChange={(e) => setPreference('breakevenAfterR', Number(e.target.value))} />
@@ -587,7 +674,7 @@ export default function OwnAccountSettingsPage() {
                 defaultInterval: '5m',
                 defaultHorizon: 5,
                 watchlistTickers: 'SPY,QQQ,NVDA,AAPL,MSFT',
-                defaultAccountSize: 1000,
+                defaultAccountSize: 100000,
                 defaultRiskPercent: 0.5,
                 defaultOrderType: 'limit',
                 defaultExecutionIntent: 'desk',
@@ -627,7 +714,7 @@ export default function OwnAccountSettingsPage() {
                 defaultInterval: '5m',
                 defaultHorizon: 5,
                 watchlistTickers: 'SPY,QQQ,NVDA,AAPL,MSFT',
-                defaultAccountSize: 1000,
+                defaultAccountSize: 100000,
                 defaultRiskPercent: 0.5,
                 defaultOrderType: 'limit',
                 defaultExecutionIntent: 'desk',
@@ -667,7 +754,7 @@ export default function OwnAccountSettingsPage() {
                 defaultInterval: '5m',
                 defaultHorizon: 5,
                 watchlistTickers: 'SPY,QQQ,AAPL,MSFT',
-                defaultAccountSize: 10,
+                defaultAccountSize: 100000,
                 defaultRiskPercent: 0.5,
                 defaultOrderType: 'limit',
                 defaultExecutionIntent: 'desk',
@@ -730,15 +817,15 @@ export default function OwnAccountSettingsPage() {
             <strong>{promotionGatePolicySummary}</strong>
           </div>
           <div className="saas-stat">
-            <span>Broker-live readiness</span>
+            <span>Live readiness</span>
             <strong>{rolloutReadiness.label}</strong>
           </div>
         </div>
       </SectionCard>
 
       <SectionCard
-        title="Broker-live readiness"
-        subtitle="Shared broker-live readiness for routing on this personal desk."
+        title="Live readiness"
+        subtitle="Shared live readiness for connected-account routing on this personal desk."
         actions={(
           <Button
             type="button"
@@ -747,10 +834,10 @@ export default function OwnAccountSettingsPage() {
               getTradeSummary()
                 .then((payload) => {
                   setLocalTradeSummary(payload)
-                  pushToast('Broker-live readiness refreshed.', 'success')
+                  pushToast('Live readiness refreshed.', 'success')
                 })
                 .catch((error) => {
-                  pushToast(error?.message || 'Failed to refresh broker-live readiness.', 'error')
+                  pushToast(error?.message || 'Failed to refresh live readiness.', 'error')
                 })
             }}
           >
@@ -765,11 +852,11 @@ export default function OwnAccountSettingsPage() {
             tone={selectedExecutionRouteTone}
             helper={
               activePersonalExecutionIntent === 'broker_live' && !rolloutReadiness.allowsLiveRollout
-                ? 'Broker-live routing is selected but still locked by broker-live readiness.'
-                : activePersonalExecutionIntent === 'broker_live'
-                  ? 'Broker-live routing is selected and currently cleared for a scoped pilot.'
-                  : activePersonalExecutionIntent === 'broker_paper'
-                    ? 'Paper routing remains the active broker path.'
+          ? 'Alpaca live routing is selected but still locked by live readiness.'
+          : activePersonalExecutionIntent === 'broker_live'
+            ? 'Alpaca live routing is selected and currently cleared for a scoped pilot.'
+            : activePersonalExecutionIntent === 'broker_paper'
+              ? 'Alpaca paper routing remains the active paper execution path.'
                     : 'The desk is still routing locally unless you promote it.'
             }
           />

@@ -334,6 +334,7 @@ class AutomationLivePilotPromotionReportServiceTests(unittest.TestCase):
                 patch.object(trade_automation_service.sdm, "monitor_open_trades", return_value=pd.DataFrame()),
                 patch.object(trade_automation_service, "_build_personal_account_summary", return_value={"status": "unavailable"}),
                 patch.object(trade_automation_service, "get_latest_trade_automation_equity_snapshot", return_value=None),
+                patch.object(automation_live_pilot_promotion_report_service, "_utc_now", return_value=FIXED_NOW),
                 patch.object(automation_live_pilot_soak_service, "run_live_pilot_soak") as live_soak_mock,
                 patch.object(automation_live_pilot_expansion_service, "run_live_pilot_expansion") as expansion_mock,
                 patch.object(automation_live_pilot_window_service, "run_live_pilot_window_entry") as entry_mock,

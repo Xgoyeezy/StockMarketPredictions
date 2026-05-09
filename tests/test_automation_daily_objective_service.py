@@ -43,6 +43,11 @@ class AutomationDailyObjectiveServiceTests(unittest.TestCase):
                 "daily_profit_target_dollars": 1000.0,
                 "daily_loss_budget_pct": 0.5,
                 "daily_objective_apply_to_live": False,
+                "objective_timeframe": "weekly",
+                "weekly_profit_target_min_pct": 1.0,
+                "weekly_profit_target_max_pct": 2.0,
+                "weekly_profit_target_min_dollars": 1000.0,
+                "weekly_profit_target_max_dollars": 2000.0,
                 "account_size": 100000.0,
                 "max_spread_bps": 25.0,
                 "min_average_dollar_volume": 1_000_000.0,
@@ -77,7 +82,7 @@ class AutomationDailyObjectiveServiceTests(unittest.TestCase):
         request = OrganizationTradeAutomationActionRequest(action="run_daily_objective_review")
         self.assertEqual(request.action, "run_daily_objective_review")
 
-    def test_target_reached_does_not_block_entries(self) -> None:
+    def test_weekly_minimum_target_does_not_block_before_stretch(self) -> None:
         _, tenant = self._db()
         state = self._state()
 
@@ -92,10 +97,33 @@ class AutomationDailyObjectiveServiceTests(unittest.TestCase):
             now=FIXED_NOW,
         )
 
-        self.assertEqual(report["status"], "target_reached")
-        self.assertTrue(report["target_reached"])
+        self.assertEqual(report["status"], "target_band_reached")
+        self.assertTrue(report["minimum_target_reached"])
+        self.assertFalse(report["target_reached"])
         self.assertFalse(report["entries_blocked"])
-        self.assertGreaterEqual(report["target_progress_pct"], 100.0)
+        self.assertGreaterEqual(report["target_min_progress_pct"], 100.0)
+
+    def test_target_dollars_scale_with_equity_above_floor(self) -> None:
+        _, tenant = self._db()
+        state = self._state()
+
+        report = automation_daily_objective_service.build_daily_objective_report(
+            tenant=tenant,
+            state=state,
+            profile_key="personal_paper",
+            owned_open=pd.DataFrame(),
+            owned_pending=pd.DataFrame(),
+            owned_closed=self._closed_trades(tenant, [1199.0]),
+            effective_funds=120000.0,
+            now=FIXED_NOW,
+        )
+
+        self.assertEqual(report["target_min_dollars"], 1200.0)
+        self.assertEqual(report["target_min_pct_amount"], 1200.0)
+        self.assertEqual(report["target_dollars"], 2400.0)
+        self.assertEqual(report["target_pct_amount"], 2400.0)
+        self.assertFalse(report["target_reached"])
+        self.assertAlmostEqual(report["target_min_gap"], 1.0)
 
     def test_loss_budget_blocks_entries_writes_note_and_audit(self) -> None:
         db, tenant = self._db()
@@ -125,6 +153,34 @@ class AutomationDailyObjectiveServiceTests(unittest.TestCase):
         self.assertEqual(notes[0]["note_type"], "risk_review")
         self.assertIn("daily-objective", notes[0]["tags"])
         self.assertIn("return-target", notes[0]["tags"])
+        self.assertEqual(audit_count, 1)
+
+    def test_target_reached_blocks_entries_writes_note_and_audit(self) -> None:
+        db, tenant = self._db()
+        state = self._state()
+        notes_patch, notes_path = self._patch_notes()
+
+        with notes_patch:
+            report = automation_daily_objective_service.evaluate_daily_objective_entry_gate(
+                db,
+                tenant=tenant,
+                state=state,
+                profile_key="personal_paper",
+                owned_open=pd.DataFrame(),
+                owned_pending=pd.DataFrame(),
+                owned_closed=self._closed_trades(tenant, [2200.0]),
+                effective_funds=100000.0,
+                now=FIXED_NOW,
+            )
+            db.commit()
+            notes = json.loads(notes_path.read_text(encoding="utf-8"))
+            audit_count = db.query(AuditEvent).filter(AuditEvent.event_type == "trade_automation.daily_objective_reviewed").count()
+
+        self.assertEqual(report["status"], "target_reached")
+        self.assertTrue(report["entries_blocked"])
+        self.assertEqual(report["entry_block_reason"], "target_reached_protect_streak")
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Stretch target reached: yes", notes[0]["body"])
         self.assertEqual(audit_count, 1)
 
     def test_manual_review_persists_snapshot_and_leaves_settings_unchanged(self) -> None:

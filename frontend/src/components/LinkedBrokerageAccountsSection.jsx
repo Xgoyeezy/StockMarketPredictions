@@ -68,8 +68,8 @@ function buildDraft(account) {
 }
 
 export default function LinkedBrokerageAccountsSection({
-  title = 'Linked client accounts',
-  subtitle = 'Link Alpaca client accounts through OAuth. Client automation is paper-only, entries-only, and inherits the main desk strategy. Personal env-key routing stays separate.',
+  title = 'Alpaca client accounts',
+  subtitle = 'Link Alpaca paper or live accounts through OAuth. Client automation remains gated, approval-first, and separate from personal env-key routing.',
   showBrokerageBinding = false,
 }) {
   const { preferences, setPreference } = usePreferences()
@@ -263,11 +263,11 @@ export default function LinkedBrokerageAccountsSection({
     const nextValue = normalizePrimaryBrokerageLinkedAccountId(event.target.value)
     setPreference('primaryBrokerageLinkedAccountId', nextValue)
     if (!nextValue) {
-      pushToast('Primary broker account cleared. Brokerage profile trading will stay locked until you bind another account.', 'info')
+      pushToast('Primary Alpaca account cleared. Linked Accounts trading will stay locked until you bind another account.', 'info')
       return
     }
     const account = brokerageBindingCandidates.find((item) => item.id === nextValue)
-    pushToast(`Primary broker account set to ${account?.label || 'the selected linked account'}.`, 'success')
+    pushToast(`Primary Alpaca account set to ${account?.label || 'the selected linked account'}.`, 'success')
   }
 
   return (
@@ -310,19 +310,19 @@ export default function LinkedBrokerageAccountsSection({
 
       {showBrokerageBinding ? (
         <SectionCard
-          title="Primary broker account"
-          subtitle="Bind the Brokerage profile to one linked broker account so brokerage trades cannot fall back to the personal env-backed lane."
+          title="Primary Alpaca account"
+          subtitle="Bind the Linked Accounts profile to one Alpaca account so those trades cannot fall back to the personal env-backed lane."
         >
           <SelectField
-            label="Bound broker account"
-            hint="When the global profile is Brokerage, orders route only to this linked broker account. Switch the global profile to a Personal mode first if you want to use personal funds."
+            label="Bound Alpaca account"
+            hint="When the global profile is Linked Accounts, orders route only to this Alpaca account. Switch the global profile to a Personal mode first if you want to use personal funds."
             value={brokerageBindingValue}
             onChange={handlePrimaryBrokerageAccountChange}
           >
-            <option value="">Select a linked broker account</option>
+            <option value="">Select an Alpaca account</option>
             {!brokerageBindingCandidates.length ? (
               <option value="no-account" disabled>
-                No connected linked broker accounts available
+                No connected Alpaca accounts available
               </option>
             ) : null}
             {brokerageBindingCandidates.map((account) => (
@@ -334,14 +334,14 @@ export default function LinkedBrokerageAccountsSection({
           {boundBrokerageAccount ? (
             <FeedbackState
               tone="positive"
-              title={`Brokerage profile bound to ${boundBrokerageAccount.label}`}
+              title={`Linked Accounts profile bound to ${boundBrokerageAccount.label}`}
               description={`Environment ${String(boundBrokerageAccount.account_environment || 'paper').toUpperCase()}. Connection ${boundBrokerageAccount.connection_status}. Last refresh ${formatDateTime(boundBrokerageAccount.last_refreshed_at)}.`}
             />
           ) : brokerageBindingMissing ? (
             <FeedbackState
               tone="warning"
-              title="Brokerage trading is currently locked"
-              description="Bind a connected linked broker account here before using the Brokerage profile for trading. Personal funds will stay unavailable while Brokerage is active."
+              title="Linked Accounts trading is currently locked"
+              description="Bind a connected Alpaca account here before using the Linked Accounts profile for trading. Personal funds will stay unavailable while Linked Accounts is active."
             />
           ) : null}
         </SectionCard>

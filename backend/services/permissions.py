@@ -5,6 +5,18 @@ from typing import Any
 from backend.services.exceptions import ForbiddenError
 
 
+PRODUCT_CONTROL_PERMISSIONS = {
+    "strategy.manage",
+    "automation.manage",
+    "readiness.evaluate",
+    "risk.manage",
+    "audit.export",
+    "execution_analytics.read",
+    "live.read",
+    "live.manage",
+    "live.approve",
+}
+
 MEMBERSHIP_ROLE_PERMISSIONS: dict[str, set[str]] = {
     "viewer": {
         "tenant.read",
@@ -20,6 +32,8 @@ MEMBERSHIP_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "market.read",
         "workspace.write",
         "trade.execute",
+        "readiness.evaluate",
+        "execution_analytics.read",
     },
     "admin": {
         "tenant.read",
@@ -35,6 +49,7 @@ MEMBERSHIP_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "tenant.manage_support",
         "tenant.manage_billing",
         "tenant.manage_members",
+        *PRODUCT_CONTROL_PERMISSIONS,
     },
     "owner": {
         "tenant.read",
@@ -50,6 +65,7 @@ MEMBERSHIP_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "tenant.manage_support",
         "tenant.manage_billing",
         "tenant.manage_members",
+        *PRODUCT_CONTROL_PERMISSIONS,
     },
 }
 
@@ -70,6 +86,7 @@ PLATFORM_ROLE_PERMISSIONS: dict[str, set[str]] = {
         "tenant.manage_support",
         "tenant.manage_billing",
         "tenant.manage_members",
+        *PRODUCT_CONTROL_PERMISSIONS,
     },
 }
 
@@ -92,6 +109,42 @@ API_SCOPE_PERMISSIONS: dict[str, set[str]] = {
         "tenant.manage_api_tokens",
         "tenant.manage_webhooks",
         "tenant.manage_billing",
+        *PRODUCT_CONTROL_PERMISSIONS,
+    },
+    "strategy.manage": {
+        "tenant.read",
+        "strategy.manage",
+        "readiness.evaluate",
+        "execution_analytics.read",
+    },
+    "risk.manage": {
+        "tenant.read",
+        "risk.manage",
+    },
+    "audit.export": {
+        "tenant.read",
+        "audit.export",
+    },
+    "execution_analytics.read": {
+        "tenant.read",
+        "execution_analytics.read",
+    },
+    "live.read": {
+        "tenant.read",
+        "live.read",
+    },
+    "live.manage": {
+        "tenant.read",
+        "live.read",
+        "live.manage",
+        "readiness.evaluate",
+        "risk.manage",
+        "audit.export",
+    },
+    "live.approve": {
+        "tenant.read",
+        "live.read",
+        "live.approve",
     },
 }
 

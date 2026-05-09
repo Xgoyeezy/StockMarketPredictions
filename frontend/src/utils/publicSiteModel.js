@@ -44,7 +44,7 @@ const PERSONAL_PUBLIC_PAGE_DEFINITIONS = {
       {
         title: 'Live funds',
         items: [
-          'Keep live execution behind explicit broker-live readiness and frontend confirmation.',
+          'Keep live execution behind explicit live readiness and frontend confirmation.',
           'Use small notional caps, one-position limits, long-only rules, and regular-hours-only defaults for early real-money use.',
           'Do not enable options, margin, shorting, or unattended live routing before backend risk locks are enforced.',
         ],
@@ -129,15 +129,15 @@ const COMMERCIAL_PUBLIC_PAGE_DEFINITIONS = {
     key: 'connect',
     path: '/connect',
     navLabel: 'Connect',
-    title: 'Application Website',
-    eyebrow: 'Private pilot',
-    headline: 'Stock Options Signal',
-    subhead: 'Private pilot trading application built on Alpaca OAuth.',
+    title: 'Customer Access',
+    eyebrow: 'Trading control plane',
+    headline: 'Quant Evidence OS',
+    subhead: 'Broker-connected control plane for paper-validated live automation, risk gates, and execution proof.',
     body: [
-      'This application connects Alpaca accounts through OAuth for a controlled trading workflow.',
-      'It keeps personal trading and brokerage-linked trading in separate account contexts to reduce accidental cross-routing.',
-      'Current pilot behavior is paper-first, with approval and account-binding controls visible inside the app.',
-      'Linked accounts are routed through Alpaca OAuth tokens rather than personal API keys.',
+      'This application connects authorized Alpaca accounts for a controlled trading workflow.',
+      'The workspace keeps linked accounts, staged decisions, paper execution, risk gates, and audit evidence visible before any automation is promoted.',
+      'Customer access is paper-first by default, with approval, readiness, reconciliation, and account-binding controls visible inside the app.',
+      'Linked accounts are execution routes. The product sells control, evidence, and operating workflow rather than broker custody or clearing.',
     ],
   },
   tradingService: {
@@ -268,15 +268,15 @@ const COMMERCIAL_PUBLIC_PAGE_DEFINITIONS = {
     path: '/terms',
     navLabel: 'Terms',
     title: 'Terms of Use',
-    eyebrow: 'Pilot terms',
+    eyebrow: 'Customer terms',
     headline: 'Terms of Use',
-    subhead: 'Short-form terms for a private pilot trading workflow.',
+    subhead: 'Short-form terms for a customer trading-control workflow.',
     sections: [
       {
-        title: 'Pilot use only',
+        title: 'Customer workspace use',
         items: [
-          'This application is provided as a limited private pilot and may change without notice.',
-          'Access may be restricted, suspended, or revoked during the pilot at any time.',
+          'This application is provided as a trading control plane for authorized customer workspaces.',
+          'Workspace access may be restricted, suspended, or revoked if security, risk, or account-routing controls require it.',
         ],
       },
       {
@@ -293,9 +293,9 @@ const COMMERCIAL_PUBLIC_PAGE_DEFINITIONS = {
     path: '/privacy',
     navLabel: 'Privacy',
     title: 'Privacy Policy',
-    eyebrow: 'Pilot privacy',
+    eyebrow: 'Customer privacy',
     headline: 'Privacy Policy',
-    subhead: 'How the pilot handles account-link, routing, and operational data.',
+    subhead: 'How the customer workspace handles account-link, routing, and operational data.',
     sections: [
       {
         title: 'What we collect',
@@ -307,6 +307,13 @@ const COMMERCIAL_PUBLIC_PAGE_DEFINITIONS = {
       },
     ],
   },
+}
+
+const PRICING_NAV_ITEM = {
+  key: 'pricing',
+  path: '/pricing',
+  navLabel: 'Pricing',
+  title: 'Pricing',
 }
 
 function getPublicPageDefinitions() {
@@ -332,12 +339,12 @@ function normalizePathname(pathname) {
 }
 
 export function getPublicSiteBranding() {
-  const name = String(appConfig.publicAppName || '').trim() || (appConfig.personalMode ? 'Personal Trading Research Desk' : 'Stock Options Signal')
+  const name = String(appConfig.publicAppName || '').trim() || (appConfig.personalMode ? 'Personal Trading Research Desk' : 'Quant Evidence OS')
   const tagline =
     String(appConfig.publicAppTagline || '').trim() ||
     (appConfig.personalMode
       ? 'Private own-account trading workstation for self-directed research and execution control.'
-      : 'Private pilot trading application built on Alpaca OAuth.')
+      : 'Broker-connected control plane for paper-validated automation, risk gates, and execution proof.')
   return { name, tagline }
 }
 
@@ -350,7 +357,7 @@ export function getPublicSiteContact() {
       type: 'email',
       label: supportEmail,
       href: `mailto:${supportEmail}`,
-      description: appConfig.personalMode ? 'Local operator contact' : 'Pilot support contact',
+      description: appConfig.personalMode ? 'Local operator contact' : 'Customer support contact',
     }
   }
 
@@ -359,7 +366,7 @@ export function getPublicSiteContact() {
       type: 'url',
       label: supportUrl,
       href: supportUrl,
-      description: appConfig.personalMode ? 'Local operator link' : 'Pilot support link',
+      description: appConfig.personalMode ? 'Local operator link' : 'Customer support link',
     }
   }
 
@@ -367,14 +374,14 @@ export function getPublicSiteContact() {
     type: 'placeholder',
     label: appConfig.personalMode
       ? 'No public support contact is configured for this personal workstation.'
-      : 'Support contact available on request during the private pilot.',
+      : 'Support contact available from the customer workspace.',
     href: '',
-    description: appConfig.personalMode ? 'Local operator' : 'Pilot support',
+    description: appConfig.personalMode ? 'Local operator' : 'Customer support',
   }
 }
 
 export function getPublicSitePages() {
-  return Object.values(getPublicPageDefinitions())
+  return [...Object.values(getPublicPageDefinitions()), PRICING_NAV_ITEM]
 }
 
 export function getPublicSitePage(pathname) {

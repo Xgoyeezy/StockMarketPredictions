@@ -652,6 +652,7 @@ def get_auth_provider_config() -> dict:
             "max_age_seconds": settings.auth_session_max_age_seconds,
             "allow_signup": bool(getattr(settings, "local_auth_allow_signup", True)),
             "default_plan": getattr(settings, "local_auth_default_plan", "starter"),
+            "login_secret_required": bool(str(getattr(settings, "local_auth_login_secret", "") or "").strip()),
         },
         "auth0": {
             "enabled": auth0_enabled,
@@ -1098,6 +1099,7 @@ def login_with_local_session(
     *,
     email: str,
     name: str,
+    login_secret: str | None = None,
     requested_tenant_slug: str | None = None,
     invite_token: str | None = None,
     organization_name: str | None = None,
@@ -1105,6 +1107,10 @@ def login_with_local_session(
 ) -> dict:
     if not is_local_session_enabled():
         raise UnauthorizedError("Local session auth is not enabled for this environment.")
+    configured_secret = str(getattr(settings, "local_auth_login_secret", "") or "").strip()
+    if configured_secret:
+        if str(login_secret or "").strip() != configured_secret:
+            raise UnauthorizedError("Invalid login secret.")
 
     normalized_email = _normalize_email(email)
     normalized_name = _normalize_name(name)

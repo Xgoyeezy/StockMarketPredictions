@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -26,7 +26,14 @@ DAILY_OBJECTIVE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "daily_profit_target_dollars": 1000.0,
     "daily_loss_budget_pct": 0.5,
     "daily_objective_apply_to_live": False,
+    "objective_timeframe": "weekly",
+    "weekly_profit_target_min_pct": 1.0,
+    "weekly_profit_target_max_pct": 2.0,
+    "weekly_profit_target_min_dollars": 1000.0,
+    "weekly_profit_target_max_dollars": 2000.0,
 }
+
+OBJECTIVE_TIMEFRAMES = {"daily", "weekly"}
 
 
 def _utc_now() -> datetime:
@@ -94,6 +101,35 @@ def _session_bounds_utc(session_day: str) -> tuple[datetime, datetime]:
     return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
+def _objective_period_for(now: datetime, timeframe: str) -> dict[str, Any]:
+    current = now
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    local = current.astimezone(MARKET_TIMEZONE)
+    if str(timeframe or "").strip().lower() == "weekly":
+        week_start = local.date() - timedelta(days=local.weekday())
+        week_end = week_start + timedelta(days=6)
+        start_local = datetime.combine(week_start, time.min, tzinfo=MARKET_TIMEZONE)
+        end_local = datetime.combine(week_end, time.max, tzinfo=MARKET_TIMEZONE)
+        iso_year, iso_week, _ = local.date().isocalendar()
+        return {
+            "timeframe": "weekly",
+            "period_key": f"{iso_year}-W{iso_week:02d}",
+            "period_label": "Current trading week",
+            "start": start_local.astimezone(timezone.utc),
+            "end": end_local.astimezone(timezone.utc),
+        }
+    session_day = local.date().isoformat()
+    start, end = _session_bounds_utc(session_day)
+    return {
+        "timeframe": "daily",
+        "period_key": session_day,
+        "period_label": "Current session",
+        "start": start,
+        "end": end,
+    }
+
+
 def _profile_tag(profile_key: str) -> str:
     return f"profile-{str(profile_key or '').strip().lower().replace(':', '-') or DAILY_OBJECTIVE_PERSONAL_PAPER_PROFILE}"
 
@@ -104,6 +140,39 @@ def _normalize_profile_key(profile_key: str | None) -> str:
 
 def normalize_daily_objective_settings(settings_state: dict[str, Any] | None) -> dict[str, Any]:
     state = dict(settings_state or {})
+    objective_timeframe = str(
+        state.get("objective_timeframe") or DAILY_OBJECTIVE_SETTINGS_DEFAULTS["objective_timeframe"]
+    ).strip().lower()
+    if objective_timeframe not in OBJECTIVE_TIMEFRAMES:
+        objective_timeframe = str(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["objective_timeframe"])
+    weekly_min_pct = _clamp_float(
+        state.get("weekly_profit_target_min_pct"),
+        float(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["weekly_profit_target_min_pct"]),
+        minimum=0.1,
+        maximum=10.0,
+    )
+    weekly_max_pct = _clamp_float(
+        state.get("weekly_profit_target_max_pct"),
+        float(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["weekly_profit_target_max_pct"]),
+        minimum=0.1,
+        maximum=10.0,
+    )
+    if weekly_max_pct < weekly_min_pct:
+        weekly_max_pct = weekly_min_pct
+    weekly_min_dollars = _clamp_float(
+        state.get("weekly_profit_target_min_dollars"),
+        float(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["weekly_profit_target_min_dollars"]),
+        minimum=1.0,
+        maximum=1_000_000.0,
+    )
+    weekly_max_dollars = _clamp_float(
+        state.get("weekly_profit_target_max_dollars"),
+        float(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["weekly_profit_target_max_dollars"]),
+        minimum=1.0,
+        maximum=1_000_000.0,
+    )
+    if weekly_max_dollars < weekly_min_dollars:
+        weekly_max_dollars = weekly_min_dollars
     return {
         "daily_objective_enabled": _coerce_bool(
             state.get("daily_objective_enabled"),
@@ -131,6 +200,11 @@ def normalize_daily_objective_settings(settings_state: dict[str, Any] | None) ->
             state.get("daily_objective_apply_to_live"),
             bool(DAILY_OBJECTIVE_SETTINGS_DEFAULTS["daily_objective_apply_to_live"]),
         ),
+        "objective_timeframe": objective_timeframe,
+        "weekly_profit_target_min_pct": weekly_min_pct,
+        "weekly_profit_target_max_pct": weekly_max_pct,
+        "weekly_profit_target_min_dollars": weekly_min_dollars,
+        "weekly_profit_target_max_dollars": weekly_max_dollars,
     }
 
 
@@ -153,30 +227,88 @@ def normalize_daily_objective_runtime(runtime_state: dict[str, Any] | None) -> d
     }
 
 
-def build_daily_objective_snapshot(state: dict[str, Any] | None) -> dict[str, Any]:
+def build_daily_objective_snapshot(state: dict[str, Any] | None, *, effective_funds: float | None = None) -> dict[str, Any]:
     state = state or {}
     settings = normalize_daily_objective_settings(state.get("settings"))
     runtime = normalize_daily_objective_runtime(state.get("runtime"))
+    equity_base = max(
+        _coerce_float(
+            effective_funds,
+            _coerce_float(state.get("__actual_funds"), _coerce_float((state.get("settings") or {}).get("account_size"), 100000.0)),
+        ),
+        1.0,
+    )
+    target_dollars, target_pct_amount = _target_amount(state.get("settings") or {}, equity_base, target="max")
+    target_min_dollars, target_min_pct_amount = _target_amount(state.get("settings") or {}, equity_base, target="min")
+    target_pct = (
+        settings["weekly_profit_target_max_pct"]
+        if settings["objective_timeframe"] == "weekly"
+        else settings["daily_profit_target_pct"]
+    )
+    target_min_pct = (
+        settings["weekly_profit_target_min_pct"]
+        if settings["objective_timeframe"] == "weekly"
+        else settings["daily_profit_target_pct"]
+    )
     report = dict(runtime.get("daily_objective_last_report") or {})
     if not report:
         return {
             "status": "not_run" if settings["daily_objective_enabled"] else "disabled",
             "label": "Not run" if settings["daily_objective_enabled"] else "Disabled",
             "enabled": settings["daily_objective_enabled"],
-            "target_dollars": settings["daily_profit_target_dollars"],
-            "target_pct": settings["daily_profit_target_pct"],
+            "objective_timeframe": settings["objective_timeframe"],
+            "objective_mode": (
+                "collective_account_weekly_1_to_2pct"
+                if settings["objective_timeframe"] == "weekly"
+                else "collective_account_daily_pct"
+            ),
+            "objective_range_label": "1-2% weekly" if settings["objective_timeframe"] == "weekly" else f"{target_pct:.2f}% daily",
+            "target_min_dollars": target_min_dollars,
+            "target_min_pct": target_min_pct,
+            "target_min_pct_amount": target_min_pct_amount,
+            "target_dollars": target_dollars,
+            "target_pct": target_pct,
+            "target_pct_amount": target_pct_amount,
             "loss_budget_pct": settings["daily_loss_budget_pct"],
             "apply_to_live": settings["daily_objective_apply_to_live"],
+            "minimum_target_reached": False,
+            "target_band_reached": False,
+            "stretch_target_reached": False,
             "target_reached": False,
             "entries_blocked": False,
+            "not_a_guarantee": (
+                "The 1-2% weekly objective is an operating target, not a return guarantee."
+                if settings["objective_timeframe"] == "weekly"
+                else "The daily objective is an operating target, not a return guarantee."
+            ),
             "related_note_id": runtime.get("daily_objective_last_note_id"),
             "history": runtime.get("daily_objective_history") or [],
         }
     report.setdefault("enabled", settings["daily_objective_enabled"])
-    report.setdefault("target_dollars", settings["daily_profit_target_dollars"])
-    report.setdefault("target_pct", settings["daily_profit_target_pct"])
+    report["objective_timeframe"] = settings["objective_timeframe"]
+    report["objective_mode"] = (
+        "collective_account_weekly_1_to_2pct"
+        if settings["objective_timeframe"] == "weekly"
+        else "collective_account_daily_pct"
+    )
+    report["objective_range_label"] = "1-2% weekly" if settings["objective_timeframe"] == "weekly" else f"{target_pct:.2f}% daily"
+    report["target_min_dollars"] = target_min_dollars
+    report["target_min_pct"] = target_min_pct
+    report["target_min_pct_amount"] = target_min_pct_amount
+    report["target_dollars"] = target_dollars
+    report["target_pct"] = target_pct
+    report["target_pct_amount"] = target_pct_amount
     report.setdefault("loss_budget_pct", settings["daily_loss_budget_pct"])
     report.setdefault("apply_to_live", settings["daily_objective_apply_to_live"])
+    report.setdefault("minimum_target_reached", False)
+    report.setdefault("target_band_reached", False)
+    report.setdefault("stretch_target_reached", bool(report.get("target_reached")))
+    report.setdefault(
+        "not_a_guarantee",
+        "The 1-2% weekly objective is an operating target, not a return guarantee."
+        if settings["objective_timeframe"] == "weekly"
+        else "The daily objective is an operating target, not a return guarantee.",
+    )
     report["history"] = runtime.get("daily_objective_history") or []
     report["related_note_id"] = report.get("related_note_id") or runtime.get("daily_objective_last_note_id")
     return serialize_value(report)
@@ -198,11 +330,10 @@ def _owned_rows(frame: pd.DataFrame | None, *, tenant_id: str | None, profile_ke
     return result.copy()
 
 
-def _daily_realized_pnl(closed_frame: pd.DataFrame, *, session_day: str) -> tuple[float, int, int, list[str]]:
+def _realized_pnl_between(closed_frame: pd.DataFrame, *, start: datetime, end: datetime) -> tuple[float, int, int, list[str]]:
     if closed_frame.empty:
         return 0.0, 0, 0, []
     timestamps = pd.to_datetime(closed_frame.get("closed_at", pd.Series(dtype=str)), errors="coerce", utc=True)
-    start, end = _session_bounds_utc(session_day)
     if timestamps.notna().any():
         mask = timestamps.ge(start) & timestamps.le(end)
         frame = closed_frame[mask]
@@ -221,11 +352,25 @@ def _daily_realized_pnl(closed_frame: pd.DataFrame, *, session_day: str) -> tupl
     return float(pnl.sum()), int((pnl > 0).sum()), int((pnl < 0).sum()), tickers[:12]
 
 
-def _target_amount(settings_state: dict[str, Any], equity_base: float) -> tuple[float, float]:
+def _daily_realized_pnl(closed_frame: pd.DataFrame, *, session_day: str) -> tuple[float, int, int, list[str]]:
+    start, end = _session_bounds_utc(session_day)
+    return _realized_pnl_between(closed_frame, start=start, end=end)
+
+
+def _target_amount(settings_state: dict[str, Any], equity_base: float, *, target: str = "max") -> tuple[float, float]:
     settings = normalize_daily_objective_settings(settings_state)
-    pct_amount = max(float(equity_base), 1.0) * (float(settings["daily_profit_target_pct"]) / 100.0)
-    explicit_amount = float(settings["daily_profit_target_dollars"])
-    return max(explicit_amount, 1.0), max(pct_amount, 1.0)
+    if settings["objective_timeframe"] == "weekly":
+        if str(target or "").strip().lower() in {"min", "minimum", "floor"}:
+            pct = float(settings["weekly_profit_target_min_pct"])
+            explicit_amount = float(settings["weekly_profit_target_min_dollars"])
+        else:
+            pct = float(settings["weekly_profit_target_max_pct"])
+            explicit_amount = float(settings["weekly_profit_target_max_dollars"])
+    else:
+        pct = float(settings["daily_profit_target_pct"])
+        explicit_amount = float(settings["daily_profit_target_dollars"])
+    pct_amount = max(float(equity_base), 1.0) * (pct / 100.0)
+    return max(explicit_amount, pct_amount, 1.0), max(pct_amount, 1.0)
 
 
 def _build_recommendations(
@@ -286,7 +431,7 @@ def _build_recommendations(
         skipped_changes.append(
             {
                 "field": "baseline_settings",
-                "reason": "Daily objective review is advisory; no baseline settings were auto-tuned.",
+                "reason": "Objective review is advisory; no baseline settings were auto-tuned.",
             }
         )
     else:
@@ -322,52 +467,98 @@ def build_daily_objective_report(
     equity_base = max(
         _coerce_float(
             effective_funds,
-            _coerce_float(state.get("__actual_funds"), _coerce_float(settings_state.get("account_size"), 10000.0)),
+            _coerce_float(state.get("__actual_funds"), _coerce_float(settings_state.get("account_size"), 100000.0)),
         ),
         1.0,
     )
-    target_dollars, target_pct_amount = _target_amount(settings_state, equity_base)
+    objective_period = _objective_period_for(now, settings["objective_timeframe"])
+    target_dollars, target_pct_amount = _target_amount(settings_state, equity_base, target="max")
+    target_min_dollars, target_min_pct_amount = _target_amount(settings_state, equity_base, target="min")
+    target_pct = (
+        settings["weekly_profit_target_max_pct"]
+        if settings["objective_timeframe"] == "weekly"
+        else settings["daily_profit_target_pct"]
+    )
+    target_min_pct = (
+        settings["weekly_profit_target_min_pct"]
+        if settings["objective_timeframe"] == "weekly"
+        else settings["daily_profit_target_pct"]
+    )
     loss_budget_dollars = max(equity_base * (float(settings["daily_loss_budget_pct"]) / 100.0), 1.0)
 
     closed_frame = owned_closed if owned_closed is not None else pd.DataFrame()
-    realized_pnl, winning_trades, losing_trades, traded_tickers = _daily_realized_pnl(
-        closed_frame,
-        session_day=session_day,
+    realized_pnl, winning_trades, losing_trades, traded_tickers = _realized_pnl_between(
+        closed_frame, start=objective_period["start"], end=objective_period["end"]
     )
+    daily_realized_pnl, _, _, _ = _daily_realized_pnl(closed_frame, session_day=session_day)
     open_frame = owned_open if owned_open is not None else pd.DataFrame()
     unrealized_pnl = risk_control_service.estimate_unrealized_pnl(open_frame, monitored_open)
     total_pnl = realized_pnl + unrealized_pnl
+    daily_loss_pnl = daily_realized_pnl + unrealized_pnl
     target_gap = max(target_dollars - total_pnl, 0.0)
+    target_min_gap = max(target_min_dollars - total_pnl, 0.0)
     target_progress_pct = (total_pnl / target_dollars * 100.0) if target_dollars > 0 else 0.0
-    loss_budget_used_pct = max((-total_pnl / loss_budget_dollars * 100.0), 0.0)
+    target_min_progress_pct = (total_pnl / target_min_dollars * 100.0) if target_min_dollars > 0 else 0.0
+    loss_budget_used_pct = max((-daily_loss_pnl / loss_budget_dollars * 100.0), 0.0)
+    minimum_target_reached = total_pnl >= target_min_dollars
     target_reached = total_pnl >= target_dollars
-    entries_blocked = bool(settings["daily_objective_enabled"] and total_pnl <= -loss_budget_dollars)
+    loss_budget_locked = bool(settings["daily_objective_enabled"] and daily_loss_pnl <= -loss_budget_dollars)
+    target_protect_locked = bool(settings["daily_objective_enabled"] and target_reached)
+    entries_blocked = bool(loss_budget_locked or target_protect_locked)
+    entry_block_reason = (
+        "daily_loss_budget_lock"
+        if loss_budget_locked
+        else ("target_reached_protect_streak" if target_protect_locked else None)
+    )
 
     if not settings["daily_objective_enabled"]:
         status = "disabled"
-        label = "Daily objective disabled"
+        label = "Weekly objective disabled" if settings["objective_timeframe"] == "weekly" else "Daily objective disabled"
     elif normalized_profile_key != DAILY_OBJECTIVE_PERSONAL_PAPER_PROFILE and not settings["daily_objective_apply_to_live"]:
         status = "not_applicable"
         label = "Paper scope only"
-    elif entries_blocked:
+    elif loss_budget_locked:
         status = "loss_budget_locked"
         label = "Loss budget locked"
     elif target_reached:
         status = "target_reached"
-        label = "Target reached"
+        label = "Weekly stretch target reached" if settings["objective_timeframe"] == "weekly" else "Target reached"
+    elif minimum_target_reached:
+        status = "target_band_reached"
+        label = "Weekly target band reached" if settings["objective_timeframe"] == "weekly" else "Target reached"
     else:
         status = "tracking"
         label = "Tracking objective"
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
-    if entries_blocked:
+    if loss_budget_locked:
         blockers.append(
             {
                 "key": "daily_loss_budget_lock",
                 "detail": (
-                    f"Daily objective PnL is {total_pnl:,.2f}, breaching the "
+                    f"Daily loss PnL is {daily_loss_pnl:,.2f}, breaching the "
                     f"{settings['daily_loss_budget_pct']:.2f}% loss budget."
+                ),
+            }
+        )
+    elif target_protect_locked:
+        blockers.append(
+            {
+                "key": "target_reached_protect_streak",
+                "detail": (
+                    f"Weekly stretch objective is reached at {target_progress_pct:.1f}% progress; "
+                    "new entries are blocked while open positions remain under protection."
+                ),
+            }
+        )
+    elif minimum_target_reached:
+        warnings.append(
+            {
+                "key": "weekly_target_band_reached",
+                "detail": (
+                    f"Weekly minimum target is reached at {target_min_progress_pct:.1f}% progress; "
+                    "new entries still require normal evidence and risk gates until the stretch target locks."
                 ),
             }
         )
@@ -399,7 +590,7 @@ def build_daily_objective_report(
             {
                 "key": "accuracy_calibration_weak",
                 "detail": (
-                    "Decision-PnL calibration is weak; daily objective pressure must not loosen capacity."
+                    "Decision-PnL calibration is weak; objective pressure must not loosen capacity."
                 ),
             }
         )
@@ -453,7 +644,19 @@ def build_daily_objective_report(
             "field": "new_entries",
             "before": "allowed",
             "effective": "blocked" if entries_blocked else "allowed",
-            "reason": "Daily loss budget hard stop" if entries_blocked else "Daily objective target-only policy",
+            "reason": (
+                "Daily loss budget hard stop"
+                if loss_budget_locked
+                else (
+                    "Protect-streak mode after weekly stretch target reached"
+                    if target_protect_locked
+                    else (
+                        "Weekly objective target-only policy"
+                        if settings["objective_timeframe"] == "weekly"
+                        else "Daily objective target-only policy"
+                    )
+                )
+            ),
         },
         {
             "field": "candidate_ranking",
@@ -468,21 +671,47 @@ def build_daily_objective_report(
             "label": label,
             "profile_key": normalized_profile_key,
             "session_day": session_day,
+            "objective_timeframe": settings["objective_timeframe"],
+            "objective_mode": (
+                "collective_account_weekly_1_to_2pct"
+                if settings["objective_timeframe"] == "weekly"
+                else "collective_account_daily_pct"
+            ),
+            "objective_range_label": (
+                "1-2% weekly"
+                if settings["objective_timeframe"] == "weekly"
+                else f"{float(target_pct):.2f}% daily"
+            ),
+            "objective_period_key": objective_period["period_key"],
+            "objective_period_label": objective_period["period_label"],
+            "objective_period_start_at": _serialize_datetime(objective_period["start"]),
+            "objective_period_end_at": _serialize_datetime(objective_period["end"]),
             "evaluated_at": _serialize_datetime(now),
             "run_source": str(run_source or "cycle").strip().lower() or "cycle",
+            "target_min_dollars": round(float(target_min_dollars), 2),
+            "target_min_pct": float(target_min_pct),
+            "target_min_pct_amount": round(float(target_min_pct_amount), 2),
             "target_dollars": round(float(target_dollars), 2),
-            "target_pct": float(settings["daily_profit_target_pct"]),
+            "target_pct": float(target_pct),
             "target_pct_amount": round(float(target_pct_amount), 2),
             "realized_pnl": round(float(realized_pnl), 2),
+            "daily_realized_pnl": round(float(daily_realized_pnl), 2),
             "unrealized_pnl": round(float(unrealized_pnl), 2),
             "total_pnl": round(float(total_pnl), 2),
+            "daily_loss_pnl": round(float(daily_loss_pnl), 2),
             "target_progress_pct": round(float(target_progress_pct), 2),
+            "target_min_progress_pct": round(float(target_min_progress_pct), 2),
             "target_gap": round(float(target_gap), 2),
+            "target_min_gap": round(float(target_min_gap), 2),
             "loss_budget_pct": float(settings["daily_loss_budget_pct"]),
             "loss_budget_dollars": round(float(loss_budget_dollars), 2),
             "loss_budget_used_pct": round(float(loss_budget_used_pct), 2),
+            "minimum_target_reached": bool(minimum_target_reached),
+            "target_band_reached": bool(minimum_target_reached and not target_reached),
+            "stretch_target_reached": bool(target_reached),
             "target_reached": bool(target_reached),
             "entries_blocked": bool(entries_blocked),
+            "entry_block_reason": entry_block_reason,
             "clean_candidate_count": candidate_count,
             "open_position_count": int(len(open_frame)),
             "pending_order_count": int(len(owned_pending) if owned_pending is not None else 0),
@@ -495,6 +724,11 @@ def build_daily_objective_report(
             "skipped_changes": skipped_changes,
             "effective_overlays": effective_overlays,
             "apply_to_live": bool(settings["daily_objective_apply_to_live"]),
+            "not_a_guarantee": (
+                "The 1-2% weekly objective is an operating target, not a return guarantee."
+                if settings["objective_timeframe"] == "weekly"
+                else "The daily objective is an operating target, not a return guarantee."
+            ),
         }
     )
 
@@ -537,19 +771,24 @@ def _format_note_rows(items: list[dict[str, Any]], *, empty: str) -> list[str]:
 
 
 def _build_note_body(*, tenant: Tenant, profile_key: str, report: dict[str, Any]) -> str:
+    objective_label = str(report.get("objective_range_label") or "objective").strip()
     lines = [
-        f"Daily objective review for {getattr(tenant, 'name', None) or getattr(tenant, 'slug', '') or 'tenant'}",
+        f"Objective review for {getattr(tenant, 'name', None) or getattr(tenant, 'slug', '') or 'tenant'}",
         "",
         f"- Profile: {profile_key}",
         f"- Session: {report.get('session_day')}",
+        f"- Objective: {objective_label}",
+        f"- Period: {report.get('objective_period_key') or report.get('session_day')}",
         f"- Status: {report.get('status')}",
-        f"- Target: ${float(report.get('target_dollars') or 0.0):,.2f} ({float(report.get('target_pct') or 0.0):.2f}%)",
+        f"- Target band: ${float(report.get('target_min_dollars') or 0.0):,.2f}-${float(report.get('target_dollars') or 0.0):,.2f} ({float(report.get('target_min_pct') or 0.0):.2f}-{float(report.get('target_pct') or 0.0):.2f}%)",
         f"- PnL: ${float(report.get('total_pnl') or 0.0):,.2f} realized/unrealized",
         f"- Progress: {float(report.get('target_progress_pct') or 0.0):.2f}%",
         f"- Target gap: ${float(report.get('target_gap') or 0.0):,.2f}",
         f"- Loss budget: ${float(report.get('loss_budget_dollars') or 0.0):,.2f} ({float(report.get('loss_budget_used_pct') or 0.0):.2f}% used)",
-        f"- Target reached: {'yes' if report.get('target_reached') else 'no'}",
+        f"- Minimum target reached: {'yes' if report.get('minimum_target_reached') else 'no'}",
+        f"- Stretch target reached: {'yes' if report.get('stretch_target_reached') or report.get('target_reached') else 'no'}",
         f"- New entries blocked: {'yes' if report.get('entries_blocked') else 'no'}",
+        f"- Guarantee: {report.get('not_a_guarantee') or 'The objective is not a return guarantee.'}",
         "",
         "Effective overlays",
     ]
@@ -576,7 +815,7 @@ def _sync_daily_objective_note(*, tenant: Tenant, profile_key: str, report: dict
         _profile_tag(profile_key),
         f"session-{session_day}",
     ]
-    title = f"Daily objective review - {profile_key} - {session_day}"
+    title = f"Weekly objective review - {profile_key} - {session_day}" if report.get("objective_timeframe") == "weekly" else f"Daily objective review - {profile_key} - {session_day}"
     body = _build_note_body(tenant=tenant, profile_key=profile_key, report=report)
     note_id = (
         str(report.get("related_note_id") or report.get("note_id") or "").strip()
@@ -625,21 +864,39 @@ def _persist_report(
         "label",
         "profile_key",
         "session_day",
+        "objective_timeframe",
+        "objective_mode",
+        "objective_range_label",
+        "objective_period_key",
+        "objective_period_label",
+        "objective_period_start_at",
+        "objective_period_end_at",
         "evaluated_at",
         "run_source",
+        "target_min_dollars",
+        "target_min_pct",
+        "target_min_pct_amount",
         "target_dollars",
         "target_pct",
         "target_pct_amount",
         "realized_pnl",
+        "daily_realized_pnl",
         "unrealized_pnl",
         "total_pnl",
+        "daily_loss_pnl",
         "target_progress_pct",
+        "target_min_progress_pct",
         "target_gap",
+        "target_min_gap",
         "loss_budget_pct",
         "loss_budget_dollars",
         "loss_budget_used_pct",
+        "minimum_target_reached",
+        "target_band_reached",
+        "stretch_target_reached",
         "target_reached",
         "entries_blocked",
+        "entry_block_reason",
         "clean_candidate_count",
         "open_position_count",
         "pending_order_count",
@@ -653,6 +910,7 @@ def _persist_report(
         "note_id",
         "related_note_id",
         "apply_to_live",
+        "not_a_guarantee",
     }
     runtime["daily_objective_last_report"] = serialize_value(
         {key: report.get(key) for key in summary_keys if key in report}
@@ -672,6 +930,7 @@ def _persist_report(
             "target_progress_pct": report.get("target_progress_pct"),
             "loss_budget_used_pct": report.get("loss_budget_used_pct"),
             "entries_blocked": report.get("entries_blocked"),
+            "entry_block_reason": report.get("entry_block_reason"),
             "note_id": report.get("related_note_id") or report.get("note_id"),
             "run_source": report.get("run_source"),
         },
@@ -763,7 +1022,7 @@ def run_daily_objective_review(
     monitored_frame = _owned_rows(sdm.monitor_open_trades(), tenant_id=tenant_id, profile_key=normalized_profile_key)
     equity_base = _coerce_float(
         state.get("__actual_funds"),
-        _coerce_float(state.get("__effective_funds"), _coerce_float((state.get("settings") or {}).get("account_size"), 10000.0)),
+        _coerce_float(state.get("__effective_funds"), _coerce_float((state.get("settings") or {}).get("account_size"), 100000.0)),
     )
     _ = linked_account
     report = build_daily_objective_report(
@@ -840,7 +1099,7 @@ def score_daily_objective_candidate(
         return {}
     if profile_key != DAILY_OBJECTIVE_PERSONAL_PAPER_PROFILE and not settings["daily_objective_apply_to_live"]:
         return {}
-    equity = max(_coerce_float(current_equity, _coerce_float(settings_state.get("account_size"), 10000.0)), 1.0)
+    equity = max(_coerce_float(current_equity, _coerce_float(settings_state.get("account_size"), 100000.0)), 1.0)
     last_report = dict(((state or {}).get("runtime") or {}).get("daily_objective_last_report") or {})
     target_gap = _coerce_float(last_report.get("target_gap"), settings["daily_profit_target_dollars"])
     target_gap = max(target_gap, 1.0)
@@ -852,12 +1111,18 @@ def score_daily_objective_candidate(
         candidate.get("execution_score"),
         _coerce_float(candidate.get("ranking_score"), _coerce_float(candidate.get("setup_score"), 0.0)),
     )
-    edge_ratio = _coerce_float(candidate.get("edge_to_cost_ratio"), 0.0)
+    edge_ratio = _coerce_float(
+        candidate.get("transaction_cost_adjusted_edge_to_cost_ratio"),
+        _coerce_float(candidate.get("edge_to_cost_ratio"), 0.0),
+    )
     edge_bps = _coerce_float(
-        candidate.get("accuracy_calibrated_expected_edge_bps"),
+        candidate.get("transaction_cost_adjusted_expected_edge_bps"),
         _coerce_float(
-            candidate.get("expected_edge_bps"),
-            _coerce_float(candidate.get("edge_bps"), _coerce_float(candidate.get("forecast_edge_bps"), 0.0)),
+            candidate.get("accuracy_calibrated_expected_edge_bps"),
+            _coerce_float(
+                candidate.get("expected_edge_bps"),
+                _coerce_float(candidate.get("edge_bps"), _coerce_float(candidate.get("forecast_edge_bps"), 0.0)),
+            ),
         ),
     )
     notional = _projected_notional(candidate, settings_state, equity)
@@ -907,6 +1172,22 @@ def apply_daily_objective_candidate_overlay(
     current_equity: float | None = None,
 ) -> list[dict[str, Any]]:
     if not candidates:
+        return candidates
+    settings_state = dict((state or {}).get("settings") or {})
+    last_report = dict(((state or {}).get("runtime") or {}).get("daily_objective_last_report") or {})
+    if bool(last_report.get("entries_blocked")):
+        reason = str(last_report.get("entry_block_reason") or last_report.get("status") or "daily_objective_entry_lock")
+        return [
+            {
+                **dict(candidate),
+                "auto_entry_eligible": False,
+                "daily_objective_score": 0.0,
+                "daily_objective_rank_reason": "new entries blocked by objective or daily loss budget",
+                "daily_objective_block_reason": reason,
+            }
+            for candidate in candidates
+        ]
+    if settings_state.get("daily_objective_ranking_enabled") is False:
         return candidates
     annotated: list[dict[str, Any]] = []
     for candidate in candidates:

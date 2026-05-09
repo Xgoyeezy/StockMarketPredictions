@@ -308,6 +308,7 @@ class AutomationLimitedLiveNextTierCapReportServiceTests(unittest.TestCase):
             patch.object(trade_automation_service.sdm, "monitor_open_trades", return_value=pd.DataFrame()),
             patch.object(trade_automation_service, "_build_personal_account_summary", return_value={"status": "unavailable"}),
             patch.object(trade_automation_service, "get_latest_trade_automation_equity_snapshot", return_value=None),
+            patch.object(automation_limited_live_next_tier_cap_report_service, "_utc_now", return_value=FIXED_NOW),
             patch.object(trade_automation_service, "open_trade_from_request") as open_trade_mock,
             patch.object(trade_automation_service, "sync_pending_orders_from_broker") as sync_orders_mock,
         ):
