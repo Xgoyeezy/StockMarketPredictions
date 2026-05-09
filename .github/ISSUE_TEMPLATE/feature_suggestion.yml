@@ -1,0 +1,41 @@
+name: Feature suggestion
+description: Suggest an improvement without changing code directly.
+title: "[Suggestion]: "
+labels: ["suggestion"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What should be clearer, safer, faster, or more useful?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      description: Describe the improvement you would like to see.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Documentation
+        - Backend
+        - Frontend
+        - Testing
+        - Evidence workflow
+        - Forecast validation
+        - Risk and safety
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundary check
+      options:
+        - label: This suggestion does not enable autonomous live-money trading, AI order authority, risk-gate bypass, kill-switch bypass, or automatic broker-route loosening.
+          required: true

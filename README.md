@@ -1,8 +1,32 @@
-# Personal Trading Research Desk
+# Quant Evidence OS / StockMarketPredictions
 
-FastAPI backend plus React frontend for self-directed market research, scanning, watchlists, trade planning, portfolio monitoring, alerts, notes, and own-account execution control.
+Quant Evidence OS is a Python/FastAPI plus React/Vite trading research and evidence-control platform for scanning markets, reviewing strategy candidates, validating forecasts, comparing evidence, and auditing why trades did or did not happen.
 
-This repo is now oriented toward private personal use, not a SaaS sale, white-label launch, or client advisory service. Treat model outputs, ranked setups, entries, targets, stops, and invalidation levels as research prompts that still require your review before any real-money decision.
+This is not a guaranteed-profit system, investment adviser, HFT platform, or autonomous live-money trading bot. Treat model outputs, ranked setups, entries, targets, stops, and invalidation levels as research prompts that still require human review before any real-money decision.
+
+## Public visibility
+
+This repository is public for portfolio review, technical feedback, and discussion. You can:
+
+- Open an issue with a bug report, question, or feature suggestion.
+- Start a discussion for architecture, research workflow, or product-positioning feedback.
+- Submit a pull request for review.
+
+Direct changes to `main` are restricted. Suggestions and pull requests are reviewed before anything is accepted.
+
+## Safety boundaries
+
+- Paper-first research and validation remain the active posture.
+- No autonomous live-money order path is enabled.
+- AI has no order authority.
+- Risk gates remain authoritative.
+- Broker routes are not loosened by analytics.
+- Forecast and reward analytics are research-only.
+- Simulation evidence stays separate from market-observed evidence.
+
+## License and reuse
+
+No open-source license is currently granted. The code is source-available for viewing and feedback only unless the repository owner gives written permission for other use. See `LICENSE`.
 
 ## Project structure
 - `backend/` - Python + FastAPI API, services, routers, models, and local storage
@@ -126,8 +150,7 @@ make frontend-build
 
 Personal-use operating notes are documented in:
 
-- `PERSONAL_USE.md`
-- `REAL_MONEY_EXECUTION_ROADMAP.md`
+- `docs/PERSONAL_USE.md`
 - `docs/broker_trading_desk_architecture.md`
 - `docs/compliance_checklist.md`
 - `docs/readiness_scoring.md`
