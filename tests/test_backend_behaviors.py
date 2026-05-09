@@ -2405,11 +2405,16 @@ class BackendBehaviorTests(unittest.TestCase):
                 "ensure_demo_tenant_for_user",
                 side_effect=SQLAlchemyTimeoutError("pool exhausted", None, None),
             ),
+            patch.object(
+                auth_core,
+                "SessionLocal",
+                side_effect=SQLAlchemyTimeoutError("pool exhausted", None, None),
+            ),
         ):
             current_user = auth_core.build_demo_user(request, db=object())
 
         self.assertEqual(current_user.user_id, "demo-trader")
-        self.assertEqual(current_user.tenant_slug, "systematic-equities")
+        self.assertEqual(current_user.tenant_slug, "alpha-desk")
         self.assertEqual(current_user.mode, "demo")
         self.assertTrue(current_user.authenticated)
 
@@ -2621,7 +2626,7 @@ class BackendBehaviorTests(unittest.TestCase):
                 return_value={"sub": "auth0|user_123", "email": "auth0@example.test", "name": "Auth Zero"},
             ),
         ):
-            start = auth_provider_service.start_auth0_login(requested_tenant_slug="alpha-desk")
+            start = auth_provider_service.start_auth0_login(db=db, requested_tenant_slug="alpha-desk")
             callback = auth_provider_service.complete_auth0_callback(
                 db,
                 code="code_123",
@@ -3028,7 +3033,7 @@ class BackendBehaviorTests(unittest.TestCase):
                 return_value={"sub": "oidc|user_456", "email": "oidc@example.test", "name": "OIDC User"},
             ),
         ):
-            start = auth_provider_service.start_provider_login(provider="oidc", requested_tenant_slug="alpha-desk")
+            start = auth_provider_service.start_provider_login(provider="oidc", db=db, requested_tenant_slug="alpha-desk")
             callback = auth_provider_service.complete_provider_callback(
                 db,
                 provider="oidc",

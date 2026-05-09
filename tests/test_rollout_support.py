@@ -125,6 +125,7 @@ class RolloutSupportTests(unittest.TestCase):
                     "suggested_contracts": 2,
                 },
             ),
+            patch.object(adapter, "_ensure_credentials"),
             patch.object(adapter, "_assert_local_ledger_persisted"),
         ):
             result = adapter.close_position(
