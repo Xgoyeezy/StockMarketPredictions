@@ -194,7 +194,7 @@ If those fields are missing, experiments can still be created and frozen, but th
 
 ## Test Commands
 
-From `D:\marcc\PycharmProjects\StockMarketPredictions`:
+From the repository root:
 
 ```powershell
 python -m compileall -q backend tests scripts

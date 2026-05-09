@@ -5,9 +5,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.services import category_upgrade_readiness_service as readiness
 from backend.services.category_upgrade_readiness_service import (
+    build_category_upgrade_proof_chain,
     build_category_upgrade_readiness_report,
     build_category_upgrade_support_export,
     evaluate_proof_gates,
@@ -210,6 +212,32 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertFalse(progress["rating_update_allowed"])
         self.assertLess(progress["planning_progress_to_10_pct"], 100.0)
 
+    def test_proof_chain_maps_gates_to_safe_next_actions_without_mutation(self) -> None:
+        report = build_category_upgrade_readiness_report(
+            safety_state=_safe_state(),
+            data_completeness=_data_ready(completion_rate=0.4, rewardability_rate=0.2, benchmark_ready=False),
+            benchmark=_benchmark("insufficient_evidence", rewardable_count=2, baseline_relative_edge=None, score_bucket_lift=None),
+            walk_forward={"records": []},
+            execution_quality=_execution_ready(),
+        )
+
+        chain = build_category_upgrade_proof_chain(report)
+
+        self.assertEqual(chain["summary"]["stage_count"], 9)
+        self.assertTrue(chain["research_only"])
+        self.assertTrue(chain["read_only"])
+        self.assertFalse(chain["can_submit_orders"])
+        self.assertFalse(chain["can_change_broker_routes"])
+        self.assertFalse(chain["can_bypass_risk_gates"])
+        by_gate = {row["gate_key"]: row for row in chain["records"]}
+        self.assertEqual(by_gate["safety_intact"]["status"], "passed")
+        self.assertEqual(by_gate["data_complete_enough"]["status"], "partial")
+        self.assertIn("Fix missing forward returns", by_gate["data_complete_enough"]["safe_next_action"])
+        self.assertFalse(by_gate["execution_costs_handled"]["execution_mutation"])
+        self.assertFalse(by_gate["execution_costs_handled"]["broker_route_mutation"])
+        self.assertFalse(by_gate["risk_visibility_complete"]["risk_gate_mutation"])
+        self.assertFalse(by_gate["baselines_beaten"]["ranking_mutation"])
+
     def test_hft_requires_separate_future_thesis(self) -> None:
         report = build_category_upgrade_readiness_report(
             hft_thesis={
@@ -286,6 +314,38 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
 
         self.assertEqual(list(gates), list(readiness.GATE_ORDER))
         self.assertTrue(all(gate["passed"] for gate in gates.values()))
+
+    def test_current_safety_verification_uses_last_known_snapshot_without_execution_authority(self) -> None:
+        last_known = {
+            "status": "ready",
+            "route": {"active": "broker_paper", "allowed": True, "provider": "alpaca", "mode": "paper"},
+            "route_enforcement": {"alpaca_paper_only": True, "active_route": "broker_paper"},
+            "trade_proof": {"no_live_order_autonomy": True, "no_signal_direct_to_broker": True},
+            "preflight": {"status": "ready"},
+            "kill_switch_context": {"active": False},
+        }
+        with patch("backend.services.trading_safety_service.read_last_known_safety_state", return_value=last_known):
+            state = readiness.build_current_safety_verification_state()
+
+        self.assertTrue(state["last_known_safety_snapshot_available"])
+        self.assertTrue(state["paper_first_boundary_preserved"])
+        self.assertTrue(state["alpaca_paper_only_unattended"])
+        self.assertTrue(state["broker_routes_unchanged"])
+        self.assertTrue(state["ai_has_no_order_authority"])
+        self.assertFalse(state["ai_order_authority"])
+        self.assertFalse(state["broker_routes_changed_by_analytics"])
+        gate = readiness.evaluate_safety_gate(state)
+        self.assertEqual(gate["status"], "passed")
+
+    def test_current_safety_verification_is_partial_when_no_last_known_snapshot_exists(self) -> None:
+        with patch("backend.services.trading_safety_service.read_last_known_safety_state", return_value={}):
+            state = readiness.build_current_safety_verification_state()
+
+        self.assertFalse(state["last_known_safety_snapshot_available"])
+        self.assertFalse(state["paper_first_boundary_preserved"])
+        gate = readiness.evaluate_safety_gate(state)
+        self.assertEqual(gate["status"], "partial")
+        self.assertIn("paper_first_boundary_preserved", gate["evidence"]["missing_required_true"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(readiness)

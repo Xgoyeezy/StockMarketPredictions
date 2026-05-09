@@ -233,14 +233,14 @@ class HedgeFundAiAgentsTests(unittest.TestCase):
             "api_key": "abc",
             "account_id": "acct-123",
             "raw_broker_record": {"id": "broker-secret-456"},
-            "log": r"C:\Users\marcc\raw.log",
+            "log": r"C:\Example\raw.log",
             "nested": {"local_path": r"D:\private\file.json"},
         }
         sanitized = str(agents.sanitize_payload(payload))
         self.assertNotIn("abc", sanitized)
         self.assertNotIn("acct-123", sanitized)
         self.assertNotIn("broker-secret-456", sanitized)
-        self.assertNotIn(r"C:\Users", sanitized)
+        self.assertNotIn(r"C:\Example", sanitized)
         self.assertNotIn(r"D:\private", sanitized)
 
     def test_service_does_not_call_execution_mutation_functions(self) -> None:

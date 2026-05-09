@@ -53,6 +53,7 @@ const ResearchPromotionPage = lazy(() => import('./pages/ResearchPromotionPage')
 const ScoreCalibrationPage = lazy(() => import('./pages/ScoreCalibrationPage'))
 const ShadowModePage = lazy(() => import('./pages/ShadowModePage'))
 const AICommitteePage = lazy(() => import('./pages/AICommitteePage'))
+const CategoryReadinessPage = lazy(() => import('./pages/CategoryReadinessPage'))
 const LiveTradingConsolePage = lazy(() => import('./pages/LiveTradingConsolePage'))
 const LiveStrategyControlPage = lazy(() => import('./pages/LiveStrategyControlPage'))
 const LiveOrderApprovalPage = lazy(() => import('./pages/LiveOrderApprovalPage'))
@@ -89,6 +90,7 @@ function buildDocumentTitle(pathname, activeAccountProfile = 'personal_paper') {
         '/score-calibration': 'Score Calibration',
         '/shadow-mode': 'Human vs System Shadow',
         '/ai-committee': 'AI Committee',
+        '/category-readiness': '10/10 Readiness',
         '/live': 'Live Console',
         '/live/approvals': 'Live Approvals',
         '/pricing': 'Pricing',
@@ -128,6 +130,7 @@ function buildDocumentTitle(pathname, activeAccountProfile = 'personal_paper') {
         '/score-calibration': 'Score Calibration',
         '/shadow-mode': 'Human vs System Shadow',
         '/ai-committee': 'AI Committee',
+        '/category-readiness': '10/10 Readiness',
         '/live': 'Live Console',
         '/live/approvals': 'Live Approvals',
         '/pricing': 'Pricing',
@@ -436,6 +439,7 @@ function AppFrame() {
           <Route path="/score-calibration" element={<ScoreCalibrationPage />} />
           <Route path="/shadow-mode" element={<ShadowModePage />} />
           <Route path="/ai-committee" element={<AICommitteePage />} />
+          <Route path="/category-readiness" element={<CategoryReadinessPage />} />
           <Route path="/live" element={<LiveTradingConsolePage />} />
           <Route path="/live/approvals" element={<LiveOrderApprovalPage />} />
           <Route path="/strategy-desks/systematic-equities" element={<AdminAccessGate><SystematicDeskPage /></AdminAccessGate>} />

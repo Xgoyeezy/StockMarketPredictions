@@ -248,7 +248,7 @@ This turns weak benchmark sections into concrete data-capture tasks.
 
 ## Test Commands
 
-From `D:\marcc\PycharmProjects\StockMarketPredictions`:
+From the repository root:
 
 ```powershell
 python -m compileall -q backend tests scripts

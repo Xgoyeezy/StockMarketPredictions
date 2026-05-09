@@ -3096,6 +3096,90 @@ export async function rollbackStrategy(strategyId, payload = {}) { return unwrap
 export async function getStrategyReadiness(strategyId) { return strictRequest(() => api.get(`/readiness/strategies/${encodeURIComponent(strategyId)}`), { retries: 1 }) }
 export async function evaluateStrategyReadiness(strategyId, payload = {}) { return unwrap(await api.post(`/readiness/strategies/${encodeURIComponent(strategyId)}/evaluate`, payload)) }
 export async function getDeskReadiness() { return strictRequest(() => api.get('/readiness/desk'), { retries: 1 }) }
+
+export const FALLBACK_CATEGORY_UPGRADE_READINESS = {
+  status: 'unavailable',
+  generated_at: null,
+  summary: {
+    gate_count: 9,
+    passed_gate_count: 0,
+    blocked_gate_count: 0,
+    ready_category_count: 0,
+    category_count: 6,
+    documented_requirement_count: 0,
+    documented_requirement_complete_count: 0,
+    all_documented_scope_added: false,
+    highest_priority_build: 'Restore category upgrade readiness telemetry.',
+    top_blockers: ['Category upgrade readiness summary is unavailable.'],
+    priority_backlog: [],
+  },
+  gates: [],
+  categories: [],
+  category_progress: [],
+  documented_scope_coverage: { records: [], requirement_count: 0, complete_count: 0, all_documented_scope_added: false },
+  backlog: [],
+  claims_to_avoid: ['guaranteed_returns', 'proven_alpha', 'autonomous_money_manager', 'hft_platform'],
+  safety_notes: [
+    'Read-only readiness evaluator. Does not affect trading.',
+    'Does not place orders.',
+    'Does not change broker routes.',
+    'Does not bypass risk gates.',
+    'Does not clear kill switches.',
+    'Does not change ranking weights automatically.',
+    'Does not grant AI order authority.',
+  ],
+  research_only: true,
+  read_only: true,
+  paper_route_only: true,
+  can_submit_orders: false,
+  can_submit_live_orders: false,
+  can_change_broker_routes: false,
+  can_bypass_risk_gates: false,
+  can_clear_kill_switch: false,
+  can_change_ranking_weights: false,
+  mutation: 'none',
+}
+
+export async function getCategoryUpgradeReadiness(params = {}) {
+  return safeRequest(() => api.get('/readiness/category-upgrade', { params }), FALLBACK_CATEGORY_UPGRADE_READINESS, { key: 'readiness:category-upgrade', retries: 1 })
+}
+
+export async function getCategoryUpgradeProofGates(params = {}) {
+  return safeRequest(
+    () => api.get('/readiness/category-upgrade/proof-gates', { params }),
+    { ...FALLBACK_CATEGORY_UPGRADE_READINESS, records: [] },
+    { key: 'readiness:category-upgrade-proof-gates', retries: 1 },
+  )
+}
+
+export async function getCategoryUpgradeProofChain(params = {}) {
+  return safeRequest(
+    () => api.get('/readiness/category-upgrade/proof-chain', { params }),
+    { ...FALLBACK_CATEGORY_UPGRADE_READINESS, summary: { stage_count: 9, passed_stage_count: 0, blocked_stage_count: 0 }, records: [] },
+    { key: 'readiness:category-upgrade-proof-chain', retries: 1 },
+  )
+}
+
+export async function getCategoryUpgradeBacklog(params = {}) {
+  return safeRequest(
+    () => api.get('/readiness/category-upgrade/backlog', { params }),
+    { ...FALLBACK_CATEGORY_UPGRADE_READINESS, records: [] },
+    { key: 'readiness:category-upgrade-backlog', retries: 1 },
+  )
+}
+
+export async function getCategoryUpgradeSupportExport(params = {}) {
+  return safeRequest(
+    () => api.get('/readiness/category-upgrade/support-export', { params }),
+    { export_type: 'category_upgrade_readiness_support_export', sanitized: true, report: FALLBACK_CATEGORY_UPGRADE_READINESS },
+    { key: 'readiness:category-upgrade-support-export', retries: 1 },
+  )
+}
+
+export async function writeCategoryUpgradeSupportExport(payload = {}) {
+  return strictRequest(() => api.post('/readiness/category-upgrade/support-export', payload), { retries: 0 })
+}
+
 export async function getStrategyRuns(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}/runs`), { retries: 1 }) }
 export async function getStrategyMetrics(strategyId) { return strictRequest(() => api.get(`/strategies/${encodeURIComponent(strategyId)}/metrics`), { retries: 1 }) }
 

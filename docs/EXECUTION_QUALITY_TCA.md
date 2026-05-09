@@ -159,7 +159,7 @@ npm.cmd run build
 Run the frontend build from:
 
 ```powershell
-D:\marcc\PycharmProjects\StockMarketPredictions\frontend
+cd frontend
 ```
 
 ## Limitations

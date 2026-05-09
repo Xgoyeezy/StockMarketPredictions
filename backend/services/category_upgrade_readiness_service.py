@@ -315,6 +315,90 @@ BUILD_STAGE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
 )
 
+PROOF_CHAIN_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "sequence": 1,
+        "stage_key": "verification_and_safety_audit",
+        "gate_key": "safety_intact",
+        "label": "Verification and safety audit",
+        "proof_boundary": "Safety must remain intact before any rating review.",
+        "safe_next_action": "Verify no live autonomy, no AI order authority, no broker-route mutation, and no risk-gate bypass.",
+        "claim_boundary": "Only paper-first research and evidence-platform language is allowed.",
+    },
+    {
+        "sequence": 2,
+        "stage_key": "data_completeness_hardening",
+        "gate_key": "data_complete_enough",
+        "label": "Data Completeness hardening",
+        "proof_boundary": "Benchmark and reward evidence must have complete, rewardable fields before readiness claims.",
+        "safe_next_action": "Fix missing forward returns, baselines, forecast actuals, slippage, regime labels, and required reward fields.",
+        "claim_boundary": "Do not treat incomplete evidence or simulation evidence as proof.",
+    },
+    {
+        "sequence": 3,
+        "stage_key": "professional_benchmark_hardening",
+        "gate_key": "benchmark_available",
+        "label": "Professional Benchmark availability",
+        "proof_boundary": "Benchmark reports must include enough rewardable candidates to support review.",
+        "safe_next_action": "Run or inspect Professional Benchmark Suite and identify rewardable evidence coverage.",
+        "claim_boundary": "Do not claim edge from an unavailable or insufficient benchmark.",
+    },
+    {
+        "sequence": 4,
+        "stage_key": "professional_benchmark_hardening",
+        "gate_key": "baselines_beaten",
+        "label": "Baseline-relative edge",
+        "proof_boundary": "Same-window baselines must be beaten after costs before edge language is considered.",
+        "safe_next_action": "Compare score buckets and strategies against baselines with slippage-adjusted results.",
+        "claim_boundary": "Do not claim alpha, proven edge, or performance until baselines are beaten and reviewed.",
+    },
+    {
+        "sequence": 5,
+        "stage_key": "walk_forward_maturity",
+        "gate_key": "walk_forward_passed",
+        "label": "Walk-Forward repeatability",
+        "proof_boundary": "Frozen out-of-sample tests must pass before repeatability language is considered.",
+        "safe_next_action": "Freeze experiment versions, run out-of-sample windows, and review multi-regime stability.",
+        "claim_boundary": "Do not claim repeatability until walk-forward proof passes.",
+    },
+    {
+        "sequence": 6,
+        "stage_key": "execution_quality_tca_maturity",
+        "gate_key": "execution_costs_handled",
+        "label": "Execution Quality and TCA",
+        "proof_boundary": "Candidate quality must survive spread, slippage, delay, and fill risk.",
+        "safe_next_action": "Review paper fills, slippage-adjusted reward, alpha decay, and setup-level execution drag.",
+        "claim_boundary": "Do not change broker routes or order behavior from execution analytics.",
+    },
+    {
+        "sequence": 7,
+        "stage_key": "portfolio_risk_maturity",
+        "gate_key": "risk_visibility_complete",
+        "label": "Portfolio Risk visibility",
+        "proof_boundary": "Portfolio exposure, concentration, correlation, drawdown, and stress context must be reviewable.",
+        "safe_next_action": "Complete portfolio risk coverage and keep risk analytics advisory-only.",
+        "claim_boundary": "Do not let portfolio analytics change risk limits automatically.",
+    },
+    {
+        "sequence": 8,
+        "stage_key": "research_promotion_maturity",
+        "gate_key": "governance_complete",
+        "label": "Research Promotion and governance",
+        "proof_boundary": "Promotion, approvals, RBAC, registries, and audit trails must be reviewable before firm-readiness claims.",
+        "safe_next_action": "Harden manual approval evidence, model and strategy registries, release validation, and rollback records.",
+        "claim_boundary": "Promotion status remains research metadata and must not change execution behavior.",
+    },
+    {
+        "sequence": 9,
+        "stage_key": "institutional_lineage_audit",
+        "gate_key": "external_review_complete",
+        "label": "External review and institutional proof",
+        "proof_boundary": "External security, legal, compliance, lineage, permission, and environment reviews are required for institutional claims.",
+        "safe_next_action": "Prepare sanitized review artifacts for future external security, legal, compliance, and data-lineage review.",
+        "claim_boundary": "Do not claim institutional-grade or compliance-approved readiness without external proof.",
+    },
+)
+
 PRIORITY_RANK: dict[str, int] = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4, "future_only": 9}
 
 FORBIDDEN_SAFETY_KEYS: tuple[str, ...] = (
@@ -1132,26 +1216,162 @@ def _collect_snapshot(label: str, callback: Callable[[], dict[str, Any]]) -> dic
         return {"status": "unavailable", "summary": {"status": "unavailable", "next_action": f"{label} unavailable: {exc}"}}
 
 
-def collect_existing_proof_snapshots(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
-    from backend.services.data_completeness_audit import get_data_completeness_summary
-    from backend.services.execution_quality_tca import get_execution_quality_tca_summary
-    from backend.services.human_system_shadow_mode import get_shadow_mode_summary
-    from backend.services.portfolio_risk_intelligence import get_portfolio_risk_summary
-    from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
-    from backend.services.research_promotion_rules import get_research_promotion_summary
-    from backend.services.score_calibration_attribution import get_score_calibration_summary
+def _skipped_snapshot(label: str, reason: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "summary": {
+            "status": "unavailable",
+            "next_action": reason,
+        },
+        "warnings": [reason],
+        "research_only": True,
+        "read_only": True,
+        "mutation": "none",
+    }
+
+
+def collect_existing_proof_snapshots(
+    db: Any = None,
+    *,
+    current_user: Any = None,
+    include_slow_sources: bool = False,
+    include_diagnostic_sources: bool = False,
+) -> dict[str, Any]:
     from backend.services.walk_forward_experiment_registry import get_walk_forward_summary
 
-    return {
-        "data_completeness": _collect_snapshot("Data Completeness", lambda: get_data_completeness_summary(db=db, current_user=current_user)),
-        "benchmark": _collect_snapshot("Professional Benchmark", lambda: get_professional_benchmark_summary(db=db, current_user=current_user)),
+    slow_reason = "Skipped in the fast category readiness view; open the dedicated surface or request a full proof refresh before treating this gate as complete."
+    if include_slow_sources:
+        from backend.services.data_completeness_audit import get_data_completeness_summary
+        from backend.services.execution_quality_tca import get_execution_quality_tca_summary
+        from backend.services.portfolio_risk_intelligence import get_portfolio_risk_summary
+        from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
+        from backend.services.research_promotion_rules import get_research_promotion_summary
+
+    if include_diagnostic_sources:
+        from backend.services.score_calibration_attribution import get_score_calibration_summary
+        if include_slow_sources:
+            from backend.services.human_system_shadow_mode import get_shadow_mode_summary
+
+    snapshots = {
+        "data_completeness": _collect_snapshot("Data Completeness", lambda: get_data_completeness_summary(db=db, current_user=current_user))
+        if include_slow_sources
+        else _skipped_snapshot("Data Completeness", slow_reason),
+        "benchmark": _collect_snapshot("Professional Benchmark", lambda: get_professional_benchmark_summary(db=db, current_user=current_user))
+        if include_slow_sources
+        else _skipped_snapshot("Professional Benchmark", slow_reason),
         "walk_forward": _collect_snapshot("Walk-Forward", lambda: get_walk_forward_summary()),
-        "score_calibration": _collect_snapshot("Score Calibration", lambda: get_score_calibration_summary(db=db, current_user=current_user)),
-        "execution_quality": _collect_snapshot("Execution Quality", lambda: get_execution_quality_tca_summary(db=db, current_user=current_user)),
-        "portfolio_risk": _collect_snapshot("Portfolio Risk", lambda: get_portfolio_risk_summary(db=db, current_user=current_user)),
-        "shadow_mode": _collect_snapshot("Human vs System Shadow Mode", lambda: get_shadow_mode_summary(db=db, current_user=current_user)),
-        "research_promotion": _collect_snapshot("Research Promotion", lambda: get_research_promotion_summary(db=db, current_user=current_user)),
+        "execution_quality": _collect_snapshot("Execution Quality", lambda: get_execution_quality_tca_summary(db=db, current_user=current_user))
+        if include_slow_sources
+        else _skipped_snapshot("Execution Quality", slow_reason),
+        "portfolio_risk": _collect_snapshot("Portfolio Risk", lambda: get_portfolio_risk_summary(db=db, current_user=current_user))
+        if include_slow_sources
+        else _skipped_snapshot("Portfolio Risk", slow_reason),
+        "research_promotion": _collect_snapshot("Research Promotion", lambda: get_research_promotion_summary(db=db, current_user=current_user))
+        if include_slow_sources
+        else _skipped_snapshot("Research Promotion", slow_reason),
     }
+    if include_diagnostic_sources:
+        snapshots["score_calibration"] = _collect_snapshot("Score Calibration", lambda: get_score_calibration_summary(db=db, current_user=current_user))
+        snapshots["shadow_mode"] = (
+            _collect_snapshot("Human vs System Shadow Mode", lambda: get_shadow_mode_summary(db=db, current_user=current_user))
+            if include_slow_sources
+            else _skipped_snapshot("Human vs System Shadow Mode", slow_reason)
+        )
+    return snapshots
+
+
+def build_current_safety_verification_state() -> dict[str, Any]:
+    from backend.services.trading_safety_service import read_last_known_safety_state
+
+    ai_agent_safety_flags = {
+        "authority_level": "research_only",
+        "ai_order_authority": False,
+        "live_trading_approval": False,
+        "execution_mutation": False,
+        "broker_route_mutation": False,
+        "risk_gate_mutation": False,
+        "ranking_mutation": False,
+    }
+    latest = _collect_snapshot("Last known safety state", lambda: read_last_known_safety_state())
+    route = _as_dict(latest.get("route"))
+    route_enforcement = _as_dict(latest.get("route_enforcement"))
+    trade_proof = _as_dict(latest.get("trade_proof"))
+    preflight = _as_dict(latest.get("preflight"))
+    kill_switch = _as_dict(latest.get("kill_switch_context"))
+    snapshot_available = bool(latest) and str(latest.get("status") or "").lower() != "unavailable"
+    route_allowed = bool(route.get("allowed")) or bool(route_enforcement.get("alpaca_paper_only"))
+    paper_mode = str(route.get("mode") or "").strip().lower() == "paper"
+    provider = str(route.get("provider") or "").strip().lower()
+    active_route = str(route.get("active") or route_enforcement.get("active_route") or "").strip().lower()
+    ai_order_authority = bool(ai_agent_safety_flags.get("ai_order_authority"))
+    live_approval = bool(ai_agent_safety_flags.get("live_trading_approval"))
+    execution_mutation = bool(ai_agent_safety_flags.get("execution_mutation"))
+    broker_route_mutation = bool(ai_agent_safety_flags.get("broker_route_mutation"))
+    risk_gate_mutation = bool(ai_agent_safety_flags.get("risk_gate_mutation"))
+    ranking_mutation = bool(ai_agent_safety_flags.get("ranking_mutation"))
+
+    violations: list[str] = []
+    if snapshot_available and not route_allowed:
+        violations.append("Last known unattended execution route was not marked Alpaca paper only.")
+    if snapshot_available and kill_switch.get("active") and kill_switch.get("auto_cleared"):
+        violations.append("Last known safety state indicates an auto-cleared kill switch.")
+    if ai_order_authority:
+        violations.append("AI agent safety flags indicate AI order authority.")
+    if live_approval:
+        violations.append("AI agent safety flags indicate live-trading approval authority.")
+    if execution_mutation:
+        violations.append("AI agent safety flags indicate execution mutation authority.")
+    if broker_route_mutation:
+        violations.append("AI agent safety flags indicate broker-route mutation authority.")
+    if risk_gate_mutation:
+        violations.append("AI agent safety flags indicate risk-gate mutation authority.")
+    if ranking_mutation:
+        violations.append("AI agent safety flags indicate ranking mutation authority.")
+
+    return serialize_value(
+        {
+            "source": "last_known_safety_snapshot_and_static_research_authority_contracts",
+            "last_known_safety_snapshot_available": snapshot_available,
+            "paper_first_boundary_preserved": bool(
+                snapshot_available
+                and route_allowed
+                and paper_mode
+                and provider == "alpaca"
+                and bool(trade_proof.get("no_live_order_autonomy"))
+                and bool(trade_proof.get("no_signal_direct_to_broker"))
+            ),
+            "alpaca_paper_only_unattended": bool(snapshot_available and route_allowed and paper_mode and provider == "alpaca"),
+            "reward_forecast_research_only": True,
+            "risk_gates_authoritative": bool(snapshot_available and bool(preflight)),
+            "broker_routes_unchanged": bool(snapshot_available and route_allowed and active_route == "broker_paper"),
+            "ai_has_no_order_authority": not ai_order_authority and not live_approval and not execution_mutation,
+            "autonomous_live_money_orders_enabled": False,
+            "ai_order_authority": ai_order_authority,
+            "risk_gate_bypass_enabled": risk_gate_mutation,
+            "kill_switch_bypass_enabled": False,
+            "automatic_broker_route_loosening": broker_route_mutation,
+            "automatic_ranking_weight_changes": ranking_mutation,
+            "simulation_merged_with_observed": False,
+            "live_money_autonomy_enabled": live_approval,
+            "broker_routes_changed_by_analytics": broker_route_mutation,
+            "support_export_leaks_sensitive_data": False,
+            "violations": violations,
+            "evidence": {
+                "route_provider": provider or None,
+                "route_mode": route.get("mode"),
+                "active_route": active_route or None,
+                "route_allowed": route_allowed,
+                "preflight_status": preflight.get("status"),
+                "trade_proof_checked": sorted(trade_proof.keys()),
+                "ai_agent_authority_level": ai_agent_safety_flags.get("authority_level"),
+                "ai_agent_execution_mutation": execution_mutation,
+                "ai_agent_broker_route_mutation": broker_route_mutation,
+                "ai_agent_risk_gate_mutation": risk_gate_mutation,
+                "ai_agent_ranking_mutation": ranking_mutation,
+            },
+            "warnings": [] if snapshot_available else ["Last known safety snapshot is unavailable; run the safety-state check before treating Gate 1 as complete."],
+        }
+    )
 
 
 def build_category_upgrade_readiness_report(
@@ -1241,6 +1461,82 @@ def build_category_upgrade_readiness_report(
     )
 
 
+def _proof_chain_row_status(gate: dict[str, Any], backlog_item: dict[str, Any]) -> str:
+    gate_status = str(gate.get("status") or "missing")
+    if gate_status == "blocked":
+        return "blocked"
+    if gate_status == "passed":
+        return "passed"
+    backlog_state = str(backlog_item.get("state") or "")
+    if backlog_state == "future_only":
+        return "future_only"
+    return gate_status if gate_status in {"partial", "missing"} else "missing"
+
+
+def build_category_upgrade_proof_chain(report: dict[str, Any] | None = None, *, generated_at: str | None = None) -> dict[str, Any]:
+    source = report or build_category_upgrade_readiness_report(generated_at=generated_at)
+    gates = {str(gate.get("key")): dict(gate) for gate in list(source.get("gates") or []) if isinstance(gate, dict)}
+    backlog = {str(item.get("key")): dict(item) for item in list(source.get("backlog") or []) if isinstance(item, dict)}
+    rows: list[dict[str, Any]] = []
+    for definition in PROOF_CHAIN_DEFINITIONS:
+        gate = gates.get(str(definition["gate_key"]), {})
+        backlog_item = backlog.get(str(definition["stage_key"]), {})
+        warnings = [str(item) for item in list(gate.get("warnings") or []) if str(item).strip()]
+        blockers = [str(item) for item in list(gate.get("blockers") or []) if str(item).strip()]
+        rows.append(
+            {
+                "sequence": definition["sequence"],
+                "stage_key": definition["stage_key"],
+                "gate_key": definition["gate_key"],
+                "label": definition["label"],
+                "status": _proof_chain_row_status(gate, backlog_item),
+                "passed": bool(gate.get("passed")),
+                "blocking": bool(gate.get("blocking")),
+                "proof_boundary": definition["proof_boundary"],
+                "safe_next_action": definition["safe_next_action"],
+                "claim_boundary": definition["claim_boundary"],
+                "evidence": _as_dict(gate.get("evidence")),
+                "claims_allowed": list(gate.get("claims_allowed") or []),
+                "claims_disallowed": list(gate.get("claims_disallowed") or []),
+                "warnings": warnings,
+                "blockers": blockers,
+                "backlog_state": backlog_item.get("state", "missing"),
+                "backlog_priority": backlog_item.get("priority"),
+                "impacted_categories": list(backlog_item.get("impacted_categories") or []),
+                "missing_gates": list(backlog_item.get("missing_gates") or []),
+                "missing_extra_proof": list(backlog_item.get("missing_extra_proof") or []),
+                "what_not_to_build_yet": backlog_item.get("what_not_to_build_yet") or definition["claim_boundary"],
+                "research_only": True,
+                "read_only": True,
+                "execution_mutation": False,
+                "broker_route_mutation": False,
+                "risk_gate_mutation": False,
+                "ranking_mutation": False,
+            }
+        )
+    blocked = [row for row in rows if row["status"] == "blocked"]
+    missing_or_partial = [row for row in rows if row["status"] in {"missing", "partial"}]
+    return serialize_value(
+        {
+            "status": "blocked" if blocked else "in_progress" if missing_or_partial else "passed",
+            "generated_at": generated_at or _utc_now(),
+            "source_report_generated_at": _as_dict(source).get("generated_at"),
+            "summary": {
+                "stage_count": len(rows),
+                "passed_stage_count": sum(1 for row in rows if row["passed"]),
+                "blocked_stage_count": len(blocked),
+                "next_stage": (blocked or missing_or_partial or rows[:1])[0]["label"] if rows else None,
+                "highest_priority_build": _as_dict(_as_dict(source).get("summary")).get("highest_priority_build"),
+                "claim_boundary": "Ratings remain current estimated readiness only; no alpha, performance, institutional, or HFT claims are allowed from this proof chain alone.",
+            },
+            "records": rows,
+            "claims_to_avoid": list(source.get("claims_to_avoid") or []),
+            "safety_notes": list(source.get("safety_notes") or SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def build_category_upgrade_support_export(
     report: dict[str, Any] | None = None,
     *,
@@ -1308,9 +1604,15 @@ def write_category_upgrade_readiness_export(
     )
 
 
-def get_category_upgrade_readiness_summary(db: Any = None, *, current_user: Any = None) -> dict[str, Any]:
-    snapshots = collect_existing_proof_snapshots(db=db, current_user=current_user)
+def get_category_upgrade_readiness_summary(
+    db: Any = None,
+    *,
+    current_user: Any = None,
+    include_slow_sources: bool = False,
+) -> dict[str, Any]:
+    snapshots = collect_existing_proof_snapshots(db=db, current_user=current_user, include_slow_sources=include_slow_sources)
     return build_category_upgrade_readiness_report(
+        safety_state=build_current_safety_verification_state(),
         data_completeness=snapshots.get("data_completeness"),
         benchmark=snapshots.get("benchmark"),
         walk_forward=snapshots.get("walk_forward"),
