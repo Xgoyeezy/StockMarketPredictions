@@ -94,12 +94,46 @@ function Get-ProcessPathSafe {
     try { return (Get-Process -Id $ProcessId -ErrorAction Stop).Path } catch { return $null }
 }
 
+function Get-ProcessCommandLineSafe {
+    param([int]$ProcessId)
+    try {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction Stop
+        if ($process -and $process.CommandLine) { return [string]$process.CommandLine }
+    } catch { }
+    return $null
+}
+
+function Normalize-ComparablePathText {
+    param([string]$PathText)
+    if (-not $PathText) { return "" }
+    return (($PathText -replace "/", "\").ToLowerInvariant() -replace "\\{2,}", "\")
+}
+
+function Test-BackendListenerMatchesRepo {
+    param(
+        [int]$ProcessId,
+        [string]$ExpectedPython,
+        [string]$RepoRootPath
+    )
+    $expectedPythonText = Normalize-ComparablePathText -PathText $ExpectedPython
+    $repoRootText = Normalize-ComparablePathText -PathText $RepoRootPath
+    $procPathText = Normalize-ComparablePathText -PathText (Get-ProcessPathSafe -ProcessId $ProcessId)
+    if ($procPathText -and ($procPathText -eq $expectedPythonText)) { return $true }
+
+    $commandLineText = Normalize-ComparablePathText -PathText (Get-ProcessCommandLineSafe -ProcessId $ProcessId)
+    if (-not $commandLineText) { return $false }
+
+    $launchesBackendApp = $commandLineText.Contains("-m backend.app")
+    $usesExpectedVenv = $commandLineText.Contains($expectedPythonText)
+    $runsFromRepo = $commandLineText.Contains($repoRootText)
+    return ($launchesBackendApp -and ($usesExpectedVenv -or $runsFromRepo))
+}
+
 if ($ForceRestart) { $needRestart = $true }
 
 if (-not $needRestart -and $RequireBackendVenv) {
     if ($initialBackendListenerPid) {
-        $procPath = Get-ProcessPathSafe -ProcessId $initialBackendListenerPid
-        if ($procPath -and ($procPath.ToLower() -ne $backendPython.ToLower())) {
+        if (-not (Test-BackendListenerMatchesRepo -ProcessId $initialBackendListenerPid -ExpectedPython $backendPython -RepoRootPath $RepoRoot)) {
             $needRestart = $true
         }
     }
