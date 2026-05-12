@@ -110,15 +110,31 @@ Every incident record should include:
 - Incident identifier.
 - Opened timestamp.
 - Severity.
+- Detection source.
+- First visible symptom.
 - Owner.
 - Affected research or control-plane entity.
+- Affected proof surfaces, such as Data Completeness, Professional Benchmark, Walk-Forward, Execution Quality, Score Calibration, Risk Gate and Audit Trail, Portfolio Risk, Human vs System, Research Promotion, Evidence Reward, or Forecast Validation.
+- Current safety state.
+- Whether execution, broker routes, order logic, risk gates, kill switches, AI authority, ranking weights, or simulation separation were affected.
 - Current status.
 - Containment note.
 - Corrective action.
+- Verification performed before closure.
 - Closed timestamp when resolved.
 - Post-incident review note when applicable.
 
 Incident reports must stay sanitized. They should exclude secrets, broker records, raw logs, account identifiers, and raw local paths.
+
+Treat any of the following as a release-blocking or safety-boundary incident until reviewed:
+
+- Unexpected live-trading enablement.
+- Broker-route, order-submission, risk-gate, kill-switch, AI-authority, or ranking-weight changes.
+- Simulation evidence merged into real-time market-observed evidence.
+- Secrets, broker records, account identifiers, raw logs, raw local paths, database files, credentials, or environment values in an export, report, or support artifact.
+- Failed local verification that affects proof surfaces or safety claims.
+
+Incident records are review metadata only. They must not clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live-money autonomy, mutate ranking weights, approve a release, or convert incomplete proof into passing proof.
 
 ## External Security Legal And Compliance Review Plan
 

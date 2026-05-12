@@ -327,6 +327,20 @@ Remaining release and rollback proof gap:
 
 Release and rollback controls are now better specified as sanitized review metadata, but they are not firm-grade governance proof by themselves. Any future readiness claim still requires release records with safety invariant results, verification summaries, affected proof surfaces, reviewer or automation checks, rollback target, sanitization result, and post-rollback verification when applicable.
 
+Incident management evidence checklist update:
+
+Follow-up action hardened incident-management documentation in `docs/compliance_checklist.md`, `docs/runbooks/incident_response.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`. This is documentation-only proof and audit discipline; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, or ranking-weight behavior.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated documents: `docs/compliance_checklist.md`, `docs/runbooks/incident_response.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, kill-switch, AI-authority, or ranking code changed.
+
+Remaining incident-management proof gap:
+
+Incident management is now better specified as sanitized review metadata, but readiness remains evidence-bound. Any future small-fund or institutional readiness claim still requires complete incident records with affected proof surfaces, safety-state impact, containment, corrective action, closure verification, sanitization checks, and post-incident review notes where applicable.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
