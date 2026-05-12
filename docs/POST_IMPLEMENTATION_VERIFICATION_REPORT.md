@@ -299,6 +299,20 @@ Remaining paper-to-live proof gap:
 
 Paper-to-live readiness remains blocked. Any future review still requires clean safety, data, benchmark, walk-forward, execution quality, portfolio risk, paper reconciliation, human approval, rollback, and hard-cap evidence before even a tiny manual live ticket could be considered.
 
+Support export sanitization checklist update:
+
+Follow-up action consolidated support-export sanitization requirements in `docs/compliance_checklist.md`, `docs/RETAIL_PAPER_OPERATOR_GUIDE.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`. This is documentation-only proof discipline for support and firm-review artifacts; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, AI authority, or ranking-weight behavior.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated documents: `docs/compliance_checklist.md`, `docs/RETAIL_PAPER_OPERATOR_GUIDE.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, or ranking code changed.
+
+Remaining support-export proof gap:
+
+Support exports already have sanitization tests, but readiness remains review-bound. Any future support or firm-review export must prove redaction status, schema version, generated timestamp, source report, no secret-like fields, no account identifiers, no raw broker payloads, no raw logs, no raw local paths, no database files, and no environment values before it can support retail or firm-facing readiness claims.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

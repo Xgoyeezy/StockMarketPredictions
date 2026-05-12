@@ -45,6 +45,8 @@ Execution readiness:
 Governance readiness:
 
 - [ ] Support export excludes secrets, broker records, raw logs, account IDs, raw local paths, and credentials.
+- [ ] Support export records redaction status, schema version, generated timestamp, source report name, and safe sharing boundary.
+- [ ] Support export review confirms no raw broker payloads, database files, environment values, authorization headers, or unsanitized personal data are present.
 - [ ] User-facing proof labels distinguish paper evidence from live-money performance.
 
 UI readiness:
@@ -63,6 +65,7 @@ Test readiness:
 - [ ] Onboarding state transition tests exist.
 - [ ] Demo evidence separation tests exist.
 - [ ] Support bundle sanitization tests exist.
+- [ ] Support export unsafe-content regression tests cover secrets, account identifiers, broker payloads, raw logs, raw local paths, credentials, and environment values.
 
 Proof readiness:
 

@@ -77,3 +77,16 @@ Rejected paper orders are evidence too. The rejection reason should be shown in 
 ## Support Export Safety
 
 Support exports must be sanitized. They must exclude secrets, broker records, raw logs, account IDs, raw local paths, credentials, and unsanitized personal data.
+
+Before sharing a support export, verify:
+
+- The export says `sanitized: true`.
+- Secret-like fields are redacted rather than included.
+- Account identifiers are absent or redacted.
+- Raw broker payloads are absent.
+- Raw logs and database files are absent.
+- Raw local paths are absent.
+- Environment values and credentials are absent.
+- The export contains summaries, status, blocked claims, and safe next actions only.
+
+If any sensitive item appears, do not share the export. Treat it as a failed support-export safety check and regenerate after the source is sanitized.

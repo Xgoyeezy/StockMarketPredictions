@@ -16,6 +16,47 @@ Compliance readiness means the repository has sanitized evidence, documented bou
 - Keep broker routes unchanged unless a separate explicit broker-routing project approves a change.
 - Keep support and firm-grade reports sanitized of secrets, account identifiers, raw broker records, raw logs, and raw local paths.
 
+## Support Export Sanitization Evidence Checklist
+
+Support and firm-review exports are proof artifacts only. They do not prove alpha, approve live trading, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or mutate ranking weights.
+
+Every support export review should record:
+
+- Export type and schema version.
+- Generated timestamp.
+- Source report name.
+- Sanitized flag.
+- Redaction policy version.
+- Whether secret-like keys were redacted.
+- Whether account identifiers were redacted.
+- Whether raw broker payloads were excluded.
+- Whether raw logs were excluded.
+- Whether raw local paths were excluded.
+- Whether credentials and environment values were excluded.
+- Whether exported fields are metadata, summaries, or sanitized evidence only.
+- Reviewer or automation check that confirmed the boundary.
+
+Stop the export or mark it unsafe if any artifact includes:
+
+- `.env` values.
+- API keys, tokens, passwords, or authorization headers.
+- Broker account identifiers.
+- Raw broker records or raw broker payloads.
+- Raw runtime logs.
+- Raw local paths.
+- Database files or local storage files.
+- Unsanitized personal data.
+
+Allowed export contents:
+
+- Sanitized summary metrics.
+- Read-only proof status.
+- Blocked claims.
+- Safe next actions.
+- Source document names.
+- Test/build/probe status summaries.
+- Redaction status and warnings.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.
