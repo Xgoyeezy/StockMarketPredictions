@@ -463,6 +463,10 @@ Release validation evidence update:
 
 Follow-up action hardened the release and rollback documentation contract with explicit required release-validation fields and blocked conditions. This is release evidence discipline only; it does not enable live autonomy, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or change ranking weights.
 
+Institutional docs index update:
+
+Follow-up action expanded the institutional docs index so the proof contracts for permissions, approvals, audit events, model versions, feature lineage, benchmark and walk-forward links, risk controls, execution reports, incidents, and release validation point to their compliance checklist anchors. This is review navigation only; it does not add runtime surfaces or approval authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

@@ -676,6 +676,17 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertIn("#compliance-readiness-checklist", docs["docs"]["compliance_readiness_checklist"])
         self.assertIn("#incident-management-runbook", docs["docs"]["incident_management_runbook"])
         self.assertIn("#external-security-legal-and-compliance-review-plan", docs["docs"]["external_review_plan"])
+        self.assertIn("#permission-enforcement-coverage", docs["docs"]["permission_enforcement"])
+        self.assertIn("#approval-trace-completeness", docs["docs"]["approval_trace"])
+        self.assertIn("#audit-event-completeness", docs["docs"]["audit_event_completeness"])
+        self.assertIn("#model-version-traceability", docs["docs"]["model_version_traceability"])
+        self.assertIn("#feature-lineage-completeness", docs["docs"]["feature_lineage_completeness"])
+        self.assertIn("#benchmark-and-walk-forward-traceability", docs["docs"]["benchmark_walk_forward_traceability"])
+        self.assertIn("#risk-control-auditability", docs["docs"]["risk_control_auditability"])
+        self.assertIn("#execution-report-lineage", docs["docs"]["execution_report_lineage"])
+        self.assertIn("#incident-report-completeness", docs["docs"]["incident_report_completeness"])
+        self.assertTrue(docs["permission_enforcement_docs_exist"])
+        self.assertTrue(docs["release_validation_docs_exist"])
         self.assertIn("not legal", docs["docs_claim_boundary"])
 
     def test_category_report_marks_this_pass_complete(self) -> None:
