@@ -377,6 +377,9 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "reviewer_role": "risk_manager",
                     "action": "hold",
                     "affected_entity": "research_promotion_status",
+                    "strategy_id": "strategy:macro_trend",
+                    "strategy_version": "strategy_v1",
+                    "promotion_rule_version": "research_promotion_v1",
                     "timestamp": "2026-05-09T14:00:00Z",
                     "evidence_snapshot_id": "snapshot-1",
                     "audit_event_id": "audit-event-1",
@@ -431,6 +434,9 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(permissions["permission_enforcement_changes_execution_behavior"])
         self.assertEqual(approvals["status"], "needs_evidence")
         self.assertIn("actor", approvals["checks"][1]["missing_fields"])
+        self.assertIn("strategy_id", approvals["checks"][1]["missing_fields"])
+        self.assertIn("strategy_version", approvals["checks"][1]["missing_fields"])
+        self.assertIn("promotion_rule_version", approvals["checks"][1]["missing_fields"])
         self.assertEqual(approvals["failed_indexes"], [1])
         self.assertEqual(approvals["violations_by_record"][1]["violation_fields"], ["approves_live_trading"])
         self.assertTrue(approvals["blocks_small_fund_claims_when_failed"])

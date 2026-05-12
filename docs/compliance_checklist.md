@@ -146,6 +146,9 @@ Every approval-trace review should record:
 - Reviewer role.
 - Action.
 - Affected research or governance entity.
+- Strategy identifier.
+- Strategy version.
+- Promotion rule version.
 - Timestamp.
 - Evidence snapshot identifier.
 - Audit event identifier.

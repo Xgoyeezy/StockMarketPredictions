@@ -416,6 +416,10 @@ Remaining approval-trace proof gap:
 
 Approval traces are now stricter about reviewer role, affected entity, audit event, approval scope, decision reason, claim boundary, and unsafe authority flags, but they remain review contracts. Small-fund and institutional-readiness claims still require real approval records proving who changed what, when, with which evidence snapshot, why the status changed, and no live-trading approval, order submission, broker-route mutation, risk-gate bypass, kill-switch clearing, AI order authority, ranking-weight mutation, risk-limit mutation, immutable forecast-record mutation, or reward-input mutation after outcomes.
 
+Strategy approval traceability update:
+
+Follow-up action added strategy identifier, strategy version, and promotion rule version to the approval-trace completeness contract. This is traceability evidence only; it does not add a strategy registry, change promotion behavior, approve live trading, change ranking weights, or grant any execution authority.
+
 Audit event completeness update:
 
 Follow-up action hardened the audit event completeness and immutability contract in `docs/compliance_checklist.md` and the institutional readiness service. This is proof and audit evidence only; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, risk-limit behavior, or release approval behavior.
