@@ -49,6 +49,44 @@ Missing forward returns, baselines, execution costs, score fields, or regime lab
 
 Simulation evidence remains separate from real-time market-observed evidence.
 
+## Evidence Reward Cleanup Plan
+
+The report includes `evidence_reward_cleanup_plan` and `aggregations.evidence_reward_cleanup_plan`.
+
+This is the proof-first cleanup layer for Evidence Reward and blocker value. It turns rewardability gaps into explicit manual cleanup items so incomplete evidence cannot be mistaken for alpha, tradability, ranking approval, paper-to-live readiness, or live-trading readiness.
+
+Cleanup items:
+
+- candidate evidence sample
+- rewardable prediction contracts
+- outcome and baseline coverage
+- execution cost context
+- blocker value evidence
+- simulation evidence separation
+- manual ranking review boundary
+
+The summary exposes:
+
+- `reward_cleanup_status`
+- `reward_cleanup_open_items`
+- `reward_cleanup_critical_open_items`
+- `top_cleanup_item`
+- `claim_permissions`
+
+Claim permissions remain conservative:
+
+- `cautious_internal_reward_review` may become true only when rewardable prediction contracts exist.
+- `blocker_value_review` may become true only when blocker value has rewardable blocked rows.
+- `after_cost_reward_review` may become true only when execution-cost context exists.
+- `public_alpha_claim` remains false.
+- `automatic_ranking_mutation` remains false.
+- `paper_to_live_readiness` remains false.
+- `live_trading_readiness` remains false.
+
+Blocked claims include proven alpha, reward-quality claims, blocker-value claims, after-cost reward claims, automatic ranking mutation, paper-to-live readiness, and live-trading readiness.
+
+The cleanup plan is research metadata only. It does not submit orders, trigger paper orders, enable live trading, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, merge simulation evidence into real-time market-observed evidence, or mutate ranking weights.
+
 ## Safety Boundary
 
 Evidence Reward may recommend manual research review. It must not:

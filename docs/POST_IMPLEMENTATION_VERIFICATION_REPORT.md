@@ -200,6 +200,25 @@ Remaining Research Promotion proof gap:
 
 Research Promotion now exposes a proof-first cleanup plan, but it is not ready for small-fund governance, automatic promotion, ranking-weight changes, risk-limit changes, broker-route changes, paper-to-live readiness, or live-readiness language. The next evidence work is still to improve traceability across benchmark, data-completeness, walk-forward, execution, and sanitized manual-review records while keeping promotion metadata disconnected from execution, broker, risk, strategy, kill-switch, ranking, and AI order authority.
 
+Evidence Reward cleanup update:
+
+Follow-up action added an Evidence Reward cleanup plan to the reward engine, API fallback, report UI, tests, and documentation. This keeps rewards research-only while making rewardability, baseline, execution-cost, blocker-value, simulation-separation, automatic ranking mutation, paper-to-live, and live-readiness blockers explicit.
+
+Verification evidence:
+
+- Focused Evidence Reward backend/static tests: PASS, 16 passed.
+- Route-health follow-up test: PASS.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live app restart completed through the existing startup script.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Evidence Reward result: status `empty`, cleanup status `blocked_by_evidence`, 5 open cleanup items, live-trading readiness `false`.
+- Frontend route smoke: `/evidence-reward` returned HTTP 200.
+
+Remaining Evidence Reward proof gap:
+
+Evidence Reward now exposes a proof-first cleanup plan, but it is not ready for reward-quality, blocker-value, after-cost reward, paper-to-live, live-readiness, or ranking-mutation language. The next evidence work is still to produce rewardable prediction contracts with closed-horizon outcomes, same-window baselines, execution-cost context, and blocked-candidate outcomes while keeping simulation evidence separate and reward recommendations manual-review only.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

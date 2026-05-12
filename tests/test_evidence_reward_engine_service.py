@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.services.evidence_reward_engine import (
     build_evidence_reward_report,
+    build_evidence_reward_cleanup_plan,
     compute_baseline_relative_score,
     compute_blocker_correctness_bonus,
     compute_drawdown_penalty,
@@ -89,6 +90,10 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
         self.assertIn("safety_notes", report)
         self.assertIn("records", report)
         self.assertIn("aggregations", report)
+        self.assertIn("evidence_reward_cleanup_plan", report)
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_reward_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["automatic_ranking_mutation"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
         self.assertTrue(report["research_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
@@ -257,6 +262,50 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["candidate_count"], 0)
         self.assertEqual(report["summary"]["source_counts"]["simulation_evidence_rows_excluded"], 1)
 
+    def test_cleanup_plan_blocks_claims_until_rewardability_and_blocker_evidence_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_jsonl(
+                root / "runtime-exports" / "candidate-lifecycle" / "2026-05-05" / "test-tenant.jsonl",
+                [
+                    {
+                        "candidate_lifecycle_id": "cand-label",
+                        "ticker": "MSFT",
+                        "opportunity_type": "bullish_chart",
+                        "final_state": "blocked",
+                        "blockers": ["wide_spread"],
+                        "actual_forward_return": 1.2,
+                    }
+                ],
+            )
+            report = self._build_report(root)
+
+        plan = build_evidence_reward_cleanup_plan(
+            records=[],
+            summary={"candidate_count": 0, "rewardable_count": 0, "blocked_count": 0, "source_counts": {}},
+            blockers=[],
+            recommendations=[],
+        )
+        live_plan = report["evidence_reward_cleanup_plan"]
+        by_key = {row["key"]: row for row in live_plan["items"]}
+
+        self.assertEqual(plan["status"], "blocked_by_evidence")
+        self.assertEqual(live_plan["status"], "blocked_by_evidence")
+        self.assertIn("reward_quality_claim", live_plan["summary"]["blocked_claims"])
+        self.assertIn("blocker_value_claim", live_plan["summary"]["blocked_claims"])
+        self.assertIn("automatic_ranking_mutation", live_plan["summary"]["blocked_claims"])
+        self.assertIn("blocker_value_claim", by_key["blocker_value_evidence"]["blocked_claims"])
+        self.assertFalse(live_plan["summary"]["claim_permissions"]["automatic_ranking_mutation"])
+        self.assertFalse(live_plan["summary"]["claim_permissions"]["paper_to_live_readiness"])
+        self.assertFalse(live_plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in live_plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in live_plan["items"]))
+        self.assertFalse(any(item["changes_order_submission"] for item in live_plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in live_plan["items"]))
+        self.assertFalse(any(item["changes_risk_gates"] for item in live_plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in live_plan["items"]))
+        self.assertFalse(any(item["clears_kill_switch"] for item in live_plan["items"]))
+
     def test_api_response_shape_has_safety_flags(self) -> None:
         client = TestClient(create_app())
         for path in (
@@ -284,6 +333,8 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
             self.assertIn("safety_notes", payload["data"])
             self.assertIn("Research only. Does not affect trading.", payload["data"]["safety_notes"])
             self.assertIn("summary", payload["data"])
+            self.assertIn("evidence_reward_cleanup_plan", payload["data"])
+            self.assertIn("claim_permissions", payload["data"]["summary"])
             self.assertIn("missing_fields", payload["data"])
             self.assertFalse(payload["data"]["can_submit_orders"])
             self.assertFalse(payload["data"]["can_submit_live_orders"])
