@@ -95,6 +95,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "benchmark_walk_forward_traceability": "docs/compliance_checklist.md#benchmark-and-walk-forward-traceability",
     "risk_control_auditability": "docs/compliance_checklist.md#risk-control-auditability",
     "execution_report_lineage": "docs/compliance_checklist.md#execution-report-lineage",
+    "incident_report_completeness": "docs/compliance_checklist.md#incident-report-completeness",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -288,11 +289,19 @@ INCIDENT_RESPONSE_FIELDS: tuple[str, ...] = (
     "incident_id",
     "opened_at",
     "severity",
+    "detection_source",
+    "first_visible_symptom",
     "owner",
     "affected_entity",
+    "affected_proof_surfaces",
+    "safety_state_impact",
     "status",
+    "containment_note",
     "corrective_action",
+    "verification_performed",
+    "sanitization_status",
     "closed_at",
+    "post_incident_review_note",
 )
 AUDIT_IMMUTABILITY_FIELDS: tuple[str, ...] = (
     "event_id",
@@ -1035,14 +1044,34 @@ def validate_incident_response_records(records: list[dict[str, Any]] | None = No
             "incident_id": "incident-1",
             "opened_at": "2026-05-09T14:00:00Z",
             "severity": "medium",
+            "detection_source": "release_validation",
+            "first_visible_symptom": "missing audit event",
             "owner": "operations",
             "affected_entity": "research_promotion",
+            "affected_proof_surfaces": ["audit_trail", "research_promotion"],
+            "safety_state_impact": "none",
             "status": "closed",
+            "containment_note": "held readiness claim",
             "corrective_action": "documented rollback validation",
+            "verification_performed": "focused audit review",
+            "sanitization_status": "sanitized",
             "closed_at": "2026-05-09T15:00:00Z",
+            "post_incident_review_note": "added required audit evidence",
         },
     )
-    return serialize_value({**result, "incident_response_changes_execution_behavior": False})
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["incident_report_completeness"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "incident_response_changes_execution_behavior": False,
+            "incident_response_can_clear_kill_switch": False,
+            "incident_response_can_change_broker_routes": False,
+            "incident_response_can_bypass_risk_gates": False,
+            "incident_response_can_approve_live_trading": False,
+        }
+    )
 
 
 def build_release_validation_rollback_docs_contract() -> dict[str, Any]:

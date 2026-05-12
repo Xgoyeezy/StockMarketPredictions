@@ -361,6 +361,31 @@ Treat any of the following as a release-blocking or safety-boundary incident unt
 
 Incident records are review metadata only. They must not clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live-money autonomy, mutate ranking weights, approve a release, or convert incomplete proof into passing proof.
 
+## Incident Report Completeness
+
+Incident report completeness is proof evidence for operational review. It does not clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live autonomy, mutate ranking weights, approve releases, or convert incomplete proof into passing proof.
+
+Every incident report review should record:
+
+- Incident identifier.
+- Opened timestamp.
+- Severity.
+- Detection source.
+- First visible symptom.
+- Owner.
+- Affected entity.
+- Affected proof surfaces.
+- Safety-state impact.
+- Current status.
+- Containment note.
+- Corrective action.
+- Verification performed.
+- Sanitization status.
+- Closed timestamp.
+- Post-incident review note.
+
+Block small-fund or institutional-readiness claims if incident reports cannot prove detection, affected proof surfaces, safety impact, containment, corrective action, closure verification, sanitization, and post-incident review.
+
 ## External Security Legal And Compliance Review Plan
 
 External review is required before any institutional-grade, compliance-approved, broker-dealer, investment-adviser, direct-market-access, or HFT capability claim. This repository can prepare review evidence, but it cannot self-certify those statuses.

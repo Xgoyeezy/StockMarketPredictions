@@ -455,6 +455,10 @@ Execution report lineage update:
 
 Follow-up action hardened execution report lineage with candidate, quote, execution lane, reconciliation status, spread, and fill-delay requirements. This is paper execution evidence only; it does not submit orders, change broker routes, change order behavior, or approve live trading.
 
+Incident report completeness update:
+
+Follow-up action hardened incident response records with detection source, first visible symptom, affected proof surfaces, safety-state impact, containment, verification, sanitization, and post-incident review requirements. This is incident review evidence only; it does not clear kill switches, bypass risk gates, change broker routes, approve releases, or change execution behavior.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

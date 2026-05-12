@@ -454,11 +454,19 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "incident_id": "incident-1",
                     "opened_at": "2026-05-09T14:00:00Z",
                     "severity": "medium",
+                    "detection_source": "release_validation",
+                    "first_visible_symptom": "missing audit event",
                     "owner": "operations",
                     "affected_entity": "research_promotion",
+                    "affected_proof_surfaces": ["audit_trail", "research_promotion"],
+                    "safety_state_impact": "none",
                     "status": "closed",
+                    "containment_note": "held readiness claim",
                     "corrective_action": "documented rollback validation",
+                    "verification_performed": "focused audit review",
+                    "sanitization_status": "sanitized",
                     "closed_at": "2026-05-09T15:00:00Z",
+                    "post_incident_review_note": "added required audit evidence",
                 },
                 {"incident_id": "incident-2"},
             ]
@@ -495,7 +503,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(approvals["approval_trace_changes_execution_behavior"])
         self.assertEqual(incidents["status"], "needs_evidence")
         self.assertIn("opened_at", incidents["missing_by_record"][1]["missing_fields"])
+        self.assertIn("detection_source", incidents["missing_by_record"][1]["missing_fields"])
+        self.assertIn("affected_proof_surfaces", incidents["missing_by_record"][1]["missing_fields"])
+        self.assertIn("#incident-report-completeness", incidents["documentation"])
+        self.assertTrue(incidents["blocks_small_fund_claims_when_failed"])
         self.assertFalse(incidents["incident_response_changes_execution_behavior"])
+        self.assertFalse(incidents["incident_response_can_clear_kill_switch"])
+        self.assertFalse(incidents["incident_response_can_bypass_risk_gates"])
         self.assertEqual(release_docs["status"], "passed")
         self.assertIn("#release-validation-and-rollback-controls", release_docs["documentation"])
         self.assertFalse(release_docs["release_or_rollback_can_enable_live_autonomy"])
