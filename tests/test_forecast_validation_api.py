@@ -26,6 +26,8 @@ class ForecastValidationApiTests(unittest.TestCase):
             self.assertTrue(payload["data"]["research_only"])
             self.assertIn("safety_notes", payload["data"])
             self.assertIn("summary", payload["data"])
+            self.assertIn("forecast_validation_hardening_plan", payload["data"])
+            self.assertIn("claim_permissions", payload["data"]["summary"])
 
     def test_summary_declares_execution_safety_boundary(self) -> None:
         client = TestClient(create_app())

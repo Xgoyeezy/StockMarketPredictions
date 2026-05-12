@@ -219,6 +219,25 @@ Remaining Evidence Reward proof gap:
 
 Evidence Reward now exposes a proof-first cleanup plan, but it is not ready for reward-quality, blocker-value, after-cost reward, paper-to-live, live-readiness, or ranking-mutation language. The next evidence work is still to produce rewardable prediction contracts with closed-horizon outcomes, same-window baselines, execution-cost context, and blocked-candidate outcomes while keeping simulation evidence separate and reward recommendations manual-review only.
 
+Forecast Validation hardening update:
+
+Follow-up action added a Forecast Validation hardening plan to the validation engine, API fallback, report UI, tests, and documentation. This keeps Forecast Validation forward-only and research-only while making forecast-contract, actual-path, target/invalidation, calibration, regime-context, immutable-record, paper-to-live, live-readiness, and ranking-mutation blockers explicit.
+
+Verification evidence:
+
+- Focused Forecast Validation backend/static tests: PASS, 9 passed.
+- Route-health follow-up test set: PASS, 10 passed.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live app restart completed through the existing startup script.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Forecast Validation result: status `ready`, hardening status `blocked_by_evidence`, 3 open hardening items, live-trading readiness `false`.
+- Frontend route smoke: `/forecast-validation` returned HTTP 200.
+
+Remaining Forecast Validation proof gap:
+
+Forecast Validation now exposes a proof-first hardening plan, but it is not ready for forecast-accuracy, forecast-edge, repeatability, paper-to-live, live-readiness, or ranking-mutation language. The next evidence work is still to broaden actual post-prediction path coverage, attach target/invalidation timing metrics, and prove calibration/regime stability while keeping immutable forecast records separate from validation outcomes and disconnected from execution, broker routes, risk gates, kill switches, ranking weights, and AI order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

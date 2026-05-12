@@ -9,6 +9,7 @@ from backend.services.forecast_validation_engine import (
     ActualPoint,
     aggregate_evaluations,
     align_actual_series,
+    build_forecast_validation_hardening_plan,
     compute_direction_score,
     compute_path_error,
     compute_path_rmse,
@@ -175,7 +176,10 @@ def test_fixture_outputs_have_expected_aggregation_shape() -> None:
     assert "records" in summary
     assert "aggregations" in summary
     assert "reward_formula" in summary
+    assert "forecast_validation_hardening_plan" in summary
+    assert summary["summary"]["claim_permissions"]["live_trading_readiness"] is False
     assert predictions["count"] >= 3
+    assert "forecast_validation_hardening_plan" in predictions
     assert all("forecast_series" in item and "evaluation" in item for item in predictions["items"])
     assert "by_engine" in models and "by_source" in models
     assert "items" in regimes
@@ -200,7 +204,31 @@ class ForecastValidationEngineUnitTests(unittest.TestCase):
         self.assertIn("summary", summary)
         self.assertIn("records", summary)
         self.assertIn("aggregations", summary)
+        self.assertIn("forecast_validation_hardening_plan", summary)
         self.assertIn("missing_fields", summary)
+
+    def test_forecast_hardening_plan_blocks_claims_when_actual_paths_are_incomplete(self) -> None:
+        summary = get_forecast_validation_summary()
+        plan = build_forecast_validation_hardening_plan(
+            summary=summary["summary"],
+            records=summary["records"],
+            aggregations=summary["aggregations"],
+        )
+        by_key = {row["key"]: row for row in plan["items"]}
+
+        self.assertEqual(plan["status"], "blocked_by_evidence")
+        self.assertIn("actual_path_coverage", by_key)
+        self.assertIn("forecast_accuracy_claim", plan["summary"]["blocked_claims"])
+        self.assertIn("automatic_ranking_mutation", plan["summary"]["blocked_claims"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["forecast_accuracy_claim"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["automatic_ranking_mutation"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_order_submission"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in plan["items"]))
 
     def test_missing_contract_fields_do_not_compute_reward(self) -> None:
         prediction = make_prediction(
