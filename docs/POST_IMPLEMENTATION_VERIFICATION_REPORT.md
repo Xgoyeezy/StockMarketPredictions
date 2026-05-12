@@ -443,6 +443,10 @@ Feature lineage completeness update:
 
 Follow-up action hardened the feature-registry lineage contract with input snapshot, output schema, and no-lookahead requirements. This is feature evidence hygiene only; it does not add a feature registry surface, change ranking weights, change execution behavior, approve live trading, or grant broker/order authority.
 
+Benchmark and walk-forward traceability update:
+
+Follow-up action hardened benchmark-to-walk-forward linkage with ranking formula version, reward formula version, baseline definition version, frozen snapshot identifier, and frozen-before-outcome evidence. This is reproducibility evidence only; it does not change ranking weights, reward formulas, execution behavior, or live-trading readiness.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

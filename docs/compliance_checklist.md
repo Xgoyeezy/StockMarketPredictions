@@ -222,6 +222,25 @@ Every feature lineage review should record:
 
 Block small-fund or institutional-readiness claims if feature records cannot prove source version, transformation version, input snapshot, output schema, ownership, generation time, and no-lookahead behavior.
 
+## Benchmark And Walk-Forward Traceability
+
+Benchmark and walk-forward traceability is proof evidence for reproducible out-of-sample review. It does not change ranking weights, change reward formulas, change execution behavior, approve live trading, submit orders, or alter broker routes.
+
+Every benchmark and walk-forward link review should record:
+
+- Benchmark run identifier.
+- Walk-forward experiment identifier.
+- Data version.
+- Model version.
+- Feature version.
+- Ranking formula version.
+- Reward formula version.
+- Baseline definition version.
+- Frozen snapshot identifier.
+- Whether the snapshot was frozen before outcomes.
+
+Block solo-systematic, small-fund, or institutional-readiness claims if benchmark and walk-forward records cannot prove same-version data, model, feature, ranking, reward, baseline, and frozen out-of-sample snapshot links.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

@@ -92,6 +92,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "audit_event_completeness": "docs/compliance_checklist.md#audit-event-completeness",
     "model_version_traceability": "docs/compliance_checklist.md#model-version-traceability",
     "feature_lineage_completeness": "docs/compliance_checklist.md#feature-lineage-completeness",
+    "benchmark_walk_forward_traceability": "docs/compliance_checklist.md#benchmark-and-walk-forward-traceability",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -172,6 +173,11 @@ BENCHMARK_WALK_FORWARD_LINK_FIELDS: tuple[str, ...] = (
     "data_version",
     "model_version",
     "feature_version",
+    "ranking_formula_version",
+    "reward_formula_version",
+    "baseline_definition_version",
+    "frozen_snapshot_id",
+    "frozen_before_outcome",
 )
 PORTFOLIO_RISK_REPORT_FIELDS: tuple[str, ...] = (
     "portfolio_exposure",
@@ -650,7 +656,7 @@ def validate_feature_registry_lineage(records: list[dict[str, Any]] | None = Non
 
 
 def validate_benchmark_walk_forward_version_links(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         BENCHMARK_WALK_FORWARD_LINK_FIELDS,
         {
@@ -659,7 +665,22 @@ def validate_benchmark_walk_forward_version_links(records: list[dict[str, Any]] 
             "data_version": "market_data_snapshot_v1",
             "model_version": "model_v1",
             "feature_version": "features_v1",
+            "ranking_formula_version": "ranking_formula_v1",
+            "reward_formula_version": "reward_formula_v1",
+            "baseline_definition_version": "baseline_v1",
+            "frozen_snapshot_id": "wf-snapshot-1",
+            "frozen_before_outcome": True,
         },
+        extra_boolean_true_fields=("frozen_before_outcome",),
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["benchmark_walk_forward_traceability"],
+            "benchmark_walk_forward_links_change_ranking_weights": False,
+            "benchmark_walk_forward_links_change_execution_behavior": False,
+            "benchmark_walk_forward_links_can_approve_live_trading": False,
+        }
     )
 
 
@@ -1107,6 +1128,11 @@ def validate_model_lineage_completeness_threshold(
             "benchmark_run_id": "benchmark-1",
             "walk_forward_experiment_id": "wf-1",
             "data_version": "market_data_snapshot_v1",
+            "ranking_formula_version": "ranking_formula_v1",
+            "reward_formula_version": "reward_formula_v1",
+            "baseline_definition_version": "baseline_v1",
+            "frozen_snapshot_id": "wf-snapshot-1",
+            "frozen_before_outcome": True,
         },
         threshold=threshold,
     )

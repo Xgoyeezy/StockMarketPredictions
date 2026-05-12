@@ -243,8 +243,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "data_version": "data_v1",
                     "model_version": "model_v1",
                     "feature_version": "features_v1",
+                    "ranking_formula_version": "ranking_formula_v1",
+                    "reward_formula_version": "reward_formula_v1",
+                    "baseline_definition_version": "baseline_v1",
+                    "frozen_snapshot_id": "wf-snapshot-1",
+                    "frozen_before_outcome": True,
                 },
-                {"benchmark_run_id": "benchmark-2"},
+                {"benchmark_run_id": "benchmark-2", "frozen_before_outcome": False},
             ]
         )
         portfolio = validate_portfolio_factor_liquidity_stress_reports(
@@ -324,6 +329,10 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
 
         self.assertEqual(benchmark_links["status"], "needs_evidence")
         self.assertIn("walk_forward_experiment_id", benchmark_links["missing_by_record"][1]["missing_fields"])
+        self.assertIn("ranking_formula_version", benchmark_links["missing_by_record"][1]["missing_fields"])
+        self.assertIn("#benchmark-and-walk-forward-traceability", benchmark_links["documentation"])
+        self.assertFalse(benchmark_links["benchmark_walk_forward_links_change_ranking_weights"])
+        self.assertFalse(benchmark_links["benchmark_walk_forward_links_change_execution_behavior"])
         self.assertEqual(portfolio["status"], "needs_evidence")
         self.assertIn("factor_exposure", portfolio["missing_by_record"][1]["missing_fields"])
         self.assertEqual(risk["status"], "needs_evidence")
@@ -525,6 +534,11 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "benchmark_run_id": "benchmark-1",
                     "walk_forward_experiment_id": "wf-1",
                     "data_version": "data_v1",
+                    "ranking_formula_version": "ranking_formula_v1",
+                    "reward_formula_version": "reward_formula_v1",
+                    "baseline_definition_version": "baseline_v1",
+                    "frozen_snapshot_id": "wf-snapshot-1",
+                    "frozen_before_outcome": True,
                 },
                 {"model_id": "model:demo"},
             ],
