@@ -386,6 +386,21 @@ Remaining environment-separation proof gap:
 
 Environment separation is now stricter about required fields and unsafe flags, but it remains a review contract. Institutional-readiness claims still require real environment records proving execution lane, data store, runtime storage scope, configuration namespace, secrets scope, broker route scope, audit scope, and no live autonomy, broker-route mutation, risk-gate bypass, ranking mutation, or simulation-observed evidence mixing.
 
+Permission enforcement coverage update:
+
+Follow-up action hardened the permission-enforcement coverage contract in `docs/compliance_checklist.md` and the institutional readiness service. This is proof and audit evidence only; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, or risk-limit behavior.
+
+Verification evidence:
+
+- Focused institutional readiness tests: PASS.
+- Backend compile check: PASS.
+- Updated documents: `docs/compliance_checklist.md` and `docs/POST_IMPLEMENTATION_VERIFICATION_REPORT.md`.
+- Updated service/test files: `backend/services/institutional_quant_readiness_service.py` and `tests/test_institutional_quant_readiness_service.py`.
+
+Remaining permission-enforcement proof gap:
+
+Permission enforcement is now stricter about required evidence traceability and unsafe authority flags, but it remains a review contract. Small-fund and institutional-readiness claims still require real permission records proving role, action, resource, allowed decision, enforced decision, audit timestamp, evidence snapshot, audit event, permission source, decision boundary, and no order authority, live-order authority, broker-route mutation, risk-gate bypass, kill-switch clearing, AI order authority, ranking-weight mutation, or risk-limit mutation.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

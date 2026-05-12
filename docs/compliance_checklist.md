@@ -115,6 +115,26 @@ Every environment-separation review should record:
 
 Block institutional-readiness claims if any reviewed environment allows live autonomy, broker-route mutation, risk-gate bypass, ranking mutation, or simulation and observed evidence mixing without a separate approved future project.
 
+## Permission Enforcement Coverage
+
+Permission enforcement coverage is proof and audit evidence for research and governance metadata. It does not enable live trading, submit orders, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or change risk limits.
+
+Every permission-enforcement review should record:
+
+- Role.
+- Action.
+- Resource.
+- Whether the action was allowed.
+- Whether the decision was enforced.
+- Audited timestamp.
+- Evidence snapshot identifier.
+- Audit event identifier.
+- Permission source or policy version.
+- Decision boundary, such as research metadata only.
+- Whether the permission record carries any order, live-order, broker-route, risk-gate, kill-switch, AI-order-authority, ranking-weight, or risk-limit authority.
+
+Block small-fund or institutional-readiness claims if any reviewed permission record lacks evidence traceability, was not enforced, or carries authority to submit orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or change risk limits.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

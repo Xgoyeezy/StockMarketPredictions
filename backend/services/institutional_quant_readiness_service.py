@@ -87,6 +87,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "release_validation": "docs/compliance_checklist.md#release-validation-and-rollback-controls",
     "incident_management": "docs/compliance_checklist.md#incident-management-runbook",
     "external_review_plan": "docs/compliance_checklist.md#external-security-legal-and-compliance-review-plan",
+    "permission_enforcement": "docs/compliance_checklist.md#permission-enforcement-coverage",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -202,6 +203,20 @@ PERMISSION_ENFORCEMENT_FIELDS: tuple[str, ...] = (
     "allowed",
     "enforced",
     "audited_at",
+    "evidence_snapshot_id",
+    "audit_event_id",
+    "permission_source",
+    "decision_boundary",
+)
+UNSAFE_PERMISSION_AUTHORITY_FIELDS: tuple[str, ...] = (
+    "can_submit_orders",
+    "can_submit_live_orders",
+    "can_change_broker_routes",
+    "can_bypass_risk_gates",
+    "can_clear_kill_switch",
+    "can_change_ranking_weights",
+    "can_grant_ai_order_authority",
+    "can_change_risk_limits",
 )
 APPROVAL_TRACE_FIELDS: tuple[str, ...] = (
     "approval_id",
@@ -726,9 +741,7 @@ def _coverage_result(
 
 
 def validate_permission_enforcement_coverage(records: list[dict[str, Any]] | None = None, *, threshold: float = 1.0) -> dict[str, Any]:
-    result = _coverage_result(
-        records,
-        PERMISSION_ENFORCEMENT_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "role": "risk_manager",
             "action": "hold",
@@ -736,11 +749,54 @@ def validate_permission_enforcement_coverage(records: list[dict[str, Any]] | Non
             "allowed": True,
             "enforced": True,
             "audited_at": "2026-05-09T14:00:00Z",
-        },
+            "evidence_snapshot_id": "snapshot-1",
+            "audit_event_id": "audit-event-1",
+            "permission_source": "research_permission_policy_v1",
+            "decision_boundary": "research_metadata_only",
+            "can_submit_orders": False,
+            "can_submit_live_orders": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_clear_kill_switch": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
+            "can_change_risk_limits": False,
+        }
+    ]
+    result = _coverage_result(
+        rows,
+        PERMISSION_ENFORCEMENT_FIELDS,
+        rows[0],
         threshold=threshold,
         boolean_true_fields=("enforced",),
     )
-    return serialize_value({**result, "permission_enforcement_changes_execution_behavior": False})
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_PERMISSION_AUTHORITY_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = {check["index"] for check in result["checks"] if not check["passed"]}
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
+    return serialize_value(
+        {
+            **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_permission_authority_fields": list(UNSAFE_PERMISSION_AUTHORITY_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["permission_enforcement"],
+            "blocks_institutional_claims_when_failed": True,
+            "permission_enforcement_can_submit_orders": False,
+            "permission_enforcement_can_change_broker_routes": False,
+            "permission_enforcement_can_bypass_risk_gates": False,
+            "permission_enforcement_can_clear_kill_switch": False,
+            "permission_enforcement_can_change_ranking_weights": False,
+            "permission_enforcement_can_grant_ai_order_authority": False,
+            "permission_enforcement_changes_execution_behavior": False,
+        }
+    )
 
 
 def validate_approval_trace_completeness(records: list[dict[str, Any]] | None = None, *, threshold: float = 1.0) -> dict[str, Any]:

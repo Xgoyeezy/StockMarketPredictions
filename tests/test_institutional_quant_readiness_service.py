@@ -345,8 +345,27 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "allowed": True,
                     "enforced": True,
                     "audited_at": "2026-05-09T14:00:00Z",
+                    "evidence_snapshot_id": "snapshot-1",
+                    "audit_event_id": "audit-event-1",
+                    "permission_source": "research_permission_policy_v1",
+                    "decision_boundary": "research_metadata_only",
+                    "can_submit_orders": False,
+                    "can_submit_live_orders": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_clear_kill_switch": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                    "can_change_risk_limits": False,
                 },
-                {"role": "operator", "action": "approve", "resource": "research_promotion_status", "allowed": False, "enforced": False},
+                {
+                    "role": "operator",
+                    "action": "approve",
+                    "resource": "research_promotion_status",
+                    "allowed": False,
+                    "enforced": False,
+                    "can_submit_orders": True,
+                },
             ],
             threshold=0.75,
         )
@@ -384,6 +403,15 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
 
         self.assertEqual(permissions["status"], "needs_evidence")
         self.assertEqual(permissions["coverage_rate"], 0.5)
+        self.assertEqual(permissions["failed_indexes"], [1])
+        self.assertIn("evidence_snapshot_id", permissions["checks"][1]["missing_fields"])
+        self.assertEqual(permissions["violations_by_record"][1]["violation_fields"], ["can_submit_orders"])
+        self.assertTrue(permissions["blocks_institutional_claims_when_failed"])
+        self.assertIn("#permission-enforcement-coverage", permissions["documentation"])
+        self.assertFalse(permissions["permission_enforcement_can_submit_orders"])
+        self.assertFalse(permissions["permission_enforcement_can_change_broker_routes"])
+        self.assertFalse(permissions["permission_enforcement_can_bypass_risk_gates"])
+        self.assertFalse(permissions["permission_enforcement_can_change_ranking_weights"])
         self.assertFalse(permissions["permission_enforcement_changes_execution_behavior"])
         self.assertEqual(approvals["status"], "needs_evidence")
         self.assertIn("actor", approvals["checks"][1]["missing_fields"])
