@@ -313,6 +313,20 @@ Remaining support-export proof gap:
 
 Support exports already have sanitization tests, but readiness remains review-bound. Any future support or firm-review export must prove redaction status, schema version, generated timestamp, source report, no secret-like fields, no account identifiers, no raw broker payloads, no raw logs, no raw local paths, no database files, and no environment values before it can support retail or firm-facing readiness claims.
 
+Release validation and rollback evidence checklist update:
+
+Follow-up action hardened release validation and rollback documentation in `docs/compliance_checklist.md`, `docs/runbooks/deployment.md`, `docs/runbooks/rollback.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`. This is documentation-only governance evidence discipline; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, or ranking-weight behavior.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated documents: `docs/compliance_checklist.md`, `docs/runbooks/deployment.md`, `docs/runbooks/rollback.md`, and `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, kill-switch, AI-authority, or ranking code changed.
+
+Remaining release and rollback proof gap:
+
+Release and rollback controls are now better specified as sanitized review metadata, but they are not firm-grade governance proof by themselves. Any future readiness claim still requires release records with safety invariant results, verification summaries, affected proof surfaces, reviewer or automation checks, rollback target, sanitization result, and post-rollback verification when applicable.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

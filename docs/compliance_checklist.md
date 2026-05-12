@@ -63,6 +63,44 @@ Release validation and rollback controls are governance evidence only. They shou
 
 Rollback metadata must not auto-clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live-money autonomy, or alter ranking weights.
 
+Every release validation record should include:
+
+- Release identifier.
+- Branch, commit, pull request, or tagged build reference.
+- Reason for the release.
+- Scope of changed source, docs, tests, and operational surfaces.
+- Affected proof surfaces, such as Data Completeness, Professional Benchmark, Walk-Forward, Execution Quality, Score Calibration, Risk Gate and Audit Trail, Portfolio Risk, Human vs System, Research Promotion, Evidence Reward, or Forecast Validation.
+- Pre-release safety invariant result.
+- Test, build, and route-probe summary where applicable.
+- Current known blocker summary.
+- Reviewer or automation check.
+- Release decision: approve, hold, reject, or rollback required.
+- Rollback target, rollback owner, and rollback verification plan.
+- Sanitization check confirming no secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values are present in the release evidence.
+
+Stop release approval or mark the release unsafe if validation finds:
+
+- Live trading was enabled without a separate approved future project.
+- Broker routes, order submission logic, risk gates, kill-switch behavior, AI authority, or ranking weights changed unexpectedly.
+- Simulation evidence was merged into real-time market-observed evidence.
+- Local verification failed or required checks are missing.
+- The rollback target is unknown.
+- Release evidence exposes secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values.
+
+Every rollback record should include:
+
+- Rollback trigger.
+- Release identifier being rolled back.
+- Rollback target.
+- Whether runtime data changed during the failed release.
+- Backup or restore requirement.
+- Safety invariant result after rollback.
+- Test, build, and route-probe summary after rollback where applicable.
+- Incident record reference if the rollback responds to an incident.
+- Follow-up owner and blocked redeploy condition.
+
+Rollback records are review metadata only. They must not approve live trading, loosen broker routes, clear kill switches, bypass risk gates, change order behavior, mutate ranking weights, or treat failed proof evidence as passing evidence.
+
 ## Incident Management Runbook
 
 Incident management is a review workflow for evidence, operations, and governance events. It does not place orders, change broker routes, clear kill switches, bypass risk gates, change ranking weights, or enable live-money autonomy.

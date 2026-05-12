@@ -168,6 +168,8 @@ Governance readiness:
 - [ ] Role-based access control gates metadata changes.
 - [ ] Approval workflows preserve who changed what and when.
 - [ ] Incident reports and release validation records exist.
+- [ ] Release validation records include release reference, changed proof surfaces, safety invariant result, verification summary, reviewer or automation check, decision, rollback target, and sanitization result.
+- [ ] Rollback records include trigger, failed release reference, rollback target, runtime-data impact, post-rollback verification, safety invariant result, incident reference when applicable, and blocked redeploy condition.
 
 UI readiness:
 
@@ -287,6 +289,7 @@ Governance readiness:
 - [ ] Approval trace completeness meets threshold.
 - [ ] Incident response records are complete.
 - [ ] Release validation and rollback controls are documented.
+- [ ] Release and rollback evidence excludes secrets, broker records, account identifiers, raw logs, raw local paths, database files, credentials, environment values, and unsanitized personal data.
 
 UI readiness:
 
