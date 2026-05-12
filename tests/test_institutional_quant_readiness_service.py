@@ -189,6 +189,11 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "feature_version": "features_v1",
                     "created_at": "2026-05-09T14:00:00Z",
                     "approval_id": "approval-1",
+                    "model_artifact_digest": "sha256:model-demo",
+                    "training_window_start": "2025-01-01",
+                    "training_window_end": "2026-01-01",
+                    "validation_report_id": "validation-report-1",
+                    "approval_scope": "research_only",
                 },
                 {"model_id": "model:demo"},
             ]
@@ -215,6 +220,10 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(feature_timestamps["feature_timestamps_change_ranking_weights"])
         self.assertEqual(model_lineage["status"], "needs_evidence")
         self.assertIn("model_version", model_lineage["missing_by_record"][1]["missing_fields"])
+        self.assertIn("model_artifact_digest", model_lineage["missing_by_record"][1]["missing_fields"])
+        self.assertIn("#model-version-traceability", model_lineage["documentation"])
+        self.assertFalse(model_lineage["model_registry_changes_ranking_weights"])
+        self.assertFalse(model_lineage["model_registry_changes_execution_behavior"])
         self.assertEqual(feature_lineage["status"], "needs_evidence")
         self.assertIn("source_version", feature_lineage["missing_by_record"][1]["missing_fields"])
 
@@ -493,6 +502,11 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "feature_version": "features_v1",
                     "created_at": "2026-05-09T14:00:00Z",
                     "approval_id": "approval-1",
+                    "model_artifact_digest": "sha256:model-demo",
+                    "training_window_start": "2025-01-01",
+                    "training_window_end": "2026-01-01",
+                    "validation_report_id": "validation-report-1",
+                    "approval_scope": "research_only",
                     "feature_id": "feature:momentum",
                     "source_version": "snapshot_v1",
                     "generated_at": "2026-05-09T14:00:00Z",

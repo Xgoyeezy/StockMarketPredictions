@@ -184,6 +184,26 @@ Every audit event review should record:
 
 Block small-fund or institutional-readiness claims if audit events are incomplete, editable without trace, not tamper-evident, not sanitized, or carry unsafe execution or control authority.
 
+## Model Version Traceability
+
+Model version traceability is proof evidence for research review. It does not change ranking weights, change execution behavior, approve live trading, submit orders, loosen broker routes, or bypass risk gates.
+
+Every model lineage review should record:
+
+- Model identifier.
+- Model version.
+- Training data version.
+- Feature version.
+- Created timestamp.
+- Approval identifier.
+- Model artifact digest.
+- Training window start.
+- Training window end.
+- Validation report identifier.
+- Approval scope.
+
+Block small-fund or institutional-readiness claims if model records cannot prove the exact version, training data, feature version, validation evidence, approval scope, and immutable artifact reference used by a forecast or benchmark result.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

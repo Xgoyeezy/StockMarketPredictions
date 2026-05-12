@@ -435,6 +435,10 @@ Remaining audit-event proof gap:
 
 Audit events are now stricter about event type, actor, affected entity, timestamp, evidence snapshot, source report, hash chain, append-only state, tamper evidence, sanitization status, safety boundary, and unsafe authority flags, but they remain review contracts. Small-fund and institutional-readiness claims still require real audit records proving complete sanitized event evidence with no secrets, account identifiers, raw logs, raw local paths, order authority, execution behavior mutation, broker-route mutation, risk-gate bypass, kill-switch clearing, AI order authority, ranking-weight mutation, or risk-limit mutation.
 
+Model version traceability update:
+
+Follow-up action hardened the model-registry lineage contract with artifact digest, training window, validation report, and approval scope requirements. This is model evidence hygiene only; it does not add a model registry surface, change ranking weights, change execution behavior, approve live trading, or grant broker/order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

@@ -90,6 +90,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "permission_enforcement": "docs/compliance_checklist.md#permission-enforcement-coverage",
     "approval_trace": "docs/compliance_checklist.md#approval-trace-completeness",
     "audit_event_completeness": "docs/compliance_checklist.md#audit-event-completeness",
+    "model_version_traceability": "docs/compliance_checklist.md#model-version-traceability",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -147,6 +148,11 @@ MODEL_LINEAGE_FIELDS: tuple[str, ...] = (
     "feature_version",
     "created_at",
     "approval_id",
+    "model_artifact_digest",
+    "training_window_start",
+    "training_window_end",
+    "validation_report_id",
+    "approval_scope",
 )
 FEATURE_LINEAGE_FIELDS: tuple[str, ...] = (
     "feature_id",
@@ -583,7 +589,7 @@ def validate_feature_generation_timestamps(records: list[dict[str, Any]] | None 
 
 
 def validate_model_registry_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         MODEL_LINEAGE_FIELDS,
         {
@@ -593,7 +599,21 @@ def validate_model_registry_lineage(records: list[dict[str, Any]] | None = None)
             "feature_version": "features_v1",
             "created_at": "2026-05-09T14:00:00Z",
             "approval_id": "approval-1",
+            "model_artifact_digest": "sha256:model-demo",
+            "training_window_start": "2025-01-01",
+            "training_window_end": "2026-01-01",
+            "validation_report_id": "validation-report-1",
+            "approval_scope": "research_only",
         },
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["model_version_traceability"],
+            "model_registry_changes_ranking_weights": False,
+            "model_registry_changes_execution_behavior": False,
+            "model_registry_can_approve_live_trading": False,
+        }
     )
 
 
@@ -1054,6 +1074,11 @@ def validate_model_lineage_completeness_threshold(
             "feature_version": "features_v1",
             "created_at": "2026-05-09T14:00:00Z",
             "approval_id": "approval-1",
+            "model_artifact_digest": "sha256:model-demo",
+            "training_window_start": "2025-01-01",
+            "training_window_end": "2026-01-01",
+            "validation_report_id": "validation-report-1",
+            "approval_scope": "research_only",
             "feature_id": "feature:momentum_20",
             "source_version": "market_data_snapshot_v1",
             "generated_at": "2026-05-09T14:00:00Z",
