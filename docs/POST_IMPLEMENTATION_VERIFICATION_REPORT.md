@@ -285,6 +285,20 @@ Remaining expansion-scoring proof gap:
 
 The expansion backlog is now scored at a planning level, but those scores do not approve build work. Any item with high safety risk or high complexity still needs a separate future project, explicit proof-gate evidence, rollback plan, and human review before it can leave future backlog.
 
+Paper-to-live proof gate documentation update:
+
+Follow-up action hardened the paper-to-live proof gate in `docs/live_trading_flow.md` and cross-referenced it from `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`. This is documentation-only safety discipline for a future review packet; it does not enable live trading, change broker routes, modify order submission, weaken risk gates, clear kill switches, grant AI order authority, or let analytics change ranking weights.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated documents: `docs/live_trading_flow.md` and `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, or ranking code changed.
+
+Remaining paper-to-live proof gap:
+
+Paper-to-live readiness remains blocked. Any future review still requires clean safety, data, benchmark, walk-forward, execution quality, portfolio risk, paper reconciliation, human approval, rollback, and hard-cap evidence before even a tiny manual live ticket could be considered.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

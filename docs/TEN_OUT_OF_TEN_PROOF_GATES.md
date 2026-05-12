@@ -411,6 +411,47 @@ Claims still disallowed:
 
 These gates apply before paying for market data, broker connectivity, infrastructure, or analytics providers beyond the free-first stack. They do not authorize implementation or provider spend by themselves.
 
+## Paper-To-Live Proof Gate
+
+This gate is a future review requirement, not current live enablement. The canonical flow notes live under `docs/live_trading_flow.md`.
+
+Paper-to-live review cannot start until Gates 1 through 7 are complete for the scope being reviewed:
+
+- Gate 1, Safety intact.
+- Gate 2, Data complete enough.
+- Gate 3, Benchmark available.
+- Gate 4, Baselines beaten where edge language is requested.
+- Gate 5, Walk-forward passed where repeatability language is requested.
+- Gate 6, Execution costs handled.
+- Gate 7, Risk visibility complete.
+
+The review packet must include:
+
+- Current safety-state evidence.
+- Kill-switch and loss-lock evidence.
+- Broker-route lock evidence.
+- Paper reconciliation evidence.
+- Execution Quality and TCA evidence.
+- Portfolio Risk evidence.
+- Walk-forward and benchmark evidence.
+- Manual approval record.
+- Rollback plan.
+- Hard caps on size, daily loss, open positions, asset class, order type, and session.
+- Explicit acknowledgement that the first test, if approved, is a tiny manual live ticket, not autonomous live trading.
+
+Claims still disallowed until a separate future project proves otherwise:
+
+- Live-trading readiness.
+- Paper-to-live readiness.
+- Autonomous live-money orders.
+- AI order authority.
+- Broker-route loosening.
+- Risk-gate bypass.
+- Kill-switch bypass.
+- Automatic ranking-weight mutation.
+
+This gate does not alter current execution behavior. Alpaca paper remains the only unattended execution lane.
+
 Decision rule:
 
 - Pay only when expected monthly value is at least 3x monthly cost.
