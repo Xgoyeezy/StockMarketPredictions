@@ -94,6 +94,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "feature_lineage_completeness": "docs/compliance_checklist.md#feature-lineage-completeness",
     "benchmark_walk_forward_traceability": "docs/compliance_checklist.md#benchmark-and-walk-forward-traceability",
     "risk_control_auditability": "docs/compliance_checklist.md#risk-control-auditability",
+    "execution_report_lineage": "docs/compliance_checklist.md#execution-report-lineage",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -206,12 +207,18 @@ UNSAFE_RISK_CONTROL_FIELDS: tuple[str, ...] = (
     "ai_override_allowed",
 )
 EXECUTION_REPORT_LINK_FIELDS: tuple[str, ...] = (
+    "candidate_id",
+    "quote_id",
     "route",
+    "execution_lane",
     "order_id",
     "receipt_id",
     "fill_id",
     "reconciliation_id",
+    "reconciliation_status",
+    "spread_bps",
     "slippage",
+    "fill_delay_ms",
     "latency_ms",
 )
 ENVIRONMENT_SEPARATION_FIELDS: tuple[str, ...] = (
@@ -756,18 +763,34 @@ def validate_risk_control_auditability(records: list[dict[str, Any]] | None = No
 
 
 def validate_execution_report_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         EXECUTION_REPORT_LINK_FIELDS,
         {
+            "candidate_id": "candidate-1",
+            "quote_id": "quote-1",
             "route": "broker_paper",
+            "execution_lane": "paper",
             "order_id": "order-1",
             "receipt_id": "receipt-1",
             "fill_id": "fill-1",
             "reconciliation_id": "reconcile-1",
+            "reconciliation_status": "matched",
+            "spread_bps": 4.2,
             "slippage": 0.02,
+            "fill_delay_ms": 450,
             "latency_ms": 450,
         },
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["execution_report_lineage"],
+            "execution_lineage_changes_broker_routes": False,
+            "execution_lineage_changes_order_behavior": False,
+            "execution_lineage_submits_orders": False,
+            "execution_lineage_can_approve_live_trading": False,
+        }
     )
 
 

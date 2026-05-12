@@ -285,12 +285,18 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         execution = validate_execution_report_lineage(
             [
                 {
+                    "candidate_id": "candidate-1",
+                    "quote_id": "quote-1",
                     "route": "broker_paper",
+                    "execution_lane": "paper",
                     "order_id": "order-1",
                     "receipt_id": "receipt-1",
                     "fill_id": "fill-1",
                     "reconciliation_id": "reconcile-1",
+                    "reconciliation_status": "matched",
+                    "spread_bps": 4.2,
                     "slippage": 0.02,
+                    "fill_delay_ms": 450,
                     "latency_ms": 450,
                 },
                 {"route": "broker_paper"},
@@ -349,6 +355,11 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(risk["ai_can_bypass_risk_controls"])
         self.assertEqual(execution["status"], "needs_evidence")
         self.assertIn("order_id", execution["missing_by_record"][1]["missing_fields"])
+        self.assertIn("candidate_id", execution["missing_by_record"][1]["missing_fields"])
+        self.assertIn("#execution-report-lineage", execution["documentation"])
+        self.assertFalse(execution["execution_lineage_changes_broker_routes"])
+        self.assertFalse(execution["execution_lineage_changes_order_behavior"])
+        self.assertFalse(execution["execution_lineage_submits_orders"])
         self.assertEqual(execution_authority["status"], "passed")
         self.assertFalse(execution_authority["execution_analytics_can_alter_broker_routes"])
         self.assertFalse(execution_authority["execution_analytics_can_alter_order_behavior"])

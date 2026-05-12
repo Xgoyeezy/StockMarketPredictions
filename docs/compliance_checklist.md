@@ -260,6 +260,28 @@ Every risk-control audit review should record:
 
 Block small-fund or institutional-readiness claims if any risk control lacks policy/test evidence, is not authoritative, allows bypass, or allows analytics or AI override.
 
+## Execution Report Lineage
+
+Execution report lineage is proof evidence for paper execution review and TCA. It does not submit orders, change order behavior, change broker routes, approve live trading, or loosen risk controls.
+
+Every execution lineage review should record:
+
+- Candidate identifier.
+- Quote identifier.
+- Route.
+- Execution lane.
+- Order identifier.
+- Receipt identifier.
+- Fill identifier.
+- Reconciliation identifier.
+- Reconciliation status.
+- Spread.
+- Slippage.
+- Fill delay.
+- Latency.
+
+Block execution-quality, small-fund, or institutional-readiness claims if execution reports cannot link candidate, quote, route, order, receipt, fill, reconciliation, spread, slippage, fill delay, and latency evidence.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.
