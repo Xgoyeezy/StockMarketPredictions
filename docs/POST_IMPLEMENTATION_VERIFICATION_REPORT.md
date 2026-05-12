@@ -356,6 +356,21 @@ Remaining external-review proof gap:
 
 The review packet contract is now clearer, but no institutional-grade, compliance-approved, broker-dealer, investment-adviser, direct-market-access, HFT, or live-readiness claim is allowed until qualified external review evidence, sanitized firm-grade reports, environment separation, permission enforcement, and safety-boundary evidence exist for the reviewed scope.
 
+Firm-grade report specification update:
+
+Follow-up action hardened the firm-grade report specification in `docs/compliance_checklist.md` and the institutional readiness contract. This is sanitized report hygiene and reviewability only; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, institutional-grade certification, or compliance approval.
+
+Verification evidence:
+
+- Focused institutional readiness tests: PASS.
+- Backend compile check: PASS.
+- Updated documents: `docs/compliance_checklist.md` and `docs/POST_IMPLEMENTATION_VERIFICATION_REPORT.md`.
+- Updated service/test files: `backend/services/institutional_quant_readiness_service.py` and `tests/test_institutional_quant_readiness_service.py`.
+
+Remaining firm-grade report proof gap:
+
+Firm-grade report hygiene is still not an institutional-grade readiness claim. Any future firm-facing report must prove schema version, generated timestamp, source evidence snapshots, lineage summaries, risk and approval context, incident and release context, audit evidence, verification summary, sanitization summary, claim boundaries, and external-review status before supporting stronger positioning.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

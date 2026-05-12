@@ -81,6 +81,9 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         contract = build_firm_grade_report_contract(
             {
                 "report_id": "report-1",
+                "schema_version": "firm_grade_report_v1",
+                "generated_at": "2026-05-09T14:00:00Z",
+                "source_evidence_snapshot_ids": ["snapshot-1"],
                 "account_id": "ACCT-SECRET",
                 "raw_log": "raw broker record",
                 "local_path": "D:\\sensitive\\broker.json",
@@ -94,6 +97,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertEqual(contract["sanitized_report"]["raw_log"], "[redacted]")
         self.assertEqual(contract["sanitized_report"]["local_path"], "[redacted]")
         self.assertEqual(contract["reproducible_digest"], contract["repeat_digest"])
+        self.assertIn("source_evidence_snapshots", contract["required_sections"])
+        self.assertIn("claim_boundaries", contract["required_sections"])
+        self.assertIn("raw_broker_payloads", contract["excluded_fields"])
+        self.assertTrue(contract["schema_version_required"])
+        self.assertTrue(contract["source_evidence_snapshots_required"])
+        self.assertFalse(contract["can_support_institutional_grade_claim_without_external_review"])
+        self.assertFalse(contract["can_certify_compliance"])
         self.assertFalse(contract["can_submit_orders"])
 
     def test_point_in_time_survivorship_and_corporate_action_contracts(self) -> None:

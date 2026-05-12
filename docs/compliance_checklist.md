@@ -57,6 +57,42 @@ Allowed export contents:
 - Test/build/probe status summaries.
 - Redaction status and warnings.
 
+## Firm-Grade Report Specification
+
+Firm-grade reports are sanitized review artifacts. They are not proof of alpha, compliance approval, institutional-grade readiness, broker-dealer status, investment-adviser status, HFT capability, or live-trading readiness.
+
+Every firm-grade report specification should include:
+
+- Report identifier.
+- Schema version.
+- Generated timestamp.
+- Source evidence snapshot identifiers.
+- Data lineage summary.
+- Model lineage summary.
+- Feature lineage summary.
+- Risk-control status.
+- Approval and promotion metadata.
+- Forecast and reward summary.
+- Incident and release summary.
+- Audit evidence summary.
+- Verification summary.
+- Sanitization summary.
+- Claim-boundary section.
+- External-review status.
+
+Firm-grade reports must exclude:
+
+- Secrets, API keys, tokens, passwords, and authorization headers.
+- Broker account identifiers.
+- Raw broker records or raw broker payloads.
+- Raw runtime logs.
+- Raw local paths.
+- Database files or local storage files.
+- Credentials and environment values.
+- Unsanitized personal data.
+
+If a report cannot prove sanitization, reproducibility, source evidence references, and claim boundaries, it should remain a draft review artifact and must not support institutional-grade or compliance-approved claims.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

@@ -302,11 +302,46 @@ def build_institutional_evaluator_inspection_contract() -> dict[str, Any]:
 
 
 def build_firm_grade_report_contract(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    required_sections = (
+        "report_metadata",
+        "source_evidence_snapshots",
+        "data_lineage_summary",
+        "model_lineage_summary",
+        "feature_lineage_summary",
+        "risk_control_status",
+        "approval_promotion_metadata",
+        "forecast_reward_summary",
+        "incident_release_summary",
+        "audit_evidence_summary",
+        "verification_summary",
+        "sanitization_summary",
+        "claim_boundaries",
+        "external_review_status",
+    )
+    excluded_fields = (
+        "secrets",
+        "api_keys",
+        "tokens",
+        "passwords",
+        "authorization_headers",
+        "broker_account_identifiers",
+        "raw_broker_records",
+        "raw_broker_payloads",
+        "raw_runtime_logs",
+        "raw_local_paths",
+        "database_files",
+        "local_storage_files",
+        "credentials",
+        "environment_values",
+        "unsanitized_personal_data",
+    )
     source = dict(
         payload
         or {
             "report_id": "firm-report-1",
+            "schema_version": "firm_grade_report_v1",
             "generated_at": "2026-05-09T14:00:00Z",
+            "source_evidence_snapshot_ids": ["snapshot-1"],
             "data_lineage": {"vendor": "sample_vendor", "as_of": "2026-05-09"},
             "account_id": "ACCT-123",
             "raw_log": "sensitive raw log",
@@ -325,6 +360,17 @@ def build_firm_grade_report_contract(payload: dict[str, Any] | None = None) -> d
             "reproducible_digest": first_digest,
             "repeat_digest": second_digest,
             "leaks": leaks,
+            "required_sections": list(required_sections),
+            "excluded_fields": list(excluded_fields),
+            "schema_version_required": True,
+            "generated_timestamp_required": True,
+            "source_evidence_snapshots_required": True,
+            "sanitization_summary_required": True,
+            "claim_boundaries_required": True,
+            "external_review_status_required": True,
+            "can_support_institutional_grade_claim_without_external_review": False,
+            "can_certify_compliance": False,
+            "can_approve_live_trading": False,
             "firm_grade_report_claim_boundary": "Report hygiene is not an institutional-grade platform claim.",
             **READ_ONLY_SAFETY_FLAGS,
         }
