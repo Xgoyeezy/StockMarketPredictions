@@ -398,6 +398,15 @@ Before any institutional-grade claim, obtain and retain evidence of:
 - Vendor and infrastructure assumptions that the reviewers were asked to inspect.
 - Sanitized firm-grade report sample or report specification.
 - Environment-separation and permission-enforcement evidence.
+- Approval-trace evidence.
+- Audit-event evidence.
+- Model-version evidence.
+- Feature-lineage evidence.
+- Benchmark and walk-forward traceability evidence.
+- Risk-control evidence.
+- Execution-lineage evidence.
+- Incident-report evidence.
+- Release-validation evidence.
 - Claim review note that lists exactly which claims remain blocked.
 - Evidence that paper-first unattended execution remains the active boundary unless a separately approved future framework changes it.
 - Evidence that reward and forecast analytics are research-only.

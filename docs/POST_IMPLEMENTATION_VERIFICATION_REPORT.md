@@ -467,6 +467,10 @@ Institutional docs index update:
 
 Follow-up action expanded the institutional docs index so the proof contracts for permissions, approvals, audit events, model versions, feature lineage, benchmark and walk-forward links, risk controls, execution reports, incidents, and release validation point to their compliance checklist anchors. This is review navigation only; it does not add runtime surfaces or approval authority.
 
+External review evidence packet update:
+
+Follow-up action expanded the external review packet contract so any future firm-facing review must reference approval, audit, model, feature, benchmark and walk-forward, risk, execution, incident, and release evidence in addition to the existing sanitized report, environment separation, permission, and safety-boundary evidence. This is review-packet evidence only; it does not certify compliance, approve live trading, or grant broker/order/risk authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
