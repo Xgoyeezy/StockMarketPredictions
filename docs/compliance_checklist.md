@@ -145,11 +145,35 @@ Before any institutional-grade claim, obtain and retain evidence of:
 - External security review scope and result.
 - Qualified legal review of product claims and operating model.
 - Qualified compliance review of applicable market, advice, custody, recordkeeping, privacy, and supervision obligations.
+- Vendor and infrastructure assumptions that the reviewers were asked to inspect.
+- Sanitized firm-grade report sample or report specification.
+- Environment-separation and permission-enforcement evidence.
+- Claim review note that lists exactly which claims remain blocked.
 - Evidence that paper-first unattended execution remains the active boundary unless a separately approved future framework changes it.
 - Evidence that reward and forecast analytics are research-only.
 - Evidence that AI has no order authority.
 - Evidence that risk gates remain authoritative.
 - Evidence that broker routes remain unchanged.
+
+Every external review evidence packet should include:
+
+- Review packet identifier.
+- Security review scope.
+- Legal review scope.
+- Compliance review scope.
+- Vendor or infrastructure dependency scope.
+- Sanitized firm-grade report reference.
+- Environment-separation evidence reference.
+- Permission-enforcement evidence reference.
+- Safety-boundary evidence reference.
+- Claim boundaries to review.
+- Reviewer type or qualification note.
+- Review status: planned, in review, passed, failed, or blocked.
+- Sanitization check confirming no secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values are present.
+
+Stop any institutional-grade, compliance-approved, investment-adviser, broker-dealer, direct-market-access, or HFT claim if the packet is missing any required scope, reviewer qualification, sanitized report evidence, safety-boundary evidence, or sanitization check.
+
+External review packets are review evidence only. They do not certify compliance, approve live trading, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or prove alpha.
 
 If any external review is missing, the allowed positioning remains paper-first trading research platform, trading evidence operating system, forecast validation platform, decision audit system, research-to-risk workflow, paper execution quality analysis, structured strategy improvement system, and benchmark or walk-forward research layer.
 

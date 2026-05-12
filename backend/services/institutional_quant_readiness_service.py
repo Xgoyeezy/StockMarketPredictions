@@ -872,6 +872,31 @@ def validate_audit_immutability_checks(records: list[dict[str, Any]] | None = No
 
 
 def build_external_review_plan_contract() -> dict[str, Any]:
+    evidence_packet_fields = (
+        "review_packet_id",
+        "security_review_scope",
+        "legal_review_scope",
+        "compliance_review_scope",
+        "vendor_dependency_scope",
+        "sanitized_firm_grade_report_reference",
+        "environment_separation_evidence_reference",
+        "permission_enforcement_evidence_reference",
+        "safety_boundary_evidence_reference",
+        "claim_boundaries_to_review",
+        "reviewer_qualification_note",
+        "review_status",
+        "sanitization_check",
+    )
+    excluded_from_packet = (
+        "secrets",
+        "broker_records",
+        "account_identifiers",
+        "raw_logs",
+        "raw_local_paths",
+        "credentials",
+        "database_files",
+        "environment_values",
+    )
     return serialize_value(
         {
             "status": "passed",
@@ -879,8 +904,24 @@ def build_external_review_plan_contract() -> dict[str, Any]:
             "external_security_review_planned": True,
             "legal_review_planned": True,
             "compliance_review_planned": True,
+            "vendor_dependency_scope_required": True,
+            "qualified_reviewer_required": True,
+            "evidence_packet_fields": list(evidence_packet_fields),
+            "excluded_from_packet": list(excluded_from_packet),
+            "sanitized_firm_grade_report_required": True,
+            "environment_separation_evidence_required": True,
+            "permission_enforcement_evidence_required": True,
+            "safety_boundary_evidence_required": True,
             "institutional_grade_claim_blocked_until_review": True,
             "compliance_approved_claim_blocked_until_review": True,
+            "investment_adviser_claim_blocked_until_review": True,
+            "broker_dealer_claim_blocked_until_review": True,
+            "direct_market_access_claim_blocked_until_review": True,
+            "hft_claim_blocked_until_review": True,
+            "can_certify_compliance": False,
+            "can_approve_live_trading": False,
+            "can_change_broker_routes": False,
+            "can_change_order_behavior": False,
             "external_review_plan_changes_execution_behavior": False,
             **READ_ONLY_SAFETY_FLAGS,
         }

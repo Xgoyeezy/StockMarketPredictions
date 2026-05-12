@@ -441,6 +441,14 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertEqual(external_review["status"], "passed")
         self.assertTrue(external_review["institutional_grade_claim_blocked_until_review"])
         self.assertFalse(external_review["external_review_plan_changes_execution_behavior"])
+        self.assertTrue(external_review["qualified_reviewer_required"])
+        self.assertTrue(external_review["sanitized_firm_grade_report_required"])
+        self.assertIn("security_review_scope", external_review["evidence_packet_fields"])
+        self.assertIn("sanitization_check", external_review["evidence_packet_fields"])
+        self.assertIn("raw_logs", external_review["excluded_from_packet"])
+        self.assertFalse(external_review["can_certify_compliance"])
+        self.assertFalse(external_review["can_approve_live_trading"])
+        self.assertFalse(external_review["can_change_broker_routes"])
 
     def test_ui_readiness_and_docs_index_contracts(self) -> None:
         ui = build_institutional_ui_readiness_contract()

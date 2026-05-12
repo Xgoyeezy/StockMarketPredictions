@@ -341,6 +341,21 @@ Remaining incident-management proof gap:
 
 Incident management is now better specified as sanitized review metadata, but readiness remains evidence-bound. Any future small-fund or institutional readiness claim still requires complete incident records with affected proof surfaces, safety-state impact, containment, corrective action, closure verification, sanitization checks, and post-incident review notes where applicable.
 
+External review evidence packet update:
+
+Follow-up action hardened the external security, legal, and compliance review plan in `docs/compliance_checklist.md` and the institutional readiness contract. This is proof and audit discipline only; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, or compliance certification.
+
+Verification evidence:
+
+- Focused institutional readiness tests: PASS.
+- Backend compile check: PASS.
+- Updated documents: `docs/compliance_checklist.md` and `docs/POST_IMPLEMENTATION_VERIFICATION_REPORT.md`.
+- Updated service/test files: `backend/services/institutional_quant_readiness_service.py` and `tests/test_institutional_quant_readiness_service.py`.
+
+Remaining external-review proof gap:
+
+The review packet contract is now clearer, but no institutional-grade, compliance-approved, broker-dealer, investment-adviser, direct-market-access, HFT, or live-readiness claim is allowed until qualified external review evidence, sanitized firm-grade reports, environment separation, permission enforcement, and safety-boundary evidence exist for the reviewed scope.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
