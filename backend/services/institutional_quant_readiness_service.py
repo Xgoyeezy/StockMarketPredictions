@@ -88,6 +88,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "incident_management": "docs/compliance_checklist.md#incident-management-runbook",
     "external_review_plan": "docs/compliance_checklist.md#external-security-legal-and-compliance-review-plan",
     "permission_enforcement": "docs/compliance_checklist.md#permission-enforcement-coverage",
+    "approval_trace": "docs/compliance_checklist.md#approval-trace-completeness",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -221,11 +222,29 @@ UNSAFE_PERMISSION_AUTHORITY_FIELDS: tuple[str, ...] = (
 APPROVAL_TRACE_FIELDS: tuple[str, ...] = (
     "approval_id",
     "actor",
+    "reviewer_role",
     "action",
+    "affected_entity",
     "timestamp",
     "evidence_snapshot_id",
+    "audit_event_id",
     "previous_status",
     "new_status",
+    "approval_scope",
+    "decision_reason",
+    "claim_boundary",
+)
+UNSAFE_APPROVAL_AUTHORITY_FIELDS: tuple[str, ...] = (
+    "approves_live_trading",
+    "approves_order_submission",
+    "approves_broker_route_change",
+    "approves_risk_gate_bypass",
+    "approves_kill_switch_clear",
+    "approves_ai_order_authority",
+    "approves_ranking_weight_change",
+    "approves_risk_limit_change",
+    "mutates_immutable_forecast_records",
+    "edits_reward_inputs_after_outcome",
 )
 INCIDENT_RESPONSE_FIELDS: tuple[str, ...] = (
     "incident_id",
@@ -800,21 +819,69 @@ def validate_permission_enforcement_coverage(records: list[dict[str, Any]] | Non
 
 
 def validate_approval_trace_completeness(records: list[dict[str, Any]] | None = None, *, threshold: float = 1.0) -> dict[str, Any]:
-    result = _coverage_result(
-        records,
-        APPROVAL_TRACE_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "approval_id": "approval-1",
             "actor": "risk-manager-1",
+            "reviewer_role": "risk_manager",
             "action": "hold",
+            "affected_entity": "research_promotion_status",
             "timestamp": "2026-05-09T14:00:00Z",
             "evidence_snapshot_id": "snapshot-1",
+            "audit_event_id": "audit-event-1",
             "previous_status": "candidate",
             "new_status": "hold",
-        },
+            "approval_scope": "research_metadata_only",
+            "decision_reason": "insufficient benchmark evidence",
+            "claim_boundary": "not live-trading approval",
+            "approves_live_trading": False,
+            "approves_order_submission": False,
+            "approves_broker_route_change": False,
+            "approves_risk_gate_bypass": False,
+            "approves_kill_switch_clear": False,
+            "approves_ai_order_authority": False,
+            "approves_ranking_weight_change": False,
+            "approves_risk_limit_change": False,
+            "mutates_immutable_forecast_records": False,
+            "edits_reward_inputs_after_outcome": False,
+        }
+    ]
+    result = _coverage_result(
+        rows,
+        APPROVAL_TRACE_FIELDS,
+        rows[0],
         threshold=threshold,
     )
-    return serialize_value({**result, "approval_trace_changes_execution_behavior": False})
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_APPROVAL_AUTHORITY_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = {check["index"] for check in result["checks"] if not check["passed"]}
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
+    return serialize_value(
+        {
+            **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_approval_authority_fields": list(UNSAFE_APPROVAL_AUTHORITY_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["approval_trace"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "approval_trace_can_approve_live_trading": False,
+            "approval_trace_can_submit_orders": False,
+            "approval_trace_can_change_broker_routes": False,
+            "approval_trace_can_bypass_risk_gates": False,
+            "approval_trace_can_clear_kill_switch": False,
+            "approval_trace_can_grant_ai_order_authority": False,
+            "approval_trace_can_change_ranking_weights": False,
+            "approval_trace_can_change_risk_limits": False,
+            "approval_trace_changes_execution_behavior": False,
+        }
+    )
 
 
 def validate_incident_response_records(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:

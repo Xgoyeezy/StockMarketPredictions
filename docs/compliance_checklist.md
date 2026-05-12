@@ -135,6 +135,29 @@ Every permission-enforcement review should record:
 
 Block small-fund or institutional-readiness claims if any reviewed permission record lacks evidence traceability, was not enforced, or carries authority to submit orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or change risk limits.
 
+## Approval Trace Completeness
+
+Approval traces are proof and audit evidence for research and governance decisions. They do not approve live trading, submit orders, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, change risk limits, mutate immutable forecast records, or edit reward inputs after outcomes.
+
+Every approval-trace review should record:
+
+- Approval identifier.
+- Actor.
+- Reviewer role.
+- Action.
+- Affected research or governance entity.
+- Timestamp.
+- Evidence snapshot identifier.
+- Audit event identifier.
+- Previous status.
+- New status.
+- Approval scope.
+- Decision reason.
+- Claim boundary.
+- Whether the approval record carries any live-trading, order-submission, broker-route, risk-gate, kill-switch, AI-order-authority, ranking-weight, risk-limit, forecast-record-mutation, or reward-input-edit authority.
+
+Block small-fund or institutional-readiness claims if approval traces do not prove who changed what, when, with which evidence snapshot, under which approval scope, and without unsafe execution or control authority.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

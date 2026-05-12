@@ -401,6 +401,21 @@ Remaining permission-enforcement proof gap:
 
 Permission enforcement is now stricter about required evidence traceability and unsafe authority flags, but it remains a review contract. Small-fund and institutional-readiness claims still require real permission records proving role, action, resource, allowed decision, enforced decision, audit timestamp, evidence snapshot, audit event, permission source, decision boundary, and no order authority, live-order authority, broker-route mutation, risk-gate bypass, kill-switch clearing, AI order authority, ranking-weight mutation, or risk-limit mutation.
 
+Approval trace completeness update:
+
+Follow-up action hardened the approval-trace completeness contract in `docs/compliance_checklist.md` and the institutional readiness service. This is proof and audit evidence only; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, risk-limit behavior, immutable forecast-record mutation, or reward-input mutation.
+
+Verification evidence:
+
+- Focused institutional readiness tests: PASS.
+- Backend compile check: PASS.
+- Updated documents: `docs/compliance_checklist.md` and `docs/POST_IMPLEMENTATION_VERIFICATION_REPORT.md`.
+- Updated service/test files: `backend/services/institutional_quant_readiness_service.py` and `tests/test_institutional_quant_readiness_service.py`.
+
+Remaining approval-trace proof gap:
+
+Approval traces are now stricter about reviewer role, affected entity, audit event, approval scope, decision reason, claim boundary, and unsafe authority flags, but they remain review contracts. Small-fund and institutional-readiness claims still require real approval records proving who changed what, when, with which evidence snapshot, why the status changed, and no live-trading approval, order submission, broker-route mutation, risk-gate bypass, kill-switch clearing, AI order authority, ranking-weight mutation, risk-limit mutation, immutable forecast-record mutation, or reward-input mutation after outcomes.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

@@ -374,13 +374,29 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                 {
                     "approval_id": "approval-1",
                     "actor": "risk-manager-1",
+                    "reviewer_role": "risk_manager",
                     "action": "hold",
+                    "affected_entity": "research_promotion_status",
                     "timestamp": "2026-05-09T14:00:00Z",
                     "evidence_snapshot_id": "snapshot-1",
+                    "audit_event_id": "audit-event-1",
                     "previous_status": "candidate",
                     "new_status": "hold",
+                    "approval_scope": "research_metadata_only",
+                    "decision_reason": "insufficient benchmark evidence",
+                    "claim_boundary": "not live-trading approval",
+                    "approves_live_trading": False,
+                    "approves_order_submission": False,
+                    "approves_broker_route_change": False,
+                    "approves_risk_gate_bypass": False,
+                    "approves_kill_switch_clear": False,
+                    "approves_ai_order_authority": False,
+                    "approves_ranking_weight_change": False,
+                    "approves_risk_limit_change": False,
+                    "mutates_immutable_forecast_records": False,
+                    "edits_reward_inputs_after_outcome": False,
                 },
-                {"approval_id": "approval-2"},
+                {"approval_id": "approval-2", "approves_live_trading": True},
             ],
             threshold=0.75,
         )
@@ -415,6 +431,16 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(permissions["permission_enforcement_changes_execution_behavior"])
         self.assertEqual(approvals["status"], "needs_evidence")
         self.assertIn("actor", approvals["checks"][1]["missing_fields"])
+        self.assertEqual(approvals["failed_indexes"], [1])
+        self.assertEqual(approvals["violations_by_record"][1]["violation_fields"], ["approves_live_trading"])
+        self.assertTrue(approvals["blocks_small_fund_claims_when_failed"])
+        self.assertTrue(approvals["blocks_institutional_claims_when_failed"])
+        self.assertIn("#approval-trace-completeness", approvals["documentation"])
+        self.assertFalse(approvals["approval_trace_can_approve_live_trading"])
+        self.assertFalse(approvals["approval_trace_can_submit_orders"])
+        self.assertFalse(approvals["approval_trace_can_change_broker_routes"])
+        self.assertFalse(approvals["approval_trace_can_bypass_risk_gates"])
+        self.assertFalse(approvals["approval_trace_can_change_ranking_weights"])
         self.assertFalse(approvals["approval_trace_changes_execution_behavior"])
         self.assertEqual(incidents["status"], "needs_evidence")
         self.assertIn("opened_at", incidents["missing_by_record"][1]["missing_fields"])
