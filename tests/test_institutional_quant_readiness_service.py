@@ -512,7 +512,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(incidents["incident_response_can_bypass_risk_gates"])
         self.assertEqual(release_docs["status"], "passed")
         self.assertIn("#release-validation-and-rollback-controls", release_docs["documentation"])
+        self.assertIn("affected_proof_surfaces", release_docs["required_release_validation_fields"])
+        self.assertIn("sanitization_check", release_docs["required_release_validation_fields"])
+        self.assertIn("failed_local_verification", release_docs["blocked_conditions"])
         self.assertFalse(release_docs["release_or_rollback_can_enable_live_autonomy"])
+        self.assertFalse(release_docs["release_or_rollback_can_change_broker_routes"])
+        self.assertFalse(release_docs["release_or_rollback_can_bypass_risk_gates"])
+        self.assertFalse(release_docs["release_or_rollback_can_change_ranking_weights"])
 
     def test_final_institutional_runbook_tests_lineage_audit_and_external_review_contracts(self) -> None:
         runbook = build_incident_management_runbook_contract()

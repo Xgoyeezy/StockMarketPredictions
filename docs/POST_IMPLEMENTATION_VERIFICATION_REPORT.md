@@ -459,6 +459,10 @@ Incident report completeness update:
 
 Follow-up action hardened incident response records with detection source, first visible symptom, affected proof surfaces, safety-state impact, containment, verification, sanitization, and post-incident review requirements. This is incident review evidence only; it does not clear kill switches, bypass risk gates, change broker routes, approve releases, or change execution behavior.
 
+Release validation evidence update:
+
+Follow-up action hardened the release and rollback documentation contract with explicit required release-validation fields and blocked conditions. This is release evidence discipline only; it does not enable live autonomy, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or change ranking weights.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

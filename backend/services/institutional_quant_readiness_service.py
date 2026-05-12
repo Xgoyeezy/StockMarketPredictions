@@ -1075,13 +1075,44 @@ def validate_incident_response_records(records: list[dict[str, Any]] | None = No
 
 
 def build_release_validation_rollback_docs_contract() -> dict[str, Any]:
+    required_release_validation_fields = (
+        "release_id",
+        "branch",
+        "commit",
+        "pull_request",
+        "changed_scope",
+        "affected_proof_surfaces",
+        "pre_release_safety_result",
+        "verification_summary",
+        "reviewer_or_automation_check",
+        "release_decision",
+        "rollback_target",
+        "rollback_verification_plan",
+        "sanitization_check",
+    )
+    blocked_conditions = (
+        "live_trading_enabled_without_separate_project",
+        "broker_route_order_risk_gate_kill_switch_ai_or_ranking_change",
+        "simulation_evidence_merged_with_observed_evidence",
+        "failed_local_verification",
+        "unknown_rollback_target",
+        "unsanitized_release_evidence",
+    )
     return serialize_value(
         {
             "status": "passed",
             "documentation": INSTITUTIONAL_DOCS["release_validation"],
             "release_validation_documented": True,
             "rollback_controls_documented": True,
+            "required_release_validation_fields": list(required_release_validation_fields),
+            "blocked_conditions": list(blocked_conditions),
             "release_or_rollback_can_enable_live_autonomy": False,
+            "release_or_rollback_can_change_broker_routes": False,
+            "release_or_rollback_can_change_order_behavior": False,
+            "release_or_rollback_can_bypass_risk_gates": False,
+            "release_or_rollback_can_clear_kill_switch": False,
+            "release_or_rollback_can_grant_ai_order_authority": False,
+            "release_or_rollback_can_change_ranking_weights": False,
             **READ_ONLY_SAFETY_FLAGS,
         }
     )
