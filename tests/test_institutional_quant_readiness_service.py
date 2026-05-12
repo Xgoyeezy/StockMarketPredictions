@@ -207,8 +207,11 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "generated_at": "2026-05-09T14:00:00Z",
                     "transformation_version": "transform_v1",
                     "owner": "research",
+                    "input_snapshot_id": "snapshot-1",
+                    "output_schema_version": "feature_schema_v1",
+                    "no_lookahead": True,
                 },
-                {"feature_id": "feature:gap"},
+                {"feature_id": "feature:gap", "no_lookahead": False},
             ]
         )
 
@@ -226,6 +229,10 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(model_lineage["model_registry_changes_execution_behavior"])
         self.assertEqual(feature_lineage["status"], "needs_evidence")
         self.assertIn("source_version", feature_lineage["missing_by_record"][1]["missing_fields"])
+        self.assertIn("input_snapshot_id", feature_lineage["missing_by_record"][1]["missing_fields"])
+        self.assertIn("#feature-lineage-completeness", feature_lineage["documentation"])
+        self.assertFalse(feature_lineage["feature_lineage_changes_ranking_weights"])
+        self.assertFalse(feature_lineage["feature_lineage_changes_execution_behavior"])
 
     def test_benchmark_risk_execution_and_environment_contracts(self) -> None:
         benchmark_links = validate_benchmark_walk_forward_version_links(
@@ -512,6 +519,9 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "generated_at": "2026-05-09T14:00:00Z",
                     "transformation_version": "transform_v1",
                     "owner": "research",
+                    "input_snapshot_id": "snapshot-1",
+                    "output_schema_version": "feature_schema_v1",
+                    "no_lookahead": True,
                     "benchmark_run_id": "benchmark-1",
                     "walk_forward_experiment_id": "wf-1",
                     "data_version": "data_v1",

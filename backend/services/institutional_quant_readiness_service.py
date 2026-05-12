@@ -91,6 +91,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "approval_trace": "docs/compliance_checklist.md#approval-trace-completeness",
     "audit_event_completeness": "docs/compliance_checklist.md#audit-event-completeness",
     "model_version_traceability": "docs/compliance_checklist.md#model-version-traceability",
+    "feature_lineage_completeness": "docs/compliance_checklist.md#feature-lineage-completeness",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -161,6 +162,9 @@ FEATURE_LINEAGE_FIELDS: tuple[str, ...] = (
     "generated_at",
     "transformation_version",
     "owner",
+    "input_snapshot_id",
+    "output_schema_version",
+    "no_lookahead",
 )
 BENCHMARK_WALK_FORWARD_LINK_FIELDS: tuple[str, ...] = (
     "benchmark_run_id",
@@ -618,7 +622,7 @@ def validate_model_registry_lineage(records: list[dict[str, Any]] | None = None)
 
 
 def validate_feature_registry_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         FEATURE_LINEAGE_FIELDS,
         {
@@ -628,7 +632,20 @@ def validate_feature_registry_lineage(records: list[dict[str, Any]] | None = Non
             "generated_at": "2026-05-09T14:00:00Z",
             "transformation_version": "feature_transform_v1",
             "owner": "research",
+            "input_snapshot_id": "snapshot-1",
+            "output_schema_version": "feature_schema_v1",
+            "no_lookahead": True,
         },
+        extra_boolean_true_fields=("no_lookahead",),
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["feature_lineage_completeness"],
+            "feature_lineage_changes_ranking_weights": False,
+            "feature_lineage_changes_execution_behavior": False,
+            "feature_lineage_can_approve_live_trading": False,
+        }
     )
 
 
@@ -1084,6 +1101,9 @@ def validate_model_lineage_completeness_threshold(
             "generated_at": "2026-05-09T14:00:00Z",
             "transformation_version": "feature_transform_v1",
             "owner": "research",
+            "input_snapshot_id": "snapshot-1",
+            "output_schema_version": "feature_schema_v1",
+            "no_lookahead": True,
             "benchmark_run_id": "benchmark-1",
             "walk_forward_experiment_id": "wf-1",
             "data_version": "market_data_snapshot_v1",

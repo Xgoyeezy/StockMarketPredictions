@@ -439,6 +439,10 @@ Model version traceability update:
 
 Follow-up action hardened the model-registry lineage contract with artifact digest, training window, validation report, and approval scope requirements. This is model evidence hygiene only; it does not add a model registry surface, change ranking weights, change execution behavior, approve live trading, or grant broker/order authority.
 
+Feature lineage completeness update:
+
+Follow-up action hardened the feature-registry lineage contract with input snapshot, output schema, and no-lookahead requirements. This is feature evidence hygiene only; it does not add a feature registry surface, change ranking weights, change execution behavior, approve live trading, or grant broker/order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

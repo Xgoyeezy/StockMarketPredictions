@@ -204,6 +204,24 @@ Every model lineage review should record:
 
 Block small-fund or institutional-readiness claims if model records cannot prove the exact version, training data, feature version, validation evidence, approval scope, and immutable artifact reference used by a forecast or benchmark result.
 
+## Feature Lineage Completeness
+
+Feature lineage completeness is proof evidence for reproducible research. It does not change ranking weights, change execution behavior, approve live trading, submit orders, loosen broker routes, or bypass risk gates.
+
+Every feature lineage review should record:
+
+- Feature identifier.
+- Feature version.
+- Source data version.
+- Generated timestamp.
+- Transformation version.
+- Owner.
+- Input snapshot identifier.
+- Output schema version.
+- No-lookahead flag.
+
+Block small-fund or institutional-readiness claims if feature records cannot prove source version, transformation version, input snapshot, output schema, ownership, generation time, and no-lookahead behavior.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.
