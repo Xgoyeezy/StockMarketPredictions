@@ -130,6 +130,35 @@ Default decision rules:
 - `future backlog`: Valuable later, but mostly expansion surface today.
 - `reject for now`: Safety risk is high, proof impact is low or unknown, or rollback is unclear.
 
+### Initial Expansion Backlog Scores
+
+These scores preserve the expansion ideas without moving them into active work. They are planning labels only, not implementation approval.
+
+| Feature | Evidence | Benchmark | Walk-forward | Execution quality | Risk reduction | Auditability | Trust | Complexity | Dependency risk | Safety risk | Maintenance | Decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Market Specialist Desks | medium | low | low | low | medium | low | medium | medium | low | medium | medium | future backlog |
+| Visual Strategy Evidence Builder | medium | medium | medium | low | medium | medium | high | high | medium | high | high | future backlog |
+| Hedge Fund AI Role Agents | medium | medium | low | low | medium | medium | medium | high | medium | high | high | future backlog |
+| Off-Exchange Liquidity Dashboard | medium | low | low | medium | medium | medium | medium | high | high | medium | high | future backlog |
+| Broker-Neutral Execution Architecture | low | low | low | high | medium | high | medium | high | high | high | high | future backlog |
+| Free-First Provider Strategy | medium | medium | low | medium | medium | medium | high | medium | medium | low | medium | foundation-first docs only |
+| Pay Threshold and Provider ROI Gates | high | medium | low | medium | high | high | high | medium | medium | low | medium | foundation-first docs only |
+| Small Capital Growth Framework | medium | medium | medium | medium | high | medium | high | medium | low | medium | medium | foundation-first docs only |
+| C++ Core Accelerators | low | low | low | low | low | medium | low | high | medium | medium | high | future backlog |
+| Institutional Governance | medium | medium | low | low | high | high | high | high | medium | medium | high | future backlog |
+| RBAC | low | low | low | low | high | high | high | high | medium | medium | high | future backlog |
+| Model Registry | medium | medium | medium | low | medium | high | medium | high | medium | medium | high | future backlog |
+| Strategy Registry | medium | medium | medium | low | medium | high | medium | high | medium | medium | high | future backlog |
+| HFT Feasibility Study | low | low | low | medium | low | medium | low | high | high | high | high | future backlog |
+| Latency-Aware Execution Research | low | low | low | medium | low | medium | low | high | high | high | high | future backlog |
+
+Rules for these rows:
+
+- `foundation-first docs only` means the idea may be documented as a proof discipline, cost discipline, or safety framing, but implementation remains gated.
+- `future backlog` means no build work should start until the current foundation is cleaner and all expansion gates pass.
+- Any row with `high` safety risk must remain inactive unless a separate future project proves the smallest safe version, rollback plan, and explicit human approval boundary.
+- None of these rows authorize broker changes, order behavior changes, risk-gate changes, kill-switch changes, AI order authority, ranking-weight mutation, live trading, or deferred expansion implementation.
+
 ## Near-Term Priority Order
 
 Use this priority order until the foundation is proof-clean:

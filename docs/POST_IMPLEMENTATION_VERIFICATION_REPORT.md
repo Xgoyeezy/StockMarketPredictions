@@ -271,6 +271,20 @@ Remaining Technical Analysis proof gap:
 
 Technical-analysis setup admission is still not implementation-ready. The next evidence work is to keep method families behind causal field completeness, matched controls, executable prices, after-cost walk-forward evidence, parameter stability, and provenance before any detector or ranking work is considered.
 
+Proof-first expansion scoring update:
+
+Follow-up action added initial proof-first scores and decisions for the deferred expansion backlog in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. This preserves strategic ideas while keeping them out of active implementation unless they pass the documented expansion gates.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated document: `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, or ranking code changed.
+
+Remaining expansion-scoring proof gap:
+
+The expansion backlog is now scored at a planning level, but those scores do not approve build work. Any item with high safety risk or high complexity still needs a separate future project, explicit proof-gate evidence, rollback plan, and human review before it can leave future backlog.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
