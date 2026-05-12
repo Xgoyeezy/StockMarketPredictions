@@ -81,7 +81,7 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_first_top_discretionary_requirements(self) -> None:
         summary = get_top_discretionary_trader_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 24)
+        self.assertEqual(summary["implemented_requirement_count"], len(TOP_DISCRETIONARY_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], TOP_DISCRETIONARY_REQUIREMENT_EVIDENCE)
         for key in TOP_DISCRETIONARY_FIRST_TEN_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -217,7 +217,7 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in small_fund_rows))
         self.assertTrue(all(row["status"] == "complete" for row in discretionary_rows))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(discretionary)

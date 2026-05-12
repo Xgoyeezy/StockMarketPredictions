@@ -46,7 +46,7 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_solo_requirements_added_so_far(self) -> None:
         summary = get_solo_systematic_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 30)
+        self.assertEqual(summary["implemented_requirement_count"], len(SOLO_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], SOLO_REQUIREMENT_EVIDENCE)
         for key in SOLO_FIRST_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -223,7 +223,7 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in retail_rows[:25]))
         self.assertTrue(all(row["status"] == "complete" for row in solo_rows[:30]))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(solo)

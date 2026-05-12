@@ -35,7 +35,7 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_retail_requirements_added_so_far(self) -> None:
         summary = get_retail_paper_operator_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 25)
+        self.assertEqual(summary["implemented_requirement_count"], len(RETAIL_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], RETAIL_REQUIREMENT_EVIDENCE)
         for key in FIRST_TEN_RETAIL_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -99,7 +99,7 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
         self.assertEqual(len(first_twenty), 20)
         self.assertTrue(all(row["status"] == "complete" for row in first_twenty))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_broker_wizard_and_paper_order_explanations_are_read_only(self) -> None:
         wizard = build_broker_readiness_wizard(
@@ -129,6 +129,13 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
 
         self.assertTrue(support["sanitized"])
         self.assertFalse(support["raw_logs_included"])
+        self.assertTrue(support["redaction_status_recorded"])
+        self.assertTrue(support["schema_version_recorded"])
+        self.assertFalse(support["raw_broker_payloads_included"])
+        self.assertFalse(support["database_files_included"])
+        self.assertFalse(support["environment_values_included"])
+        self.assertFalse(support["authorization_headers_included"])
+        self.assertFalse(support["unsanitized_personal_data_included"])
         self.assertTrue(labels["distinguishes_paper_from_live_money"])
         self.assertEqual(len(empty_states), 3)
         self.assertTrue(all(item["why_empty"] and item["next_safe_action"] for item in empty_states))

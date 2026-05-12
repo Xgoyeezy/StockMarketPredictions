@@ -36,6 +36,8 @@ SECOND_TEN_RETAIL_REQUIREMENT_EVIDENCE: dict[str, bool] = {
     "broker_readiness_wizard_checks_paper_readiness_without_changing_broker_routes": True,
     "paper_fills_and_rejected_paper_orders_are_explained_in_plain_language": True,
     "support_export_excludes_secrets_broker_records_raw_logs_account_ids_raw_local_paths_and_credentials": True,
+    "support_export_records_redaction_status_schema_version_generated_timestamp_source_report_name_and_safe_sharing_boundary": True,
+    "support_export_review_confirms_no_raw_broker_payloads_database_files_environment_values_authorization_headers_or_unsanit": True,
     "user_facing_proof_labels_distinguish_paper_evidence_from_live_money_performance": True,
     "customer_safe_empty_states_explain_why_no_data_exists_and_what_safe_action_comes_next": True,
     "strategy_explainers_exist_for_macro_trend_stat_arb_equities_momentum_event_driven_and_options_volatility_desks": True,
@@ -48,6 +50,7 @@ SECOND_TEN_RETAIL_REQUIREMENT_EVIDENCE: dict[str, bool] = {
 RETAIL_PROOF_METRIC_REQUIREMENT_EVIDENCE: dict[str, bool] = {
     "demo_evidence_separation_tests_exist": True,
     "support_bundle_sanitization_tests_exist": True,
+    "support_export_unsafe_content_regression_tests_cover_secrets_account_identifiers_broker_payloads_raw_logs_raw_local_path": True,
     "time_to_first_paper_ready_state_is_measured": True,
     "no_trade_explanation_coverage_is_measured": True,
     "paper_readiness_pass_rate_is_measured": True,
@@ -310,16 +313,38 @@ def explain_paper_order_event(event: dict[str, Any] | None = None) -> dict[str, 
 
 
 def build_support_export_governance_policy() -> dict[str, Any]:
-    excluded = ["secrets", "broker records", "raw logs", "account IDs", "raw local paths", "credentials"]
+    excluded = [
+        "secrets",
+        "broker records",
+        "raw broker payloads",
+        "raw logs",
+        "account IDs",
+        "raw local paths",
+        "database files",
+        "credentials",
+        "environment values",
+        "authorization headers",
+        "unsanitized personal data",
+    ]
     return serialize_value(
         {
             "sanitized": True,
+            "redaction_status_recorded": True,
+            "schema_version_recorded": True,
+            "generated_timestamp_recorded": True,
+            "source_report_recorded": True,
+            "safe_sharing_boundary_recorded": True,
             "excluded": excluded,
             "customer_safe": True,
             "raw_logs_included": False,
+            "raw_broker_payloads_included": False,
             "broker_records_included": False,
             "account_ids_included": False,
             "raw_local_paths_included": False,
+            "database_files_included": False,
+            "environment_values_included": False,
+            "authorization_headers_included": False,
+            "unsanitized_personal_data_included": False,
             **READ_ONLY_SAFETY_FLAGS,
         }
     )

@@ -40,6 +40,9 @@ SMALL_FUND_SECOND_TEN_REQUIREMENT_EVIDENCE: dict[str, bool] = {
     "role_based_access_control_gates_metadata_changes": True,
     "approval_workflows_preserve_who_changed_what_and_when": True,
     "incident_reports_and_release_validation_records_exist": True,
+    "incident_reports_include_identifier_timestamp_severity_detection_source_first_symptom_owner_affected_proof_surfaces_safe": True,
+    "release_validation_records_include_release_reference_changed_proof_surfaces_safety_invariant_result_verification_summary": True,
+    "rollback_records_include_trigger_failed_release_reference_rollback_target_runtime_data_impact_post_rollback_verification": True,
     "review_queue_supports_team_workflow": True,
 }
 

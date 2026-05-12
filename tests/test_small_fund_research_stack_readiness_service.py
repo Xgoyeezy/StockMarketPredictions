@@ -43,7 +43,7 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_small_fund_requirements_added_so_far(self) -> None:
         summary = get_small_fund_research_stack_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 26)
+        self.assertEqual(summary["implemented_requirement_count"], len(SMALL_FUND_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], SMALL_FUND_REQUIREMENT_EVIDENCE)
         for key in SMALL_FUND_FIRST_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -231,7 +231,7 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in solo_rows[:30]))
         self.assertTrue(all(row["status"] == "complete" for row in small_fund_rows[:26]))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(small_fund)

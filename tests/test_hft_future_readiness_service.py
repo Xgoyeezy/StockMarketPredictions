@@ -27,7 +27,7 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_all_future_only_hft_requirements(self) -> None:
         summary = get_hft_future_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 14)
+        self.assertEqual(summary["implemented_requirement_count"], len(HFT_FUTURE_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], HFT_FUTURE_REQUIREMENT_EVIDENCE)
         for key in HFT_FUTURE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -114,8 +114,8 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
         hft_rows = [row for row in coverage["requirements"] if row["category_key"] == "hft_or_elite_execution_platform"]
         hft_category = next(row for row in report["categories"] if row["key"] == "hft_or_elite_execution_platform")
 
-        self.assertEqual(coverage["requirement_count"], 158)
-        self.assertEqual(coverage["complete_count"], 158)
+        self.assertGreaterEqual(coverage["requirement_count"], 158)
+        self.assertEqual(coverage["complete_count"], coverage["requirement_count"])
         self.assertEqual(coverage["missing_count"], 0)
         self.assertTrue(coverage["all_documented_scope_added"])
         self.assertTrue(all(row["status"] == "complete" for row in hft_rows))

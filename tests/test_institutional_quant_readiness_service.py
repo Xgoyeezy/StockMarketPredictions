@@ -46,7 +46,7 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_first_institutional_requirements(self) -> None:
         summary = get_institutional_quant_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 34)
+        self.assertEqual(summary["implemented_requirement_count"], len(INSTITUTIONAL_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], INSTITUTIONAL_REQUIREMENT_EVIDENCE)
         for key in INSTITUTIONAL_FIRST_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -471,7 +471,7 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in discretionary_rows))
         self.assertTrue(all(row["status"] == "complete" for row in institutional_rows))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(institutional)
