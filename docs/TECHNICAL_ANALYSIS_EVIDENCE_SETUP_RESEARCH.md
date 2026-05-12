@@ -73,6 +73,31 @@ Every admitted setup family must extend the same core evidence contract:
 
 Synthetic chart values may be stored as derived features, but they do not qualify as fill prices, outcome prices, or proof of executable edge.
 
+## Method-Specific Setup Contracts
+
+These contracts are admission checklists only. They do not implement detectors, add execution logic, add broker routes, change ranking weights, or approve trading. A method family can become an evidence setup candidate only when its fields, matched controls, cost assumptions, walk-forward folds, and provenance are present before outcome review.
+
+| Method family | Required setup fields | Matched controls | Proof blocker until complete |
+| --- | --- | --- | --- |
+| Momentum and trend indicators | `indicator_name`, `fast_len`, `slow_len`, `signal_len`, `slope`, `cross_state`, `adx_value`, `trend_regime`, `parameter_set` | Buy and hold, simple time-series momentum, neighboring lengths, no-trend-filter version | No score-quality or edge language until after-cost walk-forward lift beats simpler momentum controls. |
+| Volume indicators | `indicator_name`, `volume_window`, `obv_slope`, `mfi_value`, `rvol_zscore`, `poc`, `value_area_low`, `value_area_high`, `volume_confirmation_rule` | Price-only setup, no-volume confirmation version, average-volume threshold | No incremental-value language until volume features improve net outcomes beyond price-only controls. |
+| Support and resistance | `level_type`, `level_price`, `level_width`, `touch_count`, `last_touch_at`, `rejection_score`, `flip_flag`, `expiry_rule` | Random horizontal levels, prior-bar extrema, round-number level set | No level-quality claim until causal levels beat naive level controls without lookahead. |
+| Dynamic support and resistance | `level_source`, `length`, `anchor_ts`, `slope`, `distance_bps`, `reclaim_flag`, `break_flag`, `expiry_rule` | Static support/resistance, simple moving-average crossover, rolling regression trend | No dynamic-level claim until it adds value beyond raw trend and static level baselines. |
+| Breakout patterns | `pattern_type`, `boundary_upper`, `boundary_lower`, `lookback_len`, `breakout_close`, `breakout_strength`, `volume_zscore`, `retest_flag` | Donchian channel, prior high/low breakout, random-level breakout | No breakout-edge language until frozen breakout rules beat simpler breakout controls after slippage. |
+| Reversal patterns | `pattern_family`, `pivot_points`, `neckline_level`, `symmetry_score`, `prior_trend_len`, `breakout_confirmed`, `invalidation_level` | Simple swing reversal, RSI reversal, prior-trend mean reversion | No reversal-quality claim until causal pivots and invalidation survive out-of-sample costs. |
+| Market structure | `pivot_method`, `swing_len`, `last_hh`, `last_hl`, `last_lh`, `last_ll`, `structure_state`, `confirmation_bar` | Moving-average regime, rolling regression trend, simple higher-high/lower-low count | No structure-quality claim until no-lookahead pivots improve setup selection across regimes. |
+| Break of structure | `bos_type`, `broken_pivot_price`, `break_close_distance`, `pivot_age`, `displacement_score`, `confirmation_bar`, `failed_break_flag` | Plain swing break, Donchian continuation, prior high/low continuation | No BOS claim until frozen pivot logic beats simpler continuation controls after costs. |
+
+Every method-specific row must keep these blocked claims until evidence is complete:
+
+- `proven_alpha`
+- `repeatability_claim`
+- `automatic_ranking_change`
+- `paper_to_live_readiness`
+- `live_trading_readiness`
+
+The safe next action for any incomplete method is to document the missing fields, controls, costs, folds, and provenance. The safe next action is not to add a detector, trade from the method, or tune ranking weights.
+
 ## Universal Acceptance Criteria
 
 A method can be documented as an evidence setup only when all of these gates are satisfied:

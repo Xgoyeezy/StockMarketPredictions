@@ -257,6 +257,20 @@ Remaining Proof Metrics proof gap:
 
 Proof Metrics now reflects attached plan blockers more clearly, but it is still visibility only. It does not close cleanup items, approve expansion work, prove alpha, prove repeatability, authorize paper-to-live movement, change ranking weights, submit orders, change broker routes, bypass risk gates, clear kill switches, or grant AI order authority.
 
+Technical Analysis setup-contract update:
+
+Follow-up action added method-specific evidence setup contracts for the eight high-priority technical-analysis families already listed in the research backlog. This is documentation-only admission guidance for future evidence contracts; it does not add detectors, services, routes, pages, execution logic, broker logic, risk-gate logic, or ranking-weight logic.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated document: `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, or ranking code changed.
+
+Remaining Technical Analysis proof gap:
+
+Technical-analysis setup admission is still not implementation-ready. The next evidence work is to keep method families behind causal field completeness, matched controls, executable prices, after-cost walk-forward evidence, parameter stability, and provenance before any detector or ranking work is considered.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
