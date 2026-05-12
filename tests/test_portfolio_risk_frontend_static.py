@@ -14,9 +14,12 @@ class PortfolioRiskFrontendStaticTests(unittest.TestCase):
         source = PAGE.read_text(encoding="utf-8")
 
         self.assertIn("Portfolio Risk Proof Gate", source)
+        self.assertIn("Portfolio Risk Cleanup Plan", source)
         self.assertIn("Portfolio risk coverage", source)
         self.assertIn("Factor coverage", source)
         self.assertIn("Liquidity coverage", source)
+        self.assertIn("Blocked claims", source)
+        self.assertIn("Internal review", source)
         self.assertIn("Portfolio Risk Record Readiness", source)
         self.assertIn("does not loosen gates or change risk limits", source)
 
@@ -25,7 +28,9 @@ class PortfolioRiskFrontendStaticTests(unittest.TestCase):
 
         self.assertIn("FALLBACK_PORTFOLIO_RISK_INTELLIGENCE", source)
         self.assertIn("proof_summary", source)
+        self.assertIn("portfolio_risk_cleanup_plan", source)
         self.assertIn("portfolio_risk_proof_ready", source)
+        self.assertIn("portfolio_risk_cleanup_status", source)
         self.assertIn("portfolio_risk_coverage", source)
         self.assertIn("writes_risk_limits: false", source)
         self.assertIn("Does not change broker routes.", source)

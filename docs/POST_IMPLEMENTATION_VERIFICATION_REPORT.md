@@ -141,6 +141,27 @@ Remaining execution proof gap:
 
 Execution Quality now avoids treating paper row count as proof. The next evidence work is still to attach slippage, spread, fill-delay, fill-price, candidate lifecycle IDs, same-window baselines, and route evidence to paper rows before making tradability, after-cost edge, route-quality, paper-to-live, or live-readiness claims.
 
+Portfolio Risk cleanup update:
+
+Follow-up action added a Portfolio Risk cleanup plan to the portfolio risk service, API fallback, report UI, and documentation. This keeps Portfolio Risk read-only while making portfolio-readiness, risk-limit, risk-gate, broker-route, paper-to-live, and live-readiness claim blockers explicit.
+
+Verification evidence:
+
+- Focused Portfolio Risk backend/static tests: PASS, 15 passed.
+- Proof Metrics and route-health follow-up tests: PASS, 6 passed.
+- Project finish tracker follow-up tests: PASS, 5 passed.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `3372`; frontend listening on `http://localhost:5173` as PID `20708`.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Portfolio Risk result: status `empty`, cleanup status `blocked_by_evidence`, 8 open cleanup items, blocked claims include `portfolio_readiness_claim`, `risk_limit_change`, and `risk_gate_change`.
+- Live safety flags: `can_submit_orders: false`, `writes_risk_limits: false`.
+- Frontend route smoke: `/portfolio-risk` returned HTTP 200.
+
+Remaining portfolio-risk proof gap:
+
+Portfolio Risk now exposes a proof-first cleanup plan, but it is not ready for portfolio-readiness, risk-limit, paper-to-live, or live-readiness language. The next evidence work is still to attach paper-route exposure rows, concentration context, factor context, liquidity context, drawdown and budget evidence, candidate and strategy linkage, and stress context without changing risk gates, broker routes, order behavior, or ranking weights.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

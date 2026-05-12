@@ -122,6 +122,99 @@ PORTFOLIO_RISK_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
     },
 )
 
+PORTFOLIO_RISK_CLEANUP_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "portfolio_sample",
+        "title": "Portfolio risk sample",
+        "priority": "critical",
+        "proof_keys": ("portfolio_sample",),
+        "missing_fields": ("paper_position", "pending_paper_intent", "candidate_exposure"),
+        "blocked_claims": ("portfolio_readiness_claim", "paper_to_live_review"),
+        "safe_next_action": "Collect paper-route position, pending order, or candidate exposure rows before treating portfolio risk as reviewable.",
+        "done_when": "Portfolio risk has at least one paper-route exposure row.",
+    },
+    {
+        "key": "exposure_context",
+        "title": "Exposure context",
+        "priority": "critical",
+        "proof_keys": ("exposure_context",),
+        "missing_fields": ("notional", "quantity", "current_price", "side"),
+        "blocked_claims": ("gross_exposure_review", "net_exposure_review", "portfolio_readiness_claim"),
+        "safe_next_action": "Attach notional or quantity-plus-price evidence so gross, net, long, and proxy exposure are reviewable.",
+        "done_when": "Exposure context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "concentration_context",
+        "title": "Concentration context",
+        "priority": "high",
+        "proof_keys": ("concentration_context",),
+        "missing_fields": ("sector", "correlation_bucket"),
+        "blocked_claims": ("concentration_review", "crowding_review"),
+        "safe_next_action": "Attach sector and correlation bucket context so crowding can be reviewed before promotion.",
+        "done_when": "Concentration context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "factor_context",
+        "title": "Factor context",
+        "priority": "high",
+        "proof_keys": ("factor_context",),
+        "missing_fields": ("beta_to_SPY", "beta_to_QQQ"),
+        "blocked_claims": ("factor_exposure_review", "market_beta_claim"),
+        "safe_next_action": "Attach SPY and QQQ beta evidence or a future factor model before stronger portfolio-risk claims.",
+        "done_when": "Factor context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "liquidity_context",
+        "title": "Liquidity context",
+        "priority": "high",
+        "proof_keys": ("liquidity_context",),
+        "missing_fields": ("liquidity_score", "average_dollar_volume", "spread_bps"),
+        "blocked_claims": ("liquidity_risk_review", "execution_risk_review"),
+        "safe_next_action": "Attach liquidity score, average dollar volume, or spread evidence to paper risk rows.",
+        "done_when": "Liquidity context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "drawdown_budget_context",
+        "title": "Drawdown and budget context",
+        "priority": "high",
+        "proof_keys": ("drawdown_budget_context",),
+        "missing_fields": ("max_risk_dollars", "daily_risk_budget", "drawdown_pct", "unrealized_pnl"),
+        "blocked_claims": ("drawdown_review", "risk_budget_review", "paper_to_live_review"),
+        "safe_next_action": "Attach max-risk dollars, daily budget, drawdown, or unrealized P&L evidence to risk rows.",
+        "done_when": "Drawdown and budget context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "candidate_strategy_context",
+        "title": "Candidate and strategy context",
+        "priority": "critical",
+        "proof_keys": ("candidate_strategy_context",),
+        "missing_fields": ("candidate_lifecycle_id", "engine", "setup_type", "strategy", "regime", "forecast_confidence"),
+        "blocked_claims": ("candidate_specific_risk_review", "promotion_traceability", "portfolio_readiness_claim"),
+        "safe_next_action": "Attach candidate, engine, setup, strategy, regime, and confidence context to each reviewable row.",
+        "done_when": "Candidate and strategy context coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "stress_context",
+        "title": "Stress scenario context",
+        "priority": "medium",
+        "proof_keys": ("stress_context",),
+        "missing_fields": ("stress_scenarios",),
+        "blocked_claims": ("stress_readiness_claim", "portfolio_resilience_claim"),
+        "safe_next_action": "Keep transparent stress scenarios available for market, liquidity, sector, single-name, data, and broker shocks.",
+        "done_when": "Stress scenario coverage passes the portfolio-risk proof threshold.",
+    },
+    {
+        "key": "risk_visibility_governance",
+        "title": "Risk visibility governance",
+        "priority": "critical",
+        "proof_keys": ("risk_visibility_safety_boundary",),
+        "missing_fields": (),
+        "blocked_claims": ("risk_limit_change", "risk_gate_change", "broker_route_change", "order_submission", "ranking_mutation"),
+        "safe_next_action": "Keep portfolio risk as read-only visibility; do not change risk limits, gates, routes, rankings, or orders.",
+        "done_when": "Portfolio Risk remains read-only and all mutation flags remain false.",
+    },
+)
+
 SECTOR_BY_SYMBOL: dict[str, str] = {
     "SPY": "broad_market",
     "QQQ": "technology",
@@ -925,6 +1018,127 @@ def build_portfolio_risk_proof_summary(
     )
 
 
+def build_portfolio_risk_cleanup_plan(
+    *,
+    records: list[dict[str, Any]],
+    proof_summary: dict[str, Any],
+) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    all_missing_fields: Counter[str] = Counter()
+    for row in records:
+        all_missing_fields.update(str(field) for field in _listify(row.get("missing_fields")))
+
+    items: list[dict[str, Any]] = []
+    for definition in PORTFOLIO_RISK_CLEANUP_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_proof_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        passed = bool(related_proof_rows) and all(bool(row.get("passed")) for row in related_proof_rows)
+        status = "no_records" if not records and definition["key"] != "risk_visibility_governance" else "ready" if passed else "needs_evidence"
+        values = {str(row.get("metric")): row.get("value") for row in related_proof_rows}
+        missing_fields = sorted(
+            {
+                str(field)
+                for row in related_proof_rows
+                for field in _listify(row.get("missing_fields"))
+            }
+        )
+        if not missing_fields and not passed:
+            missing_fields = list(definition.get("missing_fields") or ())
+        if not missing_fields and not passed and all_missing_fields:
+            missing_fields = [field for field, _count in all_missing_fields.most_common(8)]
+        safe_next_actions = [
+            str(row.get("safe_next_action"))
+            for row in related_proof_rows
+            if row.get("safe_next_action")
+        ] or [str(definition["safe_next_action"])]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": values,
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Portfolio Risk cleanup is internal paper-route risk visibility only; it is not risk approval, portfolio safety proof, investor performance evidence, paper-to-live readiness, or permission to change limits.",
+                "manual_review_only": True,
+                "research_only": True,
+                "paper_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_risk_limits": False,
+                "changes_ranking_weights": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_cleanup_item": open_items[0]["title"] if open_items else None,
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_portfolio_risk_review": proof_ready,
+                    "portfolio_readiness_claim": False,
+                    "risk_limit_change": False,
+                    "risk_gate_change": False,
+                    "broker_route_change": False,
+                    "automatic_risk_mutation": False,
+                    "paper_to_live_readiness": False,
+                    "live_trading_readiness": False,
+                },
+                "blocked_claims": [
+                    "portfolio_readiness_claim",
+                    "risk_limit_change",
+                    "risk_gate_change",
+                    "broker_route_change",
+                    "portfolio_safety_proof",
+                    "paper_to_live_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Portfolio Risk cleanup records missing risk visibility evidence and claim boundaries only. It does not authorize orders, risk-limit changes, risk-gate changes, broker-route changes, or ranking-weight mutation.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_risk_limits": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            "paper_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def _records_from_frame(frame: pd.DataFrame, source_type: str) -> list[dict[str, Any]]:
     if frame is None or frame.empty:
         return []
@@ -977,6 +1191,7 @@ def build_portfolio_risk_report(
     aggregations = compute_portfolio_risk_aggregations(normalized)
     stress_tests = compute_stress_tests(normalized)
     proof_summary = build_portfolio_risk_proof_summary(normalized, aggregations, stress_tests)
+    cleanup_plan = build_portfolio_risk_cleanup_plan(records=normalized, proof_summary=proof_summary)
     missing_counter: Counter[str] = Counter()
     for row in normalized:
         missing_counter.update(row.get("missing_fields") or [])
@@ -985,7 +1200,9 @@ def build_portfolio_risk_report(
         warnings.append("Some paper portfolio rows are missing fields required for complete portfolio risk analytics.")
     if aggregations.get("liquidity_exposure", {}).get("liquidity_warning_count"):
         warnings.append("Liquidity, spread, or average-dollar-volume warnings were observed.")
-    status = "ready" if normalized else "empty"
+    if cleanup_plan["summary"]["open_item_count"]:
+        warnings.append("Portfolio Risk cleanup still has open proof-visibility items.")
+    status = "empty" if not normalized else "ready_for_human_review" if cleanup_plan["status"] == "ready_for_human_review" else "needs_evidence"
     summary = {
         "status": status,
         "position_count": len(normalized),
@@ -1012,9 +1229,15 @@ def build_portfolio_risk_report(
         "liquidity_context_coverage": proof_summary["summary"]["liquidity_context_coverage"],
         "drawdown_budget_context_coverage": proof_summary["summary"]["drawdown_budget_context_coverage"],
         "candidate_strategy_context_coverage": proof_summary["summary"]["candidate_strategy_context_coverage"],
+        "portfolio_risk_cleanup_status": cleanup_plan["status"],
+        "portfolio_risk_cleanup_open_items": cleanup_plan["summary"]["open_item_count"],
+        "portfolio_risk_cleanup_critical_open_items": cleanup_plan["summary"]["critical_open_items"],
+        "top_cleanup_item": cleanup_plan["summary"]["top_cleanup_item"],
+        "claim_permissions": cleanup_plan["summary"]["claim_permissions"],
         **SAFETY_FLAGS,
     }
     aggregations["portfolio_risk_proof"] = proof_summary
+    aggregations["portfolio_risk_cleanup_plan"] = cleanup_plan
     return serialize_value(
         {
             "status": status,
@@ -1024,6 +1247,7 @@ def build_portfolio_risk_report(
             "summary": summary,
             "records": normalized[:250],
             "proof_summary": proof_summary,
+            "portfolio_risk_cleanup_plan": cleanup_plan,
             "aggregations": aggregations,
             "stress_tests": stress_tests,
             "warnings": list(dict.fromkeys(warnings)),

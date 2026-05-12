@@ -122,6 +122,9 @@ export default function PortfolioRiskPage() {
   const safetyNotes = report?.safety_notes || []
   const stressTests = report?.stress_tests || []
   const missingFieldRows = useMemo(() => missingRows(report?.missing_fields), [report?.missing_fields])
+  const cleanupPlan = report?.portfolio_risk_cleanup_plan || aggregations.portfolio_risk_cleanup_plan || {}
+  const cleanupSummary = cleanupPlan.summary || {}
+  const cleanupRows = cleanupPlan.items || []
 
   return (
     <div className="ui-shell__page">
@@ -176,6 +179,27 @@ export default function PortfolioRiskPage() {
             { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
             { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
             { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Portfolio Risk Cleanup Plan" subtitle="Proof-first blockers for portfolio-readiness, paper-to-live, risk-limit, broker-route, and live-readiness claims.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Cleanup status" value={humanize(cleanupPlan.status || summary.portfolio_risk_cleanup_status || 'blocked_by_evidence')} helper={`${cleanupSummary.open_item_count ?? summary.portfolio_risk_cleanup_open_items ?? 0} open cleanup items`} />
+          <MetricCard label="Critical blockers" value={cleanupSummary.critical_open_items ?? summary.portfolio_risk_cleanup_critical_open_items ?? 0} helper={cleanupSummary.top_cleanup_item || summary.top_cleanup_item || 'No top cleanup item'} />
+          <MetricCard label="Internal review" value={cleanupSummary.claim_permissions?.cautious_internal_portfolio_risk_review || summary.claim_permissions?.cautious_internal_portfolio_risk_review ? 'Allowed' : 'Blocked'} helper="Human portfolio-risk review only" />
+          <MetricCard label="Blocked claims" value={(cleanupSummary.blocked_claims || []).length || 0} helper={(cleanupSummary.blocked_claims || []).slice(0, 3).map(humanize).join(', ') || 'None'} />
+        </div>
+        <DataTable
+          rows={cleanupRows}
+          empty={loading ? 'Loading portfolio risk cleanup plan...' : 'No portfolio risk cleanup plan is available.'}
+          columns={[
+            { key: 'title', label: 'Cleanup item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing', label: 'Missing evidence', render: (row) => row.missing_fields?.length ? row.missing_fields.join(', ') : 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => row.blocked_claims?.length ? row.blocked_claims.map(humanize).join(', ') : 'None' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
           ]}
         />
       </SectionCard>

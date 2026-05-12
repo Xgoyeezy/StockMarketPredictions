@@ -9,6 +9,7 @@ from backend.api import create_app
 from backend.services import portfolio_risk_intelligence as pri
 from backend.services.portfolio_risk_intelligence import (
     build_portfolio_risk_report,
+    build_portfolio_risk_cleanup_plan,
     build_portfolio_risk_proof_summary,
     compute_correlation_heat,
     compute_position_notional,
@@ -139,6 +140,10 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
         self.assertEqual(proof["status"], "ready_for_human_review")
         self.assertEqual(report["summary"]["portfolio_risk_requirements_passed"], 9)
         self.assertEqual(report["summary"]["portfolio_risk_coverage"], 1.0)
+        self.assertEqual(report["portfolio_risk_cleanup_plan"]["status"], "ready_for_human_review")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_portfolio_risk_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["risk_limit_change"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
         self.assertTrue(all(row["research_only"] for row in proof["requirements"]))
         self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
         self.assertFalse(any(row["changes_risk_limits"] for row in proof["requirements"]))
@@ -175,6 +180,60 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
         self.assertFalse(report["proof_summary"]["proof_ready"])
         self.assertFalse(report["writes_risk_limits"])
         self.assertFalse(report["writes_risk_config"])
+        self.assertEqual(report["status"], "needs_evidence")
+
+    def test_portfolio_risk_cleanup_plan_blocks_claims_when_context_is_missing(self) -> None:
+        report = build_portfolio_risk_report(
+            records=[
+                _row(
+                    symbol="ZZZZ",
+                    sector="",
+                    engine="unknown",
+                    setup_type="unknown",
+                    strategy="unknown",
+                    regime="unknown",
+                    beta_to_SPY=None,
+                    beta_to_QQQ=None,
+                    liquidity_score=None,
+                    spread_bps=None,
+                    forecast_confidence=None,
+                    max_risk_dollars=None,
+                    current_drawdown_pct=None,
+                    unrealized_pnl=None,
+                    daily_risk_budget=None,
+                )
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        cleanup_plan = report["portfolio_risk_cleanup_plan"]
+        by_key = {row["key"]: row for row in cleanup_plan["items"]}
+
+        self.assertEqual(cleanup_plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["portfolio_risk_cleanup_status"], "blocked_by_evidence")
+        self.assertGreaterEqual(report["summary"]["portfolio_risk_cleanup_open_items"], 4)
+        self.assertGreaterEqual(report["summary"]["portfolio_risk_cleanup_critical_open_items"], 1)
+        self.assertEqual(by_key["factor_context"]["status"], "needs_evidence")
+        self.assertIn("beta_to_SPY", by_key["factor_context"]["missing_fields"])
+        self.assertIn("market_beta_claim", by_key["factor_context"]["blocked_claims"])
+        self.assertEqual(by_key["candidate_strategy_context"]["status"], "needs_evidence")
+        self.assertIn("forecast_confidence", by_key["candidate_strategy_context"]["missing_fields"])
+        self.assertIn("portfolio_readiness_claim", cleanup_plan["summary"]["blocked_claims"])
+        self.assertFalse(cleanup_plan["summary"]["claim_permissions"]["automatic_risk_mutation"])
+        self.assertFalse(cleanup_plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in cleanup_plan["items"]))
+        self.assertFalse(any(item["changes_risk_limits"] for item in cleanup_plan["items"]))
+
+    def test_portfolio_risk_cleanup_plan_helper_is_read_only(self) -> None:
+        report = build_portfolio_risk_report(records=[_row()], generated_at="2026-05-06T00:00:00Z")
+        cleanup_plan = build_portfolio_risk_cleanup_plan(
+            records=report["records"],
+            proof_summary=report["proof_summary"],
+        )
+
+        self.assertTrue(cleanup_plan["research_only"])
+        self.assertTrue(cleanup_plan["paper_only"])
+        self.assertFalse(cleanup_plan["can_submit_orders"])
+        self.assertFalse(cleanup_plan["writes_risk_limits"])
 
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
@@ -201,10 +260,12 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
                 self.assertIn("summary", data)
                 self.assertIn("records", data)
                 self.assertIn("proof_summary", data)
+                self.assertIn("portfolio_risk_cleanup_plan", data)
                 self.assertIn("aggregations", data)
                 self.assertIn("warnings", data)
                 self.assertIn("missing_fields", data)
                 self.assertIn("portfolio_risk_proof_ready", data["summary"])
+                self.assertIn("claim_permissions", data["summary"])
                 self.assertIn("safety_notes", data)
                 self.assertIn("Risk visibility only. Does not enforce, loosen, or change risk gates.", data["safety_notes"])
         finally:

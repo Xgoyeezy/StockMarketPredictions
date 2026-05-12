@@ -71,6 +71,26 @@ The summary also exposes:
 
 This is not risk approval. A proof-ready Portfolio Risk report is evidence that a human can review portfolio context; it does not authorize trades, change limits, clear gates, or modify broker routes.
 
+## Portfolio Risk Cleanup Plan
+
+The report also emits `portfolio_risk_cleanup_plan`, a proof-first work queue for Portfolio Risk maturity. It turns missing portfolio-risk context into explicit review blockers instead of treating route availability or stress-test output as readiness proof.
+
+The cleanup plan tracks:
+
+- Portfolio risk sample.
+- Exposure context.
+- Concentration context.
+- Factor context.
+- Liquidity context.
+- Drawdown and budget context.
+- Candidate and strategy context.
+- Stress scenario context.
+- Risk visibility governance.
+
+Each item reports priority, status, linked proof keys, missing fields, blocked claims, a safe next action, and a `done_when` condition. The plan also returns `claim_permissions` so the UI can show that portfolio-readiness claims, risk-limit changes, risk-gate changes, broker-route changes, automatic risk mutation, paper-to-live readiness, and live-trading readiness remain blocked.
+
+The cleanup plan is internal review guidance only. It does not place orders, block orders, change limits, clear gates, change broker routes, change ranking weights, or approve live trading.
+
 ## Stress Scenarios
 
 The v1 stress tests are simple diagnostics:
