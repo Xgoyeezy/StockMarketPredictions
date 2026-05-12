@@ -38,6 +38,22 @@ Frontend:
 
 The page ends with the shared Project Finish Tracker, consistent with the report-footer requirement.
 
+## Proof Plan Awareness
+
+The dashboard reads cleanup, hardening, and validation plans that are already emitted by the foundation reports. When a source report includes a plan, the matching Proof Metrics row exposes:
+
+- Plan status.
+- Open plan item count.
+- Critical open plan item count.
+- Total plan item count.
+- Top cleanup, hardening, validation, or gap item.
+
+Supported plan sources include Data Completeness cleanup, Professional Benchmark hardening, Walk-Forward validation, Score Calibration hardening, Evidence Reward cleanup, Execution Quality hardening, Risk/Audit hardening, Portfolio Risk cleanup, Forecast Validation hardening, Shadow Mode validation, and Research Promotion cleanup.
+
+A metric remains blocked when its attached proof plan still has open items, even if the source report has a broad `ready` status. This keeps the dashboard aligned with the proof-first discipline: a surface being present is not enough; its evidence plan must be clean before stronger claims can be reviewed.
+
+Plan awareness is read-only. It does not create plans, close plan items, approve expansion work, change ranking weights, change broker routes, change order behavior, change risk gates, or clear kill switches.
+
 ## Metric Gates
 
 | Metric | Gate | Blocks |

@@ -65,6 +65,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.proof_field_coverage_rate",),
         "target": 0.80,
         "ready_paths": ("summary.proof_field_ready", "summary.benchmark_ready"),
+        "plan_paths": ("data_cleanup_plan", "aggregations.data_cleanup_plan"),
         "blocked_claims": ("benchmark_ready", "walk_forward_ready", "paper_to_live_review"),
         "safe_next_action": "Raise forward-return, baseline, forecast-actual, execution-cost, regime, and reward-field coverage before proof claims.",
     },
@@ -101,6 +102,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.benchmark_proof_requirements_passed",),
         "target_paths": ("summary.benchmark_proof_requirements_total",),
         "ready_paths": ("summary.benchmark_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("benchmark_hardening_plan", "aggregations.benchmark_hardening_plan"),
         "blocked_claims": ("proven_alpha", "repeatability_claim", "public_edge_claim"),
         "safe_next_action": "Collect enough rewardable rows with explicit baselines, score-bucket lift, after-cost reward, and data quality.",
     },
@@ -113,6 +115,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.walk_forward_requirements_passed",),
         "target_paths": ("summary.walk_forward_requirements_total",),
         "ready_paths": ("summary.walk_forward_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("walk_forward_validation_plan", "aggregations.walk_forward_validation_plan"),
         "blocked_claims": ("repeatability_claim", "promotion_review", "paper_to_live_review"),
         "safe_next_action": "Freeze experiment versions and evaluate out-of-sample folds against stamped candidate outcomes.",
     },
@@ -125,6 +128,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.calibration_requirements_passed",),
         "target_paths": ("summary.calibration_requirements_total",),
         "ready_paths": ("summary.calibration_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("score_calibration_hardening_plan", "aggregations.score_calibration_hardening_plan"),
         "blocked_claims": ("score_quality_claim", "automatic_ranking_change", "promotion_review"),
         "safe_next_action": "Measure score-bucket lift, monotonicity, feature coverage, and after-cost lift on rewardable rows.",
     },
@@ -137,6 +141,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.rewardable_prediction_count", "summary.rewardable_count"),
         "target": 1,
         "ready_paths": (),
+        "plan_paths": ("evidence_reward_cleanup_plan", "aggregations.evidence_reward_cleanup_plan"),
         "blocked_claims": ("reward_claim", "blocker_value_claim", "benchmark_input_quality"),
         "safe_next_action": "Increase rewardable candidate rows with outcomes, baselines, costs, and blocker context.",
     },
@@ -149,6 +154,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.execution_quality_requirements_passed", "proof_summary.summary.passed_requirement_count"),
         "target_paths": ("summary.execution_quality_requirements_total", "proof_summary.summary.requirement_count"),
         "ready_paths": ("summary.execution_quality_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("execution_quality_hardening_plan", "aggregations.execution_quality_hardening_plan"),
         "blocked_claims": ("tradability_claim", "route_quality_claim", "paper_to_live_review"),
         "safe_next_action": "Link paper fills to candidates and verify cost-adjusted outcomes, fill quality, and alpha decay.",
     },
@@ -161,6 +167,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("risk_audit_hardening_plan.summary.ready_item_count",),
         "target_paths": ("risk_audit_hardening_plan.summary.item_count",),
         "ready_paths": ("risk_audit_hardening_plan.summary.claim_permissions.cautious_internal_risk_audit_review",),
+        "plan_paths": ("risk_audit_hardening_plan", "aggregations.risk_audit_hardening_plan"),
         "blocked_claims": ("risk_gate_authority_claim", "kill_switch_clearance", "live_trading_readiness"),
         "safe_next_action": "Keep risk policies, kill-switch events, audit records, replay evidence, and sanitized exports visible.",
     },
@@ -173,6 +180,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.portfolio_risk_requirements_passed", "proof_summary.summary.passed_requirement_count"),
         "target_paths": ("summary.portfolio_risk_requirements_total", "proof_summary.summary.requirement_count"),
         "ready_paths": ("summary.portfolio_risk_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("portfolio_risk_cleanup_plan", "aggregations.portfolio_risk_cleanup_plan"),
         "blocked_claims": ("portfolio_readiness_claim", "paper_to_live_review"),
         "safe_next_action": "Attach exposure, concentration, factor, liquidity, drawdown, stress, and candidate context to risk rows.",
     },
@@ -185,6 +193,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.validation_requirements_passed", "summary.forecast_validation_requirements_passed", "summary.ready_requirement_count"),
         "target_paths": ("summary.validation_requirements_total", "summary.forecast_validation_requirements_total", "summary.requirement_count"),
         "ready_paths": ("summary.forecast_validation_ready", "summary.proof_ready"),
+        "plan_paths": ("forecast_validation_hardening_plan", "aggregations.forecast_validation_hardening_plan"),
         "blocked_claims": ("forecast_accuracy_claim", "benchmark_forecast_support"),
         "safe_next_action": "Preserve immutable forecast contracts and attach actual post-forecast paths before accuracy claims.",
     },
@@ -197,6 +206,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.comparison_count",),
         "target": 1,
         "ready_paths": ("summary.shadow_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("shadow_validation_plan", "aggregations.shadow_validation_plan"),
         "blocked_claims": ("human_vs_system_quality_claim", "override_quality_claim"),
         "safe_next_action": "Capture human and system decisions against the same opportunity before outcomes are known.",
     },
@@ -209,6 +219,7 @@ METRIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "value_paths": ("summary.promotion_requirements_passed", "proof_summary.summary.passed_requirement_count"),
         "target_paths": ("summary.promotion_requirements_total", "proof_summary.summary.requirement_count"),
         "ready_paths": ("summary.promotion_proof_ready", "proof_summary.proof_ready"),
+        "plan_paths": ("research_promotion_cleanup_plan", "aggregations.research_promotion_cleanup_plan"),
         "blocked_claims": ("policy_promotion", "ranking_mutation", "paper_to_live_review"),
         "safe_next_action": "Require benchmark, data, walk-forward, execution, risk, and manual review traceability before promotion.",
     },
@@ -270,6 +281,14 @@ def _first_path_value(payload: dict[str, Any], paths: Iterable[str]) -> Any:
     return None
 
 
+def _first_plan(payload: dict[str, Any], paths: Iterable[str]) -> dict[str, Any] | None:
+    for path in paths:
+        value = _path_value(payload, path)
+        if isinstance(value, dict) and value:
+            return value
+    return None
+
+
 def _truthy_path(payload: dict[str, Any], paths: Iterable[str]) -> bool:
     for path in paths:
         if _path_value(payload, path) is True:
@@ -292,6 +311,73 @@ def _metric_status(*, available: bool, ready: bool, value: Any, target: Any, raw
     if "blocked" in normalized:
         return "blocked_by_evidence"
     return "needs_evidence"
+
+
+def _plan_status(plan: dict[str, Any] | None) -> str | None:
+    if not isinstance(plan, dict):
+        return None
+    status = plan.get("status")
+    return str(status) if status else None
+
+
+def _plan_summary(plan: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {}
+    summary = plan.get("summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _plan_open_item_count(plan: dict[str, Any] | None) -> int | None:
+    summary = _plan_summary(plan)
+    for key in ("open_item_count", "open_metric_count"):
+        value = summary.get(key)
+        if value is not None:
+            return int(value or 0)
+    items = plan.get("items") if isinstance(plan, dict) else None
+    if isinstance(items, list):
+        return sum(1 for item in items if isinstance(item, dict) and item.get("status") != "ready")
+    return None
+
+
+def _plan_item_count(plan: dict[str, Any] | None) -> int | None:
+    summary = _plan_summary(plan)
+    for key in ("item_count", "metric_count", "requirement_count"):
+        value = summary.get(key)
+        if value is not None:
+            return int(value or 0)
+    items = plan.get("items") if isinstance(plan, dict) else None
+    if isinstance(items, list):
+        return len(items)
+    return None
+
+
+def _plan_critical_open_item_count(plan: dict[str, Any] | None) -> int:
+    summary = _plan_summary(plan)
+    value = summary.get("critical_open_items") or summary.get("critical_open_metric_count")
+    if value is not None:
+        return int(value or 0)
+    items = plan.get("items") if isinstance(plan, dict) else None
+    if isinstance(items, list):
+        return sum(
+            1
+            for item in items
+            if isinstance(item, dict) and item.get("status") != "ready" and item.get("priority") == "critical"
+        )
+    return 0
+
+
+def _plan_top_item(plan: dict[str, Any] | None) -> str | None:
+    summary = _plan_summary(plan)
+    for key in ("top_cleanup_item", "top_hardening_item", "top_validation_item", "top_metric", "top_gap"):
+        value = summary.get(key)
+        if value:
+            return str(value)
+    items = plan.get("items") if isinstance(plan, dict) else None
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and item.get("status") != "ready":
+                return str(item.get("title") or item.get("label") or item.get("key") or "")
+    return None
 
 
 def _source_status(report: dict[str, Any] | None, source_key: str, label: str) -> dict[str, Any]:
@@ -401,29 +487,44 @@ def build_proof_metric_rows(source_reports: dict[str, dict[str, Any]]) -> list[d
         report = source_reports.get(source_key)
         available = isinstance(report, dict) and report.get("status") != "source_unavailable"
         report_payload = report if isinstance(report, dict) else {}
+        proof_plan = _first_plan(report_payload, definition.get("plan_paths") or ())
+        plan_status = _plan_status(proof_plan)
+        plan_open_items = _plan_open_item_count(proof_plan)
+        plan_item_count = _plan_item_count(proof_plan)
+        plan_critical_open_items = _plan_critical_open_item_count(proof_plan)
+        plan_top_item = _plan_top_item(proof_plan)
         value = _first_path_value(report_payload, definition.get("value_paths") or ())
         target = _first_path_value(report_payload, definition.get("target_paths") or ())
         if target is None:
             target = definition.get("target")
-        ready = _truthy_path(report_payload, definition.get("ready_paths") or ())
+        if value is None and plan_open_items is not None and plan_item_count is not None:
+            value = max(0, plan_item_count - plan_open_items)
+        if target is None and plan_item_count is not None:
+            target = plan_item_count
+        plan_blocks = plan_open_items is not None and plan_open_items > 0
+        ready = _truthy_path(report_payload, definition.get("ready_paths") or ()) and not plan_blocks
         raw_status = str(
-            _first_path_value(
-                report_payload,
-                (
-                    "summary.status",
-                    "summary.benchmark_proof_status",
-                    "summary.walk_forward_proof_status",
-                    "summary.calibration_proof_status",
-                    "summary.execution_quality_proof_status",
-                    "summary.portfolio_risk_proof_status",
-                    "summary.risk_audit_hardening_status",
-                    "summary.promotion_proof_status",
-                    "status",
-                ),
+            plan_status
+            or (
+                _first_path_value(
+                    report_payload,
+                    (
+                        "summary.status",
+                        "summary.benchmark_proof_status",
+                        "summary.walk_forward_proof_status",
+                        "summary.calibration_proof_status",
+                        "summary.execution_quality_proof_status",
+                        "summary.portfolio_risk_proof_status",
+                        "summary.risk_audit_hardening_status",
+                        "summary.promotion_proof_status",
+                        "summary.forecast_hardening_status",
+                        "status",
+                    ),
+                )
+                or ""
             )
-            or ""
         )
-        status = _metric_status(available=available, ready=ready, value=value, target=target, raw_status=raw_status)
+        status = "blocked_by_evidence" if available and plan_blocks else _metric_status(available=available, ready=ready, value=value, target=target, raw_status=raw_status)
         missing_fields = report_payload.get("missing_fields") if isinstance(report_payload.get("missing_fields"), dict) else {}
         gap = None
         value_number = _safe_float(value)
@@ -450,6 +551,20 @@ def build_proof_metric_rows(source_reports: dict[str, dict[str, Any]]) -> list[d
                 "blocked_claims": list(definition.get("blocked_claims") or ()),
                 "safe_next_action": definition["safe_next_action"],
                 "missing_fields": sorted(missing_fields.keys())[:8],
+                "proof_plan": {
+                    "status": plan_status,
+                    "open_item_count": plan_open_items,
+                    "critical_open_items": plan_critical_open_items,
+                    "item_count": plan_item_count,
+                    "top_item": plan_top_item,
+                }
+                if proof_plan is not None
+                else None,
+                "proof_plan_status": plan_status,
+                "proof_plan_open_items": plan_open_items,
+                "proof_plan_critical_open_items": plan_critical_open_items,
+                "proof_plan_item_count": plan_item_count,
+                "proof_plan_top_item": plan_top_item,
                 "manual_review_only": True,
                 "research_only": True,
                 **SAFETY_FLAGS,

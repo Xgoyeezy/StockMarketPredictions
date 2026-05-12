@@ -1402,9 +1402,9 @@ export const FALLBACK_PROOF_METRICS_DASHBOARD = {
     mutation: 'none',
   },
   metrics: [
-    { key: 'proof_field_coverage', label: 'Proof-field coverage', gate: 'Data Gate', source: 'data_completeness', priority: 'critical', status: 'source_unavailable', value: null, target: 0.8, blocked_claims: ['benchmark_ready', 'walk_forward_ready'], safe_next_action: 'Raise proof-field coverage before proof claims.' },
-    { key: 'outcome_baseline_coverage', label: 'Candidate outcome and baseline coverage', gate: 'Evidence Outcome Gate', source: 'evidence_outcomes', priority: 'critical', status: 'source_unavailable', value: null, target: 0.8, blocked_claims: ['baseline_relative_edge'], safe_next_action: 'Stamp closed-horizon outcomes and same-window baselines.' },
-    { key: 'benchmark_proof', label: 'Professional benchmark proof', gate: 'Benchmark Gate', source: 'professional_benchmark', priority: 'critical', status: 'source_unavailable', value: null, target: null, blocked_claims: ['proven_alpha'], safe_next_action: 'Collect rewardable rows with baselines and after-cost reward.' },
+    { key: 'proof_field_coverage', label: 'Proof-field coverage', gate: 'Data Gate', source: 'data_completeness', priority: 'critical', status: 'source_unavailable', value: null, target: 0.8, proof_plan: null, proof_plan_open_items: null, proof_plan_critical_open_items: 0, proof_plan_top_item: null, blocked_claims: ['benchmark_ready', 'walk_forward_ready'], safe_next_action: 'Raise proof-field coverage before proof claims.' },
+    { key: 'outcome_baseline_coverage', label: 'Candidate outcome and baseline coverage', gate: 'Evidence Outcome Gate', source: 'evidence_outcomes', priority: 'critical', status: 'source_unavailable', value: null, target: 0.8, proof_plan: null, proof_plan_open_items: null, proof_plan_critical_open_items: 0, proof_plan_top_item: null, blocked_claims: ['baseline_relative_edge'], safe_next_action: 'Stamp closed-horizon outcomes and same-window baselines.' },
+    { key: 'benchmark_proof', label: 'Professional benchmark proof', gate: 'Benchmark Gate', source: 'professional_benchmark', priority: 'critical', status: 'source_unavailable', value: null, target: null, proof_plan: null, proof_plan_open_items: null, proof_plan_critical_open_items: 0, proof_plan_top_item: null, blocked_claims: ['proven_alpha'], safe_next_action: 'Collect rewardable rows with baselines and after-cost reward.' },
   ],
   gate_groups: [],
   source_reports: [],

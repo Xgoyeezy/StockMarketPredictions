@@ -37,6 +37,15 @@ function compactList(items, fallback = 'None') {
   return list.slice(0, 3).map(humanize).join(', ')
 }
 
+function formatPlanBlockers(row) {
+  const openItems = row.proof_plan_open_items ?? row.proof_plan?.open_item_count
+  const criticalItems = row.proof_plan_critical_open_items ?? row.proof_plan?.critical_open_items
+  const topItem = row.proof_plan_top_item ?? row.proof_plan?.top_item
+  if (openItems == null) return 'No proof plan attached'
+  const criticalText = criticalItems ? `${criticalItems} critical` : 'no critical'
+  return `${openItems} open, ${criticalText}${topItem ? `: ${topItem}` : ''}`
+}
+
 function DataTable({ columns, rows, empty }) {
   return (
     <ListTable>
@@ -141,6 +150,7 @@ export default function ProofMetricsPage() {
             { key: 'label', label: 'Metric' },
             { key: 'gate', label: 'Gate' },
             { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'proof_plan', label: 'Plan blockers', render: formatPlanBlockers },
             { key: 'value', label: 'Value', render: (row) => formatMetric(row.value, row.target) },
             { key: 'target', label: 'Target', render: (row) => formatMetric(row.target, row.target) },
             { key: 'blocked_claims', label: 'Blocked claims', render: (row) => compactList(row.blocked_claims) },

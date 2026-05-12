@@ -238,6 +238,25 @@ Remaining Forecast Validation proof gap:
 
 Forecast Validation now exposes a proof-first hardening plan, but it is not ready for forecast-accuracy, forecast-edge, repeatability, paper-to-live, live-readiness, or ranking-mutation language. The next evidence work is still to broaden actual post-prediction path coverage, attach target/invalidation timing metrics, and prove calibration/regime stability while keeping immutable forecast records separate from validation outcomes and disconnected from execution, broker routes, risk gates, kill switches, ranking weights, and AI order authority.
 
+Proof Metrics plan-awareness update:
+
+Follow-up action made the existing Proof Metrics Dashboard read attached cleanup, hardening, and validation plans from the foundation reports. This keeps Proof Metrics read-only while making plan-level blocker counts visible alongside the metric value and gate.
+
+Verification evidence:
+
+- Focused Proof Metrics backend/static tests: PASS, 7 passed.
+- Route-health follow-up test set: PASS, 8 passed.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live app restart completed through the existing startup script.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Proof Metrics slow-source result: status `blocked_by_evidence`, 13 open metrics, Forecast Validation metric status `blocked_by_evidence`, Forecast Validation attached plan open items `3`, live order authority `false`.
+- Frontend route smoke: `/proof-metrics` returned HTTP 200.
+
+Remaining Proof Metrics proof gap:
+
+Proof Metrics now reflects attached plan blockers more clearly, but it is still visibility only. It does not close cleanup items, approve expansion work, prove alpha, prove repeatability, authorize paper-to-live movement, change ranking weights, submit orders, change broker routes, bypass risk gates, clear kill switches, or grant AI order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

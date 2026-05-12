@@ -25,6 +25,8 @@ class ProofMetricsFrontendStaticTests(unittest.TestCase):
         self.assertIn("Does not clear kill switches.", page)
         self.assertIn("FinishTrackerSection", page)
         self.assertIn("Gate Groups", page)
+        self.assertIn("Plan blockers", page)
+        self.assertIn("No proof plan attached", page)
         self.assertIn("Source Reports", page)
         self.assertIn("Deferred Scope", page)
         self.assertIn("getProofMetricsSummary", page)
@@ -32,6 +34,7 @@ class ProofMetricsFrontendStaticTests(unittest.TestCase):
         self.assertIn('path="/proof-metrics"', app)
         self.assertIn("'/proof-metrics'", nav)
         self.assertIn("FALLBACK_PROOF_METRICS_DASHBOARD", client)
+        self.assertIn("proof_plan_open_items", client)
         self.assertIn("getProofMetricsSummary", client)
         self.assertIn("'/proof-metrics/summary'", client)
 

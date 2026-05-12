@@ -142,6 +142,31 @@ class ProofMetricsDashboardTests(unittest.TestCase):
         self.assertIn("unavailable", " ".join(report["warnings"]).lower())
         self.assertTrue(any(row["status"] == "source_unavailable" for row in report["metrics"]))
 
+    def test_attached_proof_plan_blocks_ready_status_until_plan_is_clean(self) -> None:
+        reports = _ready_reports()
+        reports["forecast_validation"]["forecast_validation_hardening_plan"] = {
+            "status": "blocked_by_evidence",
+            "summary": {
+                "item_count": 7,
+                "open_item_count": 2,
+                "critical_open_items": 1,
+                "top_hardening_item": "Actual path coverage",
+            },
+        }
+
+        report = build_proof_metrics_dashboard_report(source_reports=reports, generated_at="2026-05-12T00:00:00Z")
+        forecast_row = next(row for row in report["metrics"] if row["key"] == "forecast_validation")
+
+        self.assertEqual(report["status"], "blocked_by_evidence")
+        self.assertEqual(forecast_row["status"], "blocked_by_evidence")
+        self.assertEqual(forecast_row["value"], 3)
+        self.assertEqual(forecast_row["target"], 3)
+        self.assertEqual(forecast_row["proof_plan_open_items"], 2)
+        self.assertEqual(forecast_row["proof_plan_critical_open_items"], 1)
+        self.assertEqual(forecast_row["proof_plan_top_item"], "Actual path coverage")
+        self.assertFalse(forecast_row["can_submit_orders"])
+        self.assertFalse(forecast_row["can_change_ranking_weights"])
+
     def test_api_route_returns_summary(self) -> None:
         context = build_test_context(slug="proof-metrics-test", plan_key="professional")
         client = build_test_client(context)
