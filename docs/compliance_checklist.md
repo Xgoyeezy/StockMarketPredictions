@@ -93,6 +93,28 @@ Firm-grade reports must exclude:
 
 If a report cannot prove sanitization, reproducibility, source evidence references, and claim boundaries, it should remain a draft review artifact and must not support institutional-grade or compliance-approved claims.
 
+## Environment Separation Verification
+
+Environment separation is proof and audit evidence. It does not enable live trading, loosen broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or mutate ranking weights.
+
+Every environment-separation review should record:
+
+- Environment name.
+- Execution lane.
+- Data store.
+- Runtime storage scope.
+- Configuration namespace.
+- Secrets scope.
+- Broker route scope.
+- Audit scope.
+- Whether live autonomy is enabled.
+- Whether broker-route mutation is allowed.
+- Whether risk-gate bypass is allowed.
+- Whether ranking mutation is allowed.
+- Whether simulation evidence can mix with market-observed evidence.
+
+Block institutional-readiness claims if any reviewed environment allows live autonomy, broker-route mutation, risk-gate bypass, ranking mutation, or simulation and observed evidence mixing without a separate approved future project.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

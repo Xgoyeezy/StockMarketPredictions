@@ -186,9 +186,13 @@ EXECUTION_REPORT_LINK_FIELDS: tuple[str, ...] = (
 )
 ENVIRONMENT_SEPARATION_FIELDS: tuple[str, ...] = (
     "environment",
+    "execution_lane",
     "data_store",
+    "runtime_storage_scope",
+    "config_namespace",
     "secrets_scope",
     "broker_route_scope",
+    "audit_scope",
     "live_autonomy_enabled",
 )
 PERMISSION_ENFORCEMENT_FIELDS: tuple[str, ...] = (
@@ -633,26 +637,50 @@ def validate_environment_separation(records: list[dict[str, Any]] | None = None)
     rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "environment": "paper_research",
+            "execution_lane": "alpaca_paper",
             "data_store": "research_evidence",
+            "runtime_storage_scope": "paper_research_runtime",
+            "config_namespace": "paper_research",
             "secrets_scope": "paper_only",
             "broker_route_scope": "paper_only",
+            "audit_scope": "research_audit",
             "live_autonomy_enabled": False,
+            "broker_route_mutation_allowed": False,
+            "risk_gate_bypass_allowed": False,
+            "ranking_mutation_allowed": False,
+            "simulation_observed_mixing_allowed": False,
         }
     ]
     missing_by_record = []
     failed_indexes = []
+    violation_fields = (
+        "live_autonomy_enabled",
+        "broker_route_mutation_allowed",
+        "risk_gate_bypass_allowed",
+        "ranking_mutation_allowed",
+        "simulation_observed_mixing_allowed",
+    )
+    violations_by_record = []
     for index, row in enumerate(rows):
         missing = [field for field in ENVIRONMENT_SEPARATION_FIELDS if not _has_value(row.get(field))]
-        live_autonomy_enabled = row.get("live_autonomy_enabled") is True
+        violations = [field for field in violation_fields if row.get(field) is True]
         missing_by_record.append({"index": index, "missing_fields": missing})
-        if missing or live_autonomy_enabled:
+        violations_by_record.append({"index": index, "violation_fields": violations})
+        if missing or violations:
             failed_indexes.append(index)
     return serialize_value(
         {
             "status": "passed" if not failed_indexes else "needs_evidence",
             "required_fields": list(ENVIRONMENT_SEPARATION_FIELDS),
             "missing_by_record": missing_by_record,
+            "violations_by_record": violations_by_record,
             "failed_indexes": failed_indexes,
+            "blocks_institutional_claims_when_failed": True,
+            "environment_separation_can_enable_live_autonomy": False,
+            "environment_separation_can_change_broker_routes": False,
+            "environment_separation_can_bypass_risk_gates": False,
+            "environment_separation_can_mutate_ranking_weights": False,
+            "environment_separation_can_merge_simulation_with_observed": False,
             "environment_separation_changes_live_state": False,
             **READ_ONLY_SAFETY_FLAGS,
         }

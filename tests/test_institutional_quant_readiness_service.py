@@ -275,17 +275,33 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
             [
                 {
                     "environment": "paper_research",
+                    "execution_lane": "alpaca_paper",
                     "data_store": "research_evidence",
+                    "runtime_storage_scope": "paper_research_runtime",
+                    "config_namespace": "paper_research",
                     "secrets_scope": "paper_only",
                     "broker_route_scope": "paper_only",
+                    "audit_scope": "research_audit",
                     "live_autonomy_enabled": False,
+                    "broker_route_mutation_allowed": False,
+                    "risk_gate_bypass_allowed": False,
+                    "ranking_mutation_allowed": False,
+                    "simulation_observed_mixing_allowed": False,
                 },
                 {
                     "environment": "live",
+                    "execution_lane": "live",
                     "data_store": "research_evidence",
+                    "runtime_storage_scope": "live_runtime",
+                    "config_namespace": "live",
                     "secrets_scope": "live",
                     "broker_route_scope": "live",
+                    "audit_scope": "live_audit",
                     "live_autonomy_enabled": True,
+                    "broker_route_mutation_allowed": True,
+                    "risk_gate_bypass_allowed": True,
+                    "ranking_mutation_allowed": True,
+                    "simulation_observed_mixing_allowed": True,
                 },
             ]
         )
@@ -304,6 +320,19 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(execution_authority["execution_analytics_can_alter_order_behavior"])
         self.assertEqual(environment["status"], "needs_evidence")
         self.assertEqual(environment["failed_indexes"], [1])
+        self.assertEqual(
+            set(environment["violations_by_record"][1]["violation_fields"]),
+            {
+                "live_autonomy_enabled",
+                "broker_route_mutation_allowed",
+                "risk_gate_bypass_allowed",
+                "ranking_mutation_allowed",
+                "simulation_observed_mixing_allowed",
+            },
+        )
+        self.assertTrue(environment["blocks_institutional_claims_when_failed"])
+        self.assertFalse(environment["environment_separation_can_change_broker_routes"])
+        self.assertFalse(environment["environment_separation_can_bypass_risk_gates"])
         self.assertFalse(environment["environment_separation_changes_live_state"])
 
     def test_governance_thresholds_and_incident_release_contracts(self) -> None:
