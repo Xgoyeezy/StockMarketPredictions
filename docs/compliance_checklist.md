@@ -158,6 +158,29 @@ Every approval-trace review should record:
 
 Block small-fund or institutional-readiness claims if approval traces do not prove who changed what, when, with which evidence snapshot, under which approval scope, and without unsafe execution or control authority.
 
+## Audit Event Completeness
+
+Audit event completeness is proof and audit evidence for reviewability and tamper resistance. It does not submit orders, change execution behavior, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, change risk limits, or approve incomplete evidence.
+
+Every audit event review should record:
+
+- Event identifier.
+- Event type.
+- Actor.
+- Affected research or governance entity.
+- Timestamp.
+- Evidence snapshot identifier.
+- Source report.
+- Event hash.
+- Previous event hash.
+- Whether the event is append-only.
+- Whether the event is tamper-evident.
+- Sanitization status.
+- Safety boundary.
+- Whether the audit event contains any secret, account identifier, raw log, raw local path, or authority to change execution, broker routes, risk gates, kill switches, AI order authority, ranking weights, or risk limits.
+
+Block small-fund or institutional-readiness claims if audit events are incomplete, editable without trace, not tamper-evident, not sanitized, or carry unsafe execution or control authority.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.

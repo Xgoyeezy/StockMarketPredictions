@@ -504,12 +504,32 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
             [
                 {
                     "event_id": "event-1",
+                    "event_type": "research_status_review",
+                    "actor": "risk-manager-1",
+                    "affected_entity": "research_promotion_status",
+                    "timestamp": "2026-05-09T14:00:00Z",
+                    "evidence_snapshot_id": "snapshot-1",
+                    "source_report": "institutional_readiness",
                     "event_hash": "hash-1",
                     "previous_event_hash": "hash-0",
                     "append_only": True,
                     "tamper_evident": True,
+                    "sanitization_status": "sanitized",
+                    "safety_boundary": "research_metadata_only",
+                    "submits_orders": False,
+                    "changes_execution_behavior": False,
+                    "changes_broker_routes": False,
+                    "bypasses_risk_gates": False,
+                    "clears_kill_switches": False,
+                    "grants_ai_order_authority": False,
+                    "changes_ranking_weights": False,
+                    "changes_risk_limits": False,
+                    "contains_secrets": False,
+                    "contains_account_identifiers": False,
+                    "contains_raw_logs": False,
+                    "contains_raw_local_paths": False,
                 },
-                {"event_id": "event-2", "append_only": False, "tamper_evident": False},
+                {"event_id": "event-2", "append_only": False, "tamper_evident": False, "contains_raw_logs": True},
             ]
         )
         external_review = build_external_review_plan_contract()
@@ -530,6 +550,17 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(model_lineage["model_lineage_completeness_changes_ranking_weights"])
         self.assertEqual(audit["status"], "needs_evidence")
         self.assertFalse(audit["audit_immutability_checks_pass"])
+        self.assertEqual(audit["failed_indexes"], [1])
+        self.assertIn("event_type", audit["missing_by_record"][1]["missing_fields"])
+        self.assertEqual(audit["violations_by_record"][1]["violation_fields"], ["contains_raw_logs"])
+        self.assertTrue(audit["blocks_small_fund_claims_when_failed"])
+        self.assertTrue(audit["blocks_institutional_claims_when_failed"])
+        self.assertIn("#audit-event-completeness", audit["documentation"])
+        self.assertFalse(audit["audit_event_completeness_changes_execution_behavior"])
+        self.assertFalse(audit["audit_checks_can_submit_orders"])
+        self.assertFalse(audit["audit_checks_can_change_broker_routes"])
+        self.assertFalse(audit["audit_checks_can_bypass_risk_gates"])
+        self.assertFalse(audit["audit_checks_can_change_ranking_weights"])
         self.assertFalse(audit["audit_checks_change_execution_behavior"])
         self.assertEqual(external_review["status"], "passed")
         self.assertTrue(external_review["institutional_grade_claim_blocked_until_review"])

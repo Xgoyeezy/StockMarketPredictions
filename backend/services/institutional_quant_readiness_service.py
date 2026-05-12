@@ -89,6 +89,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "external_review_plan": "docs/compliance_checklist.md#external-security-legal-and-compliance-review-plan",
     "permission_enforcement": "docs/compliance_checklist.md#permission-enforcement-coverage",
     "approval_trace": "docs/compliance_checklist.md#approval-trace-completeness",
+    "audit_event_completeness": "docs/compliance_checklist.md#audit-event-completeness",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -258,10 +259,32 @@ INCIDENT_RESPONSE_FIELDS: tuple[str, ...] = (
 )
 AUDIT_IMMUTABILITY_FIELDS: tuple[str, ...] = (
     "event_id",
+    "event_type",
+    "actor",
+    "affected_entity",
+    "timestamp",
+    "evidence_snapshot_id",
+    "source_report",
     "event_hash",
     "previous_event_hash",
     "append_only",
     "tamper_evident",
+    "sanitization_status",
+    "safety_boundary",
+)
+UNSAFE_AUDIT_EVENT_FIELDS: tuple[str, ...] = (
+    "submits_orders",
+    "changes_execution_behavior",
+    "changes_broker_routes",
+    "bypasses_risk_gates",
+    "clears_kill_switches",
+    "grants_ai_order_authority",
+    "changes_ranking_weights",
+    "changes_risk_limits",
+    "contains_secrets",
+    "contains_account_identifiers",
+    "contains_raw_logs",
+    "contains_raw_local_paths",
 )
 SECRET_KEY_MARKERS: tuple[str, ...] = (
     "secret",
@@ -1047,23 +1070,70 @@ def validate_model_lineage_completeness_threshold(
 
 
 def validate_audit_immutability_checks(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    result = _validate_required_fields(
-        records,
-        AUDIT_IMMUTABILITY_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "event_id": "audit-event-1",
+            "event_type": "research_status_review",
+            "actor": "risk-manager-1",
+            "affected_entity": "research_promotion_status",
+            "timestamp": "2026-05-09T14:00:00Z",
+            "evidence_snapshot_id": "snapshot-1",
+            "source_report": "institutional_readiness",
             "event_hash": "hash-1",
             "previous_event_hash": "hash-0",
             "append_only": True,
             "tamper_evident": True,
-        },
+            "sanitization_status": "sanitized",
+            "safety_boundary": "research_metadata_only",
+            "submits_orders": False,
+            "changes_execution_behavior": False,
+            "changes_broker_routes": False,
+            "bypasses_risk_gates": False,
+            "clears_kill_switches": False,
+            "grants_ai_order_authority": False,
+            "changes_ranking_weights": False,
+            "changes_risk_limits": False,
+            "contains_secrets": False,
+            "contains_account_identifiers": False,
+            "contains_raw_logs": False,
+            "contains_raw_local_paths": False,
+        }
+    ]
+    result = _validate_required_fields(
+        rows,
+        AUDIT_IMMUTABILITY_FIELDS,
+        rows[0],
         extra_boolean_true_fields=("append_only", "tamper_evident"),
     )
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_AUDIT_EVENT_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = set(result["failed_indexes"])
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
     return serialize_value(
         {
             **result,
-            "audit_immutability_checks_pass": result["status"] == "passed",
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_audit_event_fields": list(UNSAFE_AUDIT_EVENT_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["audit_event_completeness"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "audit_immutability_checks_pass": status == "passed",
+            "audit_event_completeness_changes_execution_behavior": False,
             "audit_checks_change_execution_behavior": False,
+            "audit_checks_can_submit_orders": False,
+            "audit_checks_can_change_broker_routes": False,
+            "audit_checks_can_bypass_risk_gates": False,
+            "audit_checks_can_clear_kill_switch": False,
+            "audit_checks_can_grant_ai_order_authority": False,
+            "audit_checks_can_change_ranking_weights": False,
+            "audit_checks_can_change_risk_limits": False,
         }
     )
 
