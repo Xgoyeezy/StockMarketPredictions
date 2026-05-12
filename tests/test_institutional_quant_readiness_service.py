@@ -273,8 +273,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
                     "audited_at": "2026-05-09T14:00:00Z",
                     "evidence_snapshot_id": "snapshot-1",
                     "authoritative": True,
+                    "policy_version": "risk_policy_v1",
+                    "last_tested_at": "2026-05-09T13:00:00Z",
+                    "bypass_allowed": False,
+                    "analytics_override_allowed": False,
+                    "ai_override_allowed": False,
                 },
-                {"risk_control_id": "route_block", "authoritative": False},
+                {"risk_control_id": "route_block", "authoritative": False, "analytics_override_allowed": True},
             ]
         )
         execution = validate_execution_report_lineage(
@@ -336,6 +341,10 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertEqual(portfolio["status"], "needs_evidence")
         self.assertIn("factor_exposure", portfolio["missing_by_record"][1]["missing_fields"])
         self.assertEqual(risk["status"], "needs_evidence")
+        self.assertIn("policy_version", risk["missing_by_record"][1]["missing_fields"])
+        self.assertEqual(risk["violations_by_record"][1]["violation_fields"], ["analytics_override_allowed"])
+        self.assertTrue(risk["blocks_small_fund_claims_when_failed"])
+        self.assertIn("#risk-control-auditability", risk["documentation"])
         self.assertFalse(risk["analytics_can_bypass_risk_controls"])
         self.assertFalse(risk["ai_can_bypass_risk_controls"])
         self.assertEqual(execution["status"], "needs_evidence")

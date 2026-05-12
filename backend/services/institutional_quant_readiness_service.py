@@ -93,6 +93,7 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "model_version_traceability": "docs/compliance_checklist.md#model-version-traceability",
     "feature_lineage_completeness": "docs/compliance_checklist.md#feature-lineage-completeness",
     "benchmark_walk_forward_traceability": "docs/compliance_checklist.md#benchmark-and-walk-forward-traceability",
+    "risk_control_auditability": "docs/compliance_checklist.md#risk-control-auditability",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -193,6 +194,16 @@ RISK_CONTROL_AUDIT_FIELDS: tuple[str, ...] = (
     "audited_at",
     "evidence_snapshot_id",
     "authoritative",
+    "policy_version",
+    "last_tested_at",
+    "bypass_allowed",
+    "analytics_override_allowed",
+    "ai_override_allowed",
+)
+UNSAFE_RISK_CONTROL_FIELDS: tuple[str, ...] = (
+    "bypass_allowed",
+    "analytics_override_allowed",
+    "ai_override_allowed",
 )
 EXECUTION_REPORT_LINK_FIELDS: tuple[str, ...] = (
     "route",
@@ -700,21 +711,43 @@ def validate_portfolio_factor_liquidity_stress_reports(records: list[dict[str, A
 
 
 def validate_risk_control_auditability(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    result = _validate_required_fields(
-        records,
-        RISK_CONTROL_AUDIT_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "risk_control_id": "daily_loss_lock",
             "state": "active",
             "audited_at": "2026-05-09T14:00:00Z",
             "evidence_snapshot_id": "snapshot-1",
             "authoritative": True,
-        },
+            "policy_version": "risk_policy_v1",
+            "last_tested_at": "2026-05-09T13:00:00Z",
+            "bypass_allowed": False,
+            "analytics_override_allowed": False,
+            "ai_override_allowed": False,
+        }
+    ]
+    result = _validate_required_fields(
+        rows,
+        RISK_CONTROL_AUDIT_FIELDS,
+        rows[0],
         extra_boolean_true_fields=("authoritative",),
     )
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_RISK_CONTROL_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+    incomplete_indexes = set(result["failed_indexes"])
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
     return serialize_value(
         {
             **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "documentation": INSTITUTIONAL_DOCS["risk_control_auditability"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
             "analytics_can_bypass_risk_controls": False,
             "ai_can_bypass_risk_controls": False,
             "risk_audit_changes_risk_controls": False,

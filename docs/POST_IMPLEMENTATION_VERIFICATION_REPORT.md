@@ -447,6 +447,10 @@ Benchmark and walk-forward traceability update:
 
 Follow-up action hardened benchmark-to-walk-forward linkage with ranking formula version, reward formula version, baseline definition version, frozen snapshot identifier, and frozen-before-outcome evidence. This is reproducibility evidence only; it does not change ranking weights, reward formulas, execution behavior, or live-trading readiness.
 
+Risk control auditability update:
+
+Follow-up action hardened risk-control auditability with policy version, last-tested timestamp, and explicit bypass, analytics-override, and AI-override blockers. This is control evidence only; it does not change risk limits, bypass risk gates, clear kill switches, submit orders, or change broker routes.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

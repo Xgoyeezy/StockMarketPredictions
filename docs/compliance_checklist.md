@@ -241,6 +241,25 @@ Every benchmark and walk-forward link review should record:
 
 Block solo-systematic, small-fund, or institutional-readiness claims if benchmark and walk-forward records cannot prove same-version data, model, feature, ranking, reward, baseline, and frozen out-of-sample snapshot links.
 
+## Risk Control Auditability
+
+Risk control auditability is proof evidence that controls remained authoritative during research review. It does not change risk limits, bypass risk gates, clear kill switches, submit orders, change broker routes, or grant analytics or AI override authority.
+
+Every risk-control audit review should record:
+
+- Risk control identifier.
+- Current state.
+- Audited timestamp.
+- Evidence snapshot identifier.
+- Whether the control is authoritative.
+- Risk policy version.
+- Last tested timestamp.
+- Whether bypass is allowed.
+- Whether analytics override is allowed.
+- Whether AI override is allowed.
+
+Block small-fund or institutional-readiness claims if any risk control lacks policy/test evidence, is not authoritative, allows bypass, or allows analytics or AI override.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.
