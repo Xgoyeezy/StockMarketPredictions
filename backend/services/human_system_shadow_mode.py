@@ -148,6 +148,89 @@ SHADOW_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "safe_next_action": "Keep Shadow Mode as research metadata only; do not place, route, approve, or configure trades.",
     },
 )
+
+SHADOW_MODE_VALIDATION_PLAN_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "same_opportunity_sample",
+        "title": "Same-opportunity sample",
+        "priority": "critical",
+        "proof_keys": ("same_opportunity_sample",),
+        "missing_fields": ("linked_candidate_id", "system_prediction_id", "same_horizon"),
+        "blocked_claims": ("human_vs_system_comparison_claim", "system_beats_human_claim"),
+        "safe_next_action": "Capture enough human and system decisions on the same candidate opportunity before judging either side.",
+        "done_when": "At least the v1 minimum same-opportunity sample exists with linked human and system decisions.",
+    },
+    {
+        "key": "decision_linkage",
+        "title": "Decision linkage",
+        "priority": "critical",
+        "proof_keys": ("same_opportunity_linkage",),
+        "missing_fields": ("linked_candidate_id", "system_prediction_id", "human_horizon_minutes", "system_horizon_minutes"),
+        "blocked_claims": ("fair_comparison_claim", "repeatability_claim"),
+        "safe_next_action": "Link every human thesis to the exact candidate, system prediction, and matching horizon.",
+        "done_when": "Most comparison rows link human, system, candidate, and horizon fields before outcome scoring.",
+    },
+    {
+        "key": "human_thesis_contract",
+        "title": "Human thesis contract",
+        "priority": "critical",
+        "proof_keys": ("human_thesis_contract", "pre_outcome_capture"),
+        "missing_fields": REQUIRED_HUMAN_FIELDS + ("human_reason", "created_at", "outcome_window_closed_at"),
+        "blocked_claims": ("human_skill_claim", "override_quality_claim"),
+        "safe_next_action": "Require a complete, timestamped human thesis before the outcome window closes.",
+        "done_when": "Human records include direction, confidence, target, invalidation, horizon, thesis text, and pre-outcome timestamps.",
+    },
+    {
+        "key": "system_forecast_contract",
+        "title": "System forecast contract",
+        "priority": "critical",
+        "proof_keys": ("system_forecast_contract",),
+        "missing_fields": REQUIRED_SYSTEM_FIELDS,
+        "blocked_claims": ("system_quality_claim", "system_beats_human_claim"),
+        "safe_next_action": "Attach the system forecast contract used at decision time to the same comparison row.",
+        "done_when": "System records include direction, confidence, target, invalidation, and horizon for the matched opportunity.",
+    },
+    {
+        "key": "outcome_contract",
+        "title": "Outcome contract",
+        "priority": "critical",
+        "proof_keys": ("outcome_contract",),
+        "missing_fields": REQUIRED_OUTCOME_FIELDS + ("outcome_window_closed_at", "target_hit", "invalidation_hit"),
+        "blocked_claims": ("decision_quality_claim", "benchmark_relative_claim"),
+        "safe_next_action": "Attach closed-window actual returns, baseline returns, target hits, invalidation hits, and outcome close evidence.",
+        "done_when": "Comparison rows have closed-horizon outcomes and baseline returns before quality scoring.",
+    },
+    {
+        "key": "cost_risk_context",
+        "title": "Cost and risk context",
+        "priority": "high",
+        "proof_keys": ("cost_risk_context",),
+        "missing_fields": REQUIRED_COST_RISK_FIELDS,
+        "blocked_claims": ("after_cost_quality_claim", "paper_to_live_readiness"),
+        "safe_next_action": "Attach spread, slippage, fill assumptions, risk adjustment, gate state, kill-switch state, and portfolio exposure.",
+        "done_when": "Decision quality is measured after costs and with risk context visible for most comparison rows.",
+    },
+    {
+        "key": "decision_quality_metrics",
+        "title": "Decision quality metrics",
+        "priority": "high",
+        "proof_keys": ("decision_quality_metrics", "system_after_cost_improvement"),
+        "missing_fields": ("direction_accuracy", "target_hit_rate", "false_positive_rate", "false_negative_rate", "override_quality", "missed_winner_comparison"),
+        "blocked_claims": ("system_beats_human_claim", "human_override_quality_claim"),
+        "safe_next_action": "Measure direction accuracy, targets, false positives, false negatives, overrides, and missed winners for both sides.",
+        "done_when": "The report has enough after-cost metrics to compare human and system decision quality honestly.",
+    },
+    {
+        "key": "shadow_safety_governance",
+        "title": "Shadow safety governance",
+        "priority": "critical",
+        "proof_keys": ("shadow_mode_safety_boundary",),
+        "missing_fields": (),
+        "blocked_claims": ("automatic_ranking_mutation", "paper_to_live_readiness", "live_trading_readiness"),
+        "safe_next_action": "Keep Shadow Mode as research metadata only; do not place, route, approve, or configure trades.",
+        "done_when": "Shadow Mode remains read-only to execution state and cannot mutate execution, broker, risk, or ranking configuration.",
+    },
+)
 SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "apikey", "access_key", "private_key", "account_id")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORE_PATH = PROJECT_ROOT / "runtime-exports" / "human-system-shadow-mode" / "human_theses.json"
@@ -944,6 +1027,117 @@ def build_shadow_mode_proof_summary(rows: list[dict[str, Any]], aggregations: di
     )
 
 
+def build_shadow_mode_validation_plan(
+    *,
+    rows: list[dict[str, Any]],
+    proof_summary: dict[str, Any],
+) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    all_missing_fields: Counter[str] = Counter()
+    for row in rows:
+        all_missing_fields.update(str(field) for field in _listify(row.get("missing_fields")))
+
+    items: list[dict[str, Any]] = []
+    for definition in SHADOW_MODE_VALIDATION_PLAN_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        passed = bool(related_rows) and all(bool(row.get("passed")) for row in related_rows)
+        status = "no_records" if not rows and definition["key"] != "shadow_safety_governance" else "ready" if passed else "needs_evidence"
+        missing_fields = list(definition.get("missing_fields") or ())
+        if not missing_fields and not passed and all_missing_fields:
+            missing_fields = [field for field, _count in all_missing_fields.most_common(8)]
+        safe_next_actions = [
+            str(row.get("safe_next_action"))
+            for row in related_rows
+            if row.get("safe_next_action")
+        ] or [str(definition["safe_next_action"])]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": {str(row.get("metric")): row.get("value") for row in related_rows},
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Human vs System validation is same-opportunity research review only; it is not proof of alpha, investor performance, live-trading readiness, or permission for AI/order/ranking authority.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_validation_item": open_items[0]["title"] if open_items else None,
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_shadow_review": proof_ready,
+                    "system_beats_human_claim": False,
+                    "human_override_quality_claim": False,
+                    "public_alpha_claim": False,
+                    "automatic_ranking_mutation": False,
+                    "paper_to_live_readiness": False,
+                    "live_trading_readiness": False,
+                },
+                "blocked_claims": [
+                    "system_beats_human_claim",
+                    "human_override_quality_claim",
+                    "public_alpha_claim",
+                    "repeatability_claim",
+                    "paper_to_live_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Human vs System validation records proof gaps and claim boundaries only. It does not authorize orders, broker-route changes, risk-gate changes, kill-switch changes, ranking-weight mutation, AI order authority, or live trading.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def build_shadow_mode_report(
     *,
     records: Iterable[dict[str, Any]] | None = None,
@@ -959,6 +1153,7 @@ def build_shadow_mode_report(
     rows = [build_shadow_comparison_row(record, system_records=system_records) for record in human_records if isinstance(record, dict)]
     aggregations = compute_shadow_analytics(rows)
     proof_summary = build_shadow_mode_proof_summary(rows, aggregations)
+    validation_plan = build_shadow_mode_validation_plan(rows=rows, proof_summary=proof_summary)
     missing_counter: Counter[str] = Counter()
     for row in rows:
         missing_counter.update(row.get("missing_fields") or [])
@@ -991,9 +1186,15 @@ def build_shadow_mode_report(
         "cost_risk_context_coverage": proof_summary["summary"]["cost_risk_context_coverage"],
         "pre_outcome_capture_coverage": proof_summary["summary"]["pre_outcome_capture_coverage"],
         "system_decision_quality_delta": proof_summary["summary"]["system_decision_quality_delta"],
+        "shadow_validation_status": validation_plan["status"],
+        "shadow_validation_open_items": validation_plan["summary"]["open_item_count"],
+        "shadow_validation_critical_open_items": validation_plan["summary"]["critical_open_items"],
+        "top_validation_item": validation_plan["summary"]["top_validation_item"],
+        "claim_permissions": validation_plan["summary"]["claim_permissions"],
         **SAFETY_FLAGS,
     }
     aggregations["shadow_proof"] = proof_summary
+    aggregations["shadow_validation_plan"] = validation_plan
     return serialize_value(
         {
             "status": status,
@@ -1003,6 +1204,7 @@ def build_shadow_mode_report(
             "records": rows[:250],
             "comparisons": rows[:250],
             "proof_summary": proof_summary,
+            "shadow_validation_plan": validation_plan,
             "aggregations": aggregations,
             "warnings": list(dict.fromkeys(warnings)),
             "missing_fields": dict(missing_counter),

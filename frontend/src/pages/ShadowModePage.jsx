@@ -147,6 +147,10 @@ export default function ShadowModePage() {
   const proofSummary = report?.proof_summary || aggregations.shadow_proof || {}
   const proofRequirements = proofSummary.requirements || []
   const recordReadiness = proofSummary.record_readiness || []
+  const validationPlan = report?.shadow_validation_plan || aggregations.shadow_validation_plan || {}
+  const validationItems = validationPlan.items || []
+  const validationSummary = validationPlan.summary || {}
+  const claimPermissions = validationSummary.claim_permissions || summary.claim_permissions || {}
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
   const biasItems = aggregations.bias_diagnostics?.items || []
@@ -208,6 +212,27 @@ export default function ShadowModePage() {
             { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
             { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
             { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Human vs System Validation Plan" subtitle="Proof-first backlog items for fair same-opportunity comparison. These items are manual-review only and cannot trade, route, approve, or reweight anything.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Validation status" value={humanize(validationPlan.status || summary.shadow_validation_status || 'blocked_by_evidence')} helper={`${summary.shadow_validation_open_items ?? validationSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary.shadow_validation_critical_open_items ?? validationSummary.critical_open_items ?? 0} helper={summary.top_validation_item || validationSummary.top_validation_item || 'No top blocker returned'} />
+          <MetricCard label="Internal review" value={claimPermissions.cautious_internal_shadow_review ? 'Allowed' : 'Blocked'} helper="Requires complete same-opportunity evidence" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Shadow Mode never grants trading authority" />
+        </div>
+        <DataTable
+          rows={validationItems}
+          empty={loading ? 'Loading shadow validation plan...' : 'No shadow validation plan returned.'}
+          columns={[
+            { key: 'title', label: 'Validation item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing_fields', label: 'Missing evidence', render: (row) => (row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => (row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None' },
             { key: 'safe_next_action', label: 'Safe next action' },
           ]}
         />

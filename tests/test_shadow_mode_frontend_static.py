@@ -18,6 +18,8 @@ class ShadowModeFrontendStaticTests(unittest.TestCase):
         self.assertIn("Human contract coverage", source)
         self.assertIn("System contract coverage", source)
         self.assertIn("Cost/risk coverage", source)
+        self.assertIn("Human vs System Validation Plan", source)
+        self.assertIn("manual-review only", source)
         self.assertIn("Shadow Record Readiness", source)
         self.assertIn("does not place, route, approve, or configure trades", source)
 
@@ -26,7 +28,9 @@ class ShadowModeFrontendStaticTests(unittest.TestCase):
 
         self.assertIn("FALLBACK_SHADOW_MODE", source)
         self.assertIn("proof_summary", source)
+        self.assertIn("shadow_validation_plan", source)
         self.assertIn("shadow_proof_ready", source)
+        self.assertIn("claim_permissions", source)
         self.assertIn("same_opportunity_coverage", source)
         self.assertIn("system_decision_quality_delta", source)
         self.assertIn("Does not change broker routes.", source)

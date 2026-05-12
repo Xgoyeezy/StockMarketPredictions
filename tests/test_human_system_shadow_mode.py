@@ -14,6 +14,7 @@ from backend.services.human_system_shadow_mode import (
     build_shadow_comparison_row,
     build_shadow_mode_report,
     build_shadow_mode_proof_summary,
+    build_shadow_mode_validation_plan,
     compute_shadow_reward,
     create_human_thesis,
 )
@@ -197,6 +198,10 @@ class HumanSystemShadowModeTests(unittest.TestCase):
         self.assertTrue(all(row["research_only"] for row in proof["requirements"]))
         self.assertFalse(any(row["changes_execution"] for row in proof["requirements"]))
         self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
+        self.assertEqual(report["shadow_validation_plan"]["status"], "ready_for_human_review")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_shadow_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["system_beats_human_claim"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
 
     def test_shadow_proof_blocks_missing_context_and_human_outperformance_claims(self) -> None:
         report = build_shadow_mode_report(
@@ -221,6 +226,40 @@ class HumanSystemShadowModeTests(unittest.TestCase):
         self.assertFalse(report["proof_summary"]["proof_ready"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["writes_ranking_config"])
+
+    def test_shadow_validation_plan_blocks_claims_until_same_opportunity_proof_is_complete(self) -> None:
+        report = build_shadow_mode_report(
+            records=[
+                _human(
+                    system_direction="down",
+                    system_prediction_id="",
+                    linked_candidate_id="",
+                    outcome_window_closed_at=None,
+                    cost_model=None,
+                    spread=None,
+                    slippage=None,
+                    risk_gate_state=None,
+                    human_reward_after_costs=1.4,
+                    system_reward_after_costs=0.3,
+                )
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        plan = build_shadow_mode_validation_plan(rows=report["records"], proof_summary=report["proof_summary"])
+        by_key = {row["key"]: row for row in plan["items"]}
+
+        self.assertEqual(plan["status"], "blocked_by_evidence")
+        self.assertIn("same_opportunity_sample", by_key)
+        self.assertIn("system_beats_human_claim", plan["summary"]["blocked_claims"])
+        self.assertIn("paper_to_live_readiness", plan["summary"]["blocked_claims"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["system_beats_human_claim"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["automatic_ranking_mutation"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertFalse(any(row["changes_execution"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_order_submission"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_broker_routes"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_ranking_weights"] for row in plan["items"]))
 
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
@@ -251,7 +290,9 @@ class HumanSystemShadowModeTests(unittest.TestCase):
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
                 self.assertIn("proof_summary", data)
+                self.assertIn("shadow_validation_plan", data)
                 self.assertIn("shadow_proof_ready", data["summary"])
+                self.assertIn("claim_permissions", data["summary"])
                 self.assertIn("safety_notes", data)
                 self.assertIn("Does not place orders.", data["safety_notes"])
             post = client.post("/api/shadow-mode/human-thesis", json=_human())

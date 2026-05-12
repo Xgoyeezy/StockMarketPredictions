@@ -162,6 +162,25 @@ Remaining portfolio-risk proof gap:
 
 Portfolio Risk now exposes a proof-first cleanup plan, but it is not ready for portfolio-readiness, risk-limit, paper-to-live, or live-readiness language. The next evidence work is still to attach paper-route exposure rows, concentration context, factor context, liquidity context, drawdown and budget evidence, candidate and strategy linkage, and stress context without changing risk gates, broker routes, order behavior, or ranking weights.
 
+Human vs System validation update:
+
+Follow-up action added a Human vs System validation plan to Shadow Mode, the API fallback, the report UI, and documentation. This keeps Shadow Mode research-only while making same-opportunity, decision-linkage, contract-completeness, outcome, cost/risk, decision-quality, and safety-governance blockers explicit.
+
+Verification evidence:
+
+- Focused Human vs System backend/static tests: PASS, 16 passed.
+- Route-health follow-up test: PASS.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live app restart completed through the existing startup script.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Shadow Mode result: status `empty`, validation status `blocked_by_evidence`, 7 open validation items, live-trading readiness `false`.
+- Frontend route smoke: `/shadow-mode` returned HTTP 200.
+
+Remaining Human vs System proof gap:
+
+Human vs System Shadow Mode now exposes a proof-first validation plan, but it is not ready for system-beats-human, override-quality, repeatability, paper-to-live, or live-readiness language. The next evidence work is still to capture same-opportunity human and system contracts before outcomes, link them to the same candidate, attach outcome/cost/risk context, and score decision quality without changing execution, broker routes, risk gates, kill switches, ranking weights, or AI order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

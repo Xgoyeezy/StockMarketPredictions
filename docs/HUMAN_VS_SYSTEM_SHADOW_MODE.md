@@ -177,6 +177,45 @@ The summary exposes:
 
 `proof_ready: true` means the comparison is ready for human review. It does not prove alpha, guarantee returns, approve trading, authorize live execution, or certify that the system beats skilled discretionary traders outside the measured sample.
 
+## Human vs System Validation Plan
+
+The report also includes `shadow_validation_plan` and `aggregations.shadow_validation_plan`.
+
+This is the proof-first backlog layer for Shadow Mode. It turns the proof gate into explicit validation items so the system shows what must be fixed before any human-vs-system comparison claim is allowed.
+
+Validation items:
+
+- same-opportunity sample
+- decision linkage
+- human thesis contract
+- system forecast contract
+- outcome contract
+- cost and risk context
+- decision quality metrics
+- shadow safety governance
+
+The summary exposes:
+
+- `shadow_validation_status`
+- `shadow_validation_open_items`
+- `shadow_validation_critical_open_items`
+- `top_validation_item`
+- `claim_permissions`
+
+Claim permissions remain conservative:
+
+- `cautious_internal_shadow_review` may become true only when the proof gate is ready.
+- `system_beats_human_claim` remains false.
+- `human_override_quality_claim` remains false.
+- `public_alpha_claim` remains false.
+- `automatic_ranking_mutation` remains false.
+- `paper_to_live_readiness` remains false.
+- `live_trading_readiness` remains false.
+
+Blocked claims include system-beats-human claims, human override quality claims, public alpha claims, repeatability claims, paper-to-live readiness, and live-trading readiness.
+
+The validation plan is research metadata only. It does not place orders, trigger paper orders, trigger live orders, change broker routes, clear kill switches, bypass risk gates, change ranking weights, or approve live trading.
+
 ## Override Quality Definitions
 
 An override is a same-opportunity record where the human direction differs from the system direction. Override quality is evaluated after costs and risk context, using:
@@ -223,7 +262,7 @@ Open:
 - `/shadow-mode`
 
 The page shows the research-only boundary, a human thesis form, human-vs-system summary, comparison rows, direction accuracy, reward comparison, target/invalidation comparisons, missed-winner comparison, bias diagnostics, and missing data warnings.
-It also shows the Shadow Mode Proof Gate and per-record readiness for same-opportunity comparison proof.
+It also shows the Shadow Mode Proof Gate, Human vs System Validation Plan, and per-record readiness for same-opportunity comparison proof.
 
 ## Test Commands
 
