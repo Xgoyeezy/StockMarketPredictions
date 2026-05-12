@@ -133,6 +133,10 @@ export default function ResearchPromotionPage() {
   const proofSummary = report?.proof_summary || aggregations.research_promotion_proof || {}
   const proofRequirements = proofSummary.requirements || []
   const recordReadiness = proofSummary.record_readiness || []
+  const cleanupPlan = report?.research_promotion_cleanup_plan || aggregations.research_promotion_cleanup_plan || {}
+  const cleanupItems = cleanupPlan.items || []
+  const cleanupSummary = cleanupPlan.summary || {}
+  const claimPermissions = cleanupSummary.claim_permissions || summary.claim_permissions || {}
   const records = report?.records || []
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
@@ -214,6 +218,27 @@ export default function ResearchPromotionPage() {
             { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
             { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
             { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Research Promotion Cleanup Plan" subtitle="Proof-first governance cleanup for traceability, review metadata, blocked claims, and metadata-only safety. Cleanup items cannot approve live trading or mutate execution, broker, risk, strategy, or ranking configuration.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Cleanup status" value={humanize(cleanupPlan.status || summary.research_promotion_cleanup_status || 'blocked_by_evidence')} helper={`${summary.research_promotion_cleanup_open_items ?? cleanupSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary.research_promotion_cleanup_critical_open_items ?? cleanupSummary.critical_open_items ?? 0} helper={summary.top_cleanup_item || cleanupSummary.top_cleanup_item || 'No top blocker returned'} />
+          <MetricCard label="Internal review" value={claimPermissions.cautious_internal_promotion_review ? 'Allowed' : 'Blocked'} helper="Requires complete traceability and manual review metadata" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Research Promotion never grants trading authority" />
+        </div>
+        <DataTable
+          rows={cleanupItems}
+          empty={loading ? 'Loading research promotion cleanup plan...' : 'No research promotion cleanup plan returned.'}
+          columns={[
+            { key: 'title', label: 'Cleanup item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing_fields', label: 'Missing evidence', render: (row) => (row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => (row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None' },
             { key: 'safe_next_action', label: 'Safe next action' },
           ]}
         />

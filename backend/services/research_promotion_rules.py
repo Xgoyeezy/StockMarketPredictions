@@ -154,6 +154,79 @@ RESEARCH_PROMOTION_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
     },
 )
 
+RESEARCH_PROMOTION_CLEANUP_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "research_entity_sample",
+        "title": "Research entity sample",
+        "priority": "critical",
+        "proof_keys": ("research_entity_sample",),
+        "missing_fields": ("entity_id", "entity_type", "promotion_status", "safe_explanation"),
+        "blocked_claims": ("promotion_readiness_claim", "governance_workflow_claim"),
+        "safe_next_action": "Keep at least one traceable research entity visible before treating promotion workflow as reviewable.",
+        "done_when": "Promotion entities exist with status, type, and safe explanation metadata.",
+    },
+    {
+        "key": "status_and_criteria_traceability",
+        "title": "Status and criteria traceability",
+        "priority": "critical",
+        "proof_keys": ("status_traceability", "criteria_traceability"),
+        "missing_fields": ("promotion_status", "safe_explanation", "criteria_passed", "criteria_failed"),
+        "blocked_claims": ("promotion_readiness_claim", "paper_proven_research_claim"),
+        "safe_next_action": "Attach status, safe explanation, passed criteria, and failed criteria to every promotion entity.",
+        "done_when": "Most promotion entities have reviewable status and criterion traceability.",
+    },
+    {
+        "key": "benchmark_and_data_traceability",
+        "title": "Benchmark and data traceability",
+        "priority": "critical",
+        "proof_keys": ("benchmark_traceability", "data_quality_traceability"),
+        "missing_fields": ("benchmark_verdict", "sample_size", "rewardable_count", "baseline_relative_edge", "completion_rate", "rewardability_rate"),
+        "blocked_claims": ("benchmark_backed_promotion_claim", "paper_proven_research_claim"),
+        "safe_next_action": "Link promotion entities to benchmark verdict, sample, rewardability, baseline-relative evidence, and data-quality fields.",
+        "done_when": "Benchmark and data-quality fields are traceable before any promotion-readiness language.",
+    },
+    {
+        "key": "walk_forward_traceability",
+        "title": "Walk-forward traceability",
+        "priority": "high",
+        "proof_keys": ("walk_forward_traceability",),
+        "missing_fields": ("walk_forward_status", "walk_forward_verdict", "frozen_experiment_id"),
+        "blocked_claims": ("repeatability_claim", "paper_proven_research_claim"),
+        "safe_next_action": "Link promotion entities to frozen or completed walk-forward experiment evidence before repeatability or paper-proven review.",
+        "done_when": "Promotion entities show frozen or completed walk-forward context where promotion language depends on repeatability.",
+    },
+    {
+        "key": "execution_traceability",
+        "title": "Execution traceability",
+        "priority": "high",
+        "proof_keys": ("execution_traceability",),
+        "missing_fields": ("execution_adjusted_reward", "slippage_adjusted_reward", "execution_quality"),
+        "blocked_claims": ("tradability_claim", "paper_to_live_readiness"),
+        "safe_next_action": "Attach execution-adjusted reward or explicit execution-quality evidence before treating promoted research as tradable.",
+        "done_when": "Promotion entities have execution-cost context tied to the evidence snapshot.",
+    },
+    {
+        "key": "manual_review_metadata",
+        "title": "Manual review metadata",
+        "priority": "critical",
+        "proof_keys": ("manual_review_traceability",),
+        "missing_fields": ("manual_status.promotion_status", "manual_status.reason", "manual_status.updated_at", "manual_status.previous_promotion_status", "manual_status.evidence_snapshot"),
+        "blocked_claims": ("human_approved_promotion_claim", "small_fund_governance_claim"),
+        "safe_next_action": "Record sanitized manual review metadata with reviewer context when available, reason, previous status, and evidence snapshot.",
+        "done_when": "At least one manual review metadata event is traceable without carrying broker, account, secret, or raw-path data.",
+    },
+    {
+        "key": "metadata_only_safety_governance",
+        "title": "Metadata-only safety governance",
+        "priority": "critical",
+        "proof_keys": ("promotion_metadata_only", "safety_boundary_preserved"),
+        "missing_fields": (),
+        "blocked_claims": ("automatic_strategy_promotion", "ranking_weight_change", "risk_limit_change", "broker_route_change", "live_trading_readiness"),
+        "safe_next_action": "Keep promotion status disconnected from execution, broker routes, risk gates, risk limits, kill switches, ranking weights, and live trading.",
+        "done_when": "Promotion remains research metadata only and cannot mutate trading, broker, risk, or ranking configuration.",
+    },
+)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -687,6 +760,117 @@ def build_research_promotion_proof_summary(entities: list[dict[str, Any]]) -> di
     )
 
 
+def build_research_promotion_cleanup_plan(
+    *,
+    entities: list[dict[str, Any]],
+    proof_summary: dict[str, Any],
+) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    items: list[dict[str, Any]] = []
+    for definition in RESEARCH_PROMOTION_CLEANUP_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        passed = bool(related_rows) and all(bool(row.get("passed")) for row in related_rows)
+        status = "no_records" if not entities and definition["key"] != "metadata_only_safety_governance" else "ready" if passed else "needs_evidence"
+        safe_next_actions = [
+            str(row.get("safe_next_action"))
+            for row in related_rows
+            if row.get("safe_next_action")
+        ] or [str(definition["safe_next_action"])]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": {str(row.get("metric")): row.get("value") for row in related_rows},
+                "missing_fields": list(definition.get("missing_fields") or ()),
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Research Promotion cleanup is internal governance metadata only; it is not live approval, alpha proof, paper-to-live readiness, or permission to mutate execution, broker, risk, ranking, or strategy policy.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_risk_limits": False,
+                "changes_ranking_weights": False,
+                "clears_kill_switch": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_cleanup_item": open_items[0]["title"] if open_items else None,
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_promotion_review": proof_ready,
+                    "paper_proven_research_review": proof_ready,
+                    "small_fund_governance_claim": False,
+                    "automatic_strategy_promotion": False,
+                    "ranking_weight_change": False,
+                    "risk_limit_change": False,
+                    "broker_route_change": False,
+                    "paper_to_live_readiness": False,
+                    "live_trading_readiness": False,
+                },
+                "blocked_claims": [
+                    "paper_proven_research_claim",
+                    "small_fund_governance_claim",
+                    "automatic_strategy_promotion",
+                    "ranking_weight_change",
+                    "risk_limit_change",
+                    "broker_route_change",
+                    "paper_to_live_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Research Promotion cleanup records missing governance evidence and blocked claims only. It does not approve live trading, place orders, change broker routes, clear kill switches, bypass risk gates, change risk limits, change strategy configs, or mutate ranking weights.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_risk_limits": False,
+                    "changes_ranking_weights": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def _build_report_from_sources(
     *,
     benchmark_report: dict[str, Any],
@@ -710,6 +894,7 @@ def _build_report_from_sources(
         status_counts[str(entity.get("promotion_status"))] = status_counts.get(str(entity.get("promotion_status")), 0) + 1
         type_counts[str(entity.get("entity_type"))] = type_counts.get(str(entity.get("entity_type")), 0) + 1
     proof_summary = build_research_promotion_proof_summary(entities)
+    cleanup_plan = build_research_promotion_cleanup_plan(entities=entities, proof_summary=proof_summary)
     summary = {
         "entity_count": len(entities),
         "status_counts": status_counts,
@@ -730,6 +915,11 @@ def _build_report_from_sources(
         "walk_forward_traceability_coverage": proof_summary["summary"]["walk_forward_traceability_coverage"],
         "execution_traceability_coverage": proof_summary["summary"]["execution_traceability_coverage"],
         "manual_review_record_count": proof_summary["summary"]["manual_review_record_count"],
+        "research_promotion_cleanup_status": cleanup_plan["status"],
+        "research_promotion_cleanup_open_items": cleanup_plan["summary"]["open_item_count"],
+        "research_promotion_cleanup_critical_open_items": cleanup_plan["summary"]["critical_open_items"],
+        "top_cleanup_item": cleanup_plan["summary"]["top_cleanup_item"],
+        "claim_permissions": cleanup_plan["summary"]["claim_permissions"],
         **SAFETY_FLAGS,
     }
     warnings = list(dict.fromkeys(str(item) for item in context.get("warnings", []) if item))
@@ -750,7 +940,8 @@ def _build_report_from_sources(
                 "benchmark_ready": context["benchmark_ready"],
             },
             "proof_summary": proof_summary,
-            "aggregations": {"research_promotion_proof": proof_summary},
+            "research_promotion_cleanup_plan": cleanup_plan,
+            "aggregations": {"research_promotion_proof": proof_summary, "research_promotion_cleanup_plan": cleanup_plan},
             "warnings": warnings,
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,

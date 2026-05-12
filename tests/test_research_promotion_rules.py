@@ -13,6 +13,7 @@ from backend.services import research_promotion_rules as rules
 from backend.services.exceptions import ValidationServiceError
 from backend.services.research_promotion_rules import (
     build_research_promotion_report,
+    build_research_promotion_cleanup_plan,
     get_research_promotion_entity,
     update_research_promotion_status,
 )
@@ -228,7 +229,41 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertEqual(report["summary"]["promotion_requirements_passed"], report["summary"]["promotion_requirements_total"])
         self.assertGreaterEqual(report["summary"]["promotion_traceability_coverage"], 0.8)
         self.assertEqual(report["aggregations"]["research_promotion_proof"]["proof_ready"], True)
+        self.assertEqual(report["research_promotion_cleanup_plan"]["status"], "ready_for_human_review")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_promotion_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["automatic_strategy_promotion"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
         self.assertTrue(any(row["manual_review_traceable"] for row in proof["record_readiness"]))
+
+    def test_cleanup_plan_blocks_governance_and_mutation_claims_when_proof_is_missing(self) -> None:
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses={},
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        plan = build_research_promotion_cleanup_plan(entities=report["records"], proof_summary=report["proof_summary"])
+        by_key = {row["key"]: row for row in plan["items"]}
+
+        self.assertEqual(plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["research_promotion_cleanup_status"], "blocked_by_evidence")
+        self.assertIn("manual_review_metadata", by_key)
+        self.assertIn("small_fund_governance_claim", plan["summary"]["blocked_claims"])
+        self.assertIn("live_trading_readiness", plan["summary"]["blocked_claims"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["automatic_strategy_promotion"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["ranking_weight_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["risk_limit_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["broker_route_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_order_submission"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_risk_limits"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["clears_kill_switch"] for item in plan["items"]))
 
     def test_rejected_status(self) -> None:
         report = build_research_promotion_report(
@@ -325,6 +360,8 @@ class ResearchPromotionRulesTests(unittest.TestCase):
                     data = payload["data"]
                     self.assertTrue(data["research_only"])
                     self.assertIn("summary", data)
+                    self.assertIn("research_promotion_cleanup_plan", data)
+                    self.assertIn("claim_permissions", data["summary"])
                     self.assertIn("warnings", data)
                     self.assertIn("safety_notes", data)
                     self.assertIn("Does not place orders.", data["safety_notes"])

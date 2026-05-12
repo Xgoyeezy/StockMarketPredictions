@@ -181,6 +181,25 @@ Remaining Human vs System proof gap:
 
 Human vs System Shadow Mode now exposes a proof-first validation plan, but it is not ready for system-beats-human, override-quality, repeatability, paper-to-live, or live-readiness language. The next evidence work is still to capture same-opportunity human and system contracts before outcomes, link them to the same candidate, attach outcome/cost/risk context, and score decision quality without changing execution, broker routes, risk gates, kill switches, ranking weights, or AI order authority.
 
+Research Promotion cleanup update:
+
+Follow-up action added a Research Promotion cleanup plan to the promotion rules service, API fallback, report UI, and documentation. This keeps promotion as research metadata while making promotion-readiness, governance, paper-proven research, automatic strategy promotion, ranking-weight, risk-limit, broker-route, paper-to-live, and live-readiness blockers explicit.
+
+Verification evidence:
+
+- Focused Research Promotion backend/static tests: PASS, 16 passed.
+- Route-health follow-up test: PASS.
+- Backend compile check: PASS.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live app restart completed through the existing startup script.
+- Live health checks: `/api/healthz` and `/api/readyz` returned HTTP 200.
+- Live Research Promotion result: status `ready`, cleanup status `blocked_by_evidence`, 4 open cleanup items, live-trading readiness `false`.
+- Frontend route smoke: `/research-promotion` returned HTTP 200.
+
+Remaining Research Promotion proof gap:
+
+Research Promotion now exposes a proof-first cleanup plan, but it is not ready for small-fund governance, automatic promotion, ranking-weight changes, risk-limit changes, broker-route changes, paper-to-live readiness, or live-readiness language. The next evidence work is still to improve traceability across benchmark, data-completeness, walk-forward, execution, and sanitized manual-review records while keeping promotion metadata disconnected from execution, broker, risk, strategy, kill-switch, ranking, and AI order authority.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.

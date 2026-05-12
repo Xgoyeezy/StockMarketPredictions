@@ -19,6 +19,8 @@ class ResearchPromotionFrontendStaticTests(unittest.TestCase):
         self.assertIn("Walk-forward linkage", source)
         self.assertIn("Execution linkage", source)
         self.assertIn("Manual review records", source)
+        self.assertIn("Research Promotion Cleanup Plan", source)
+        self.assertIn("metadata-only safety", source)
         self.assertIn("Promotion Record Readiness", source)
         self.assertIn("does not place, route, approve, or configure trades", source)
 
@@ -27,7 +29,9 @@ class ResearchPromotionFrontendStaticTests(unittest.TestCase):
 
         self.assertIn("FALLBACK_RESEARCH_PROMOTION_PROOF", source)
         self.assertIn("proof_summary", source)
+        self.assertIn("research_promotion_cleanup_plan", source)
         self.assertIn("promotion_proof_ready", source)
+        self.assertIn("claim_permissions", source)
         self.assertIn("promotion_traceability_coverage", source)
         self.assertIn("manual_review_record_count", source)
         self.assertIn("writes_execution_config: false", source)

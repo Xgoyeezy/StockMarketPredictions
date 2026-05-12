@@ -96,6 +96,46 @@ The summary surfaces:
 
 If the proof gate is incomplete, governance readiness must remain partial even when promotion records exist. Missing proof does not mean the system is unsafe; it means Research Promotion should not yet be used as firm-style approval evidence.
 
+## Research Promotion Cleanup Plan
+
+The report also includes `research_promotion_cleanup_plan` and `aggregations.research_promotion_cleanup_plan`.
+
+This is the proof-first cleanup layer for Research Promotion. It turns promotion proof gaps into explicit manual cleanup items so promotion metadata cannot be mistaken for strategy deployment, ranking mutation, broker approval, risk approval, or live-trading readiness.
+
+Cleanup items:
+
+- research entity sample
+- status and criteria traceability
+- benchmark and data traceability
+- walk-forward traceability
+- execution traceability
+- manual review metadata
+- metadata-only safety governance
+
+The summary exposes:
+
+- `research_promotion_cleanup_status`
+- `research_promotion_cleanup_open_items`
+- `research_promotion_cleanup_critical_open_items`
+- `top_cleanup_item`
+- `claim_permissions`
+
+Claim permissions remain conservative:
+
+- `cautious_internal_promotion_review` may become true only when promotion proof is ready.
+- `paper_proven_research_review` may become true only when promotion proof is ready.
+- `small_fund_governance_claim` remains false.
+- `automatic_strategy_promotion` remains false.
+- `ranking_weight_change` remains false.
+- `risk_limit_change` remains false.
+- `broker_route_change` remains false.
+- `paper_to_live_readiness` remains false.
+- `live_trading_readiness` remains false.
+
+Blocked claims include paper-proven research claims, small-fund governance claims, automatic strategy promotion, ranking-weight changes, risk-limit changes, broker-route changes, paper-to-live readiness, and live-trading readiness.
+
+The cleanup plan is research metadata only. It does not approve live trading, place orders, trigger paper orders, change broker routes, clear kill switches, bypass risk gates, change risk limits, change strategy configs, change ranking weights, or grant AI order authority.
+
 ## What Paper-Proven Means
 
 `paper_proven` means the entity has passed a research-only paper evidence threshold. It may justify a human review of whether the research hypothesis deserves more controlled testing.
@@ -127,6 +167,7 @@ The POST endpoint writes sanitized research metadata only. It does not mutate st
 - `/research-promotion`
 
 The page shows the entity list, current research status, sample size, benchmark verdict, walk-forward status, data-quality warnings, criteria passed, criteria failed, and manual research metadata status controls.
+It also shows the Research Promotion Proof Gate, Research Promotion Cleanup Plan, and per-entity promotion record readiness.
 
 ## Role Model
 
