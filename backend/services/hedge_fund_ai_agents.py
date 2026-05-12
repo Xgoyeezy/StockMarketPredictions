@@ -15,6 +15,7 @@ from backend.services.execution_quality_tca import get_execution_quality_tca_sum
 from backend.services.forecast_validation_engine import get_forecast_validation_summary
 from backend.services.portfolio_risk_intelligence import get_portfolio_risk_summary
 from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.research_promotion_rules import get_research_promotion_summary
 from backend.services.score_calibration_attribution import get_score_calibration_summary
 from backend.services.serialization import serialize_value
@@ -209,6 +210,7 @@ class AgentCommitteeReport(BaseModel):
     recommended_next_safe_action: str
     human_decision_checklist: list[str] = Field(default_factory=list)
     safety_notes: list[str] = Field(default_factory=lambda: list(SAFETY_NOTES))
+    finish_tracker: dict[str, Any] = Field(default_factory=lambda: build_project_finish_tracker(report_name="ai_committee"))
 
 
 class AgentRunResult(BaseModel):
@@ -231,6 +233,7 @@ class AgentRunResult(BaseModel):
     broker_route_mutation: bool = False
     risk_gate_mutation: bool = False
     ranking_mutation: bool = False
+    finish_tracker: dict[str, Any] = Field(default_factory=lambda: build_project_finish_tracker(report_name="ai_agents"))
 
 
 class AgentProposal(BaseModel):
@@ -2114,4 +2117,5 @@ def get_ai_agents_summary(*, storage_path: Path | str | None = None) -> dict[str
         "missing_fields": [] if latest_committee else ["committee_report"],
         "safety_notes": list(SAFETY_NOTES),
         **SAFETY_FLAGS,
+        "finish_tracker": build_project_finish_tracker(report_name="ai_agents_summary"),
     }

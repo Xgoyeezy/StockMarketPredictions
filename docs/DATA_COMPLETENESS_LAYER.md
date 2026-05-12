@@ -190,8 +190,38 @@ The summary report computes:
 - `missing_by_regime`
 - `highest_priority_missing_fields`
 - `benchmark_blockers`
+- `cleanup_plan_status`
+- `cleanup_plan_open_items`
+- `cleanup_plan_critical_open_items`
+- `top_cleanup_item`
 
 Benchmark blockers highlight fields that most directly prevent Professional Benchmark Suite proof, such as forward returns, baseline returns, forecast paths, actual paths, slippage, and spread fields.
+
+## Proof Field Coverage
+
+The summary now includes `proof_field_coverage`, a research-only readiness block for the roadmap fields that must be present before benchmark or walk-forward proof can support stronger claims:
+
+- forward returns
+- baseline returns
+- forecast actuals
+- execution costs
+- regime labels
+- required reward fields
+
+`summary.benchmark_ready` requires both base benchmark evidence and proof-field coverage. Missing proof fields create manual safe next actions only. They do not place orders, change broker routes, bypass risk gates, alter ranking weights, or infer missing market outcomes.
+
+## Data Cleanup Plan
+
+The summary includes `data_cleanup_plan`, an ordered manual work queue for the proof-first cleanup tasks in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`:
+
+- missing forward returns
+- missing baselines
+- missing forecast actuals
+- missing spread, slippage, fill delay, route, and paper-fill evidence
+- missing setup, engine, regime, timestamp, and horizon context
+- missing reward contract fields
+
+Each cleanup item reports status, priority, affected sources, accepted fields, missing counts, blocked reports, a safe next action, and a `done_when` condition. Cleanup items are diagnostic only: they do not fabricate market outcomes, submit orders, change broker routes, bypass risk gates, or mutate ranking weights.
 
 ## API Endpoints
 
@@ -213,6 +243,8 @@ Every endpoint returns:
 - `summary`
 - `records`
 - `aggregations`
+- `proof_field_coverage`
+- `data_cleanup_plan`
 - `missing_fields`
 - `warnings`
 - `safety_notes`
@@ -223,7 +255,7 @@ Frontend route:
 
 - `/data-completeness`
 
-The page shows completion rate, rewardability rate, benchmark readiness, missing fields by category, category-level contract coverage, and safe next actions. The UI copy explicitly states that the page is research-only and does not affect trading.
+The page shows completion rate, rewardability rate, benchmark readiness, proof-field coverage, the manual data cleanup plan, missing fields by category, category-level contract coverage, and safe next actions. The UI copy explicitly states that the page is research-only and does not affect trading.
 
 ## How This Supports Benchmarks
 

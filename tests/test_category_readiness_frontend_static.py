@@ -23,6 +23,8 @@ class CategoryReadinessFrontendStaticTests(unittest.TestCase):
         self.assertIn("Does not change ranking weights automatically.", page)
         self.assertIn("Does not grant AI order authority.", page)
         self.assertIn("No proof of alpha", page)
+        self.assertIn("Proof decides priority", page)
+        self.assertIn("deferred expansion items", page)
         self.assertIn("Proof Chain", page)
         self.assertIn("Next safe action", page)
         self.assertIn("Do not build/claim yet", page)

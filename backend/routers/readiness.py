@@ -65,6 +65,7 @@ def get_category_upgrade_proof_gates(
             },
             "records": gates,
             "claims_to_avoid": list(report.get("claims_to_avoid") or []),
+            "finish_tracker": report.get("finish_tracker"),
             **_report_safety_fields(report),
         }
     )
@@ -98,6 +99,7 @@ def get_category_upgrade_backlog(
                 "highest_priority_build": (report.get("summary") or {}).get("highest_priority_build"),
             },
             "records": backlog,
+            "finish_tracker": report.get("finish_tracker"),
             **_report_safety_fields(report),
         }
     )

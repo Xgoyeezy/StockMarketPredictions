@@ -8,6 +8,7 @@ from statistics import mean, pstdev
 from types import MappingProxyType
 from typing import Any
 
+from backend.services.project_finish_tracker import build_project_finish_tracker
 
 SAFETY_NOTES: tuple[str, ...] = (
     "Research only. Does not affect trading.",
@@ -720,6 +721,7 @@ def _forecast_unified_response(
         "warnings": warnings or [],
         "safety_notes": list(SAFETY_NOTES),
         **SAFETY_FLAGS,
+        "finish_tracker": build_project_finish_tracker(report_name="forecast_validation"),
     }
 
 

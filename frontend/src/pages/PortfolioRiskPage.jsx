@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -26,6 +27,13 @@ function formatPercent(value) {
   return `${(numeric * 100).toFixed(1)}%`
 }
 
+function formatRequirementValue(value, metric) {
+  if (value === null || value === undefined) return '--'
+  if (String(metric || '').includes('coverage') || String(metric || '').includes('usage')) return formatPercent(value)
+  if (String(metric || '').includes('count')) return formatNumber(value, 0)
+  return formatNumber(value)
+}
+
 function humanize(value, fallback = 'Unknown') {
   const text = String(value || '').trim()
   if (!text) return fallback
@@ -33,7 +41,7 @@ function humanize(value, fallback = 'Unknown') {
 }
 
 function statusTone(status) {
-  if (status === 'ready') return 'positive'
+  if (status === 'ready' || status === 'ready_for_human_review' || status === 'passed') return 'positive'
   if (status === 'empty') return 'neutral'
   return 'warning'
 }
@@ -57,7 +65,7 @@ function DataTable({ columns, rows, empty }) {
         </thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
-            <tr key={row.symbol || row.sector || row.engine || row.setup_type || row.scenario || row.bucket || row.field || index}>
+            <tr key={`${row.record_id || row.linked_candidate_id || row.symbol || row.sector || row.engine || row.setup_type || row.scenario || row.bucket || row.field || 'row'}-${index}`}>
               {columns.map((column) => (
                 <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
               ))}
@@ -107,6 +115,9 @@ export default function PortfolioRiskPage() {
   const riskBudget = aggregations.daily_risk_budget_usage || {}
   const openHeat = aggregations.open_heat || {}
   const forecastConfidence = aggregations.forecast_confidence_exposure || {}
+  const proofSummary = report?.proof_summary || aggregations.portfolio_risk_proof || {}
+  const proofRequirements = proofSummary.requirements || []
+  const recordReadiness = proofSummary.record_readiness || []
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
   const stressTests = report?.stress_tests || []
@@ -145,6 +156,28 @@ export default function PortfolioRiskPage() {
           <MetricCard label="Daily risk budget" value={formatPercent(summary.daily_risk_budget_usage)} helper={`${formatMoney(riskBudget.open_risk_estimate)} of ${formatMoney(riskBudget.daily_risk_budget)}`} />
           <MetricCard label="Drawdown state" value={humanize(summary.drawdown_state)} helper={`${formatPercent(drawdown.current_drawdown_pct)} current drawdown`} />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Portfolio Risk Proof Gate" subtitle="Human-review checklist for exposure, concentration, factor, liquidity, drawdown, stress, and candidate context.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Proof status" value={humanize(proofSummary.status || summary.portfolio_risk_proof_status || 'needs_evidence')} helper={`${summary.portfolio_risk_requirements_passed ?? 0}/${summary.portfolio_risk_requirements_total ?? 9} requirements passed`} />
+          <MetricCard label="Portfolio risk coverage" value={formatPercent(summary.portfolio_risk_coverage ?? proofSummary.summary?.portfolio_risk_coverage)} helper="Average context coverage across proof fields" />
+          <MetricCard label="Factor coverage" value={formatPercent(summary.factor_context_coverage ?? proofSummary.summary?.factor_context_coverage)} helper="SPY and QQQ beta evidence" />
+          <MetricCard label="Liquidity coverage" value={formatPercent(summary.liquidity_context_coverage ?? proofSummary.summary?.liquidity_context_coverage)} helper="Liquidity, ADV, or spread evidence" />
+          <MetricCard label="Drawdown/budget coverage" value={formatPercent(summary.drawdown_budget_context_coverage ?? proofSummary.summary?.drawdown_budget_context_coverage)} helper="Risk dollars, budget, drawdown, or P&L" />
+          <MetricCard label="Candidate context coverage" value={formatPercent(summary.candidate_strategy_context_coverage ?? proofSummary.summary?.candidate_strategy_context_coverage)} helper="Candidate, desk, setup, regime, and confidence" />
+        </div>
+        <DataTable
+          rows={proofRequirements}
+          empty={loading ? 'Loading portfolio risk proof requirements...' : 'No portfolio risk proof requirements returned.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
+            { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Exposure Breakdown" subtitle="Sector, engine, setup, strategy, regime, and confidence exposure are visibility metrics only.">
@@ -262,6 +295,23 @@ export default function PortfolioRiskPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title="Portfolio Risk Record Readiness" subtitle="Per-record evidence completeness for human review only; this does not loosen gates or change risk limits.">
+        <DataTable
+          rows={recordReadiness}
+          empty={loading ? 'Loading portfolio risk record readiness...' : 'No portfolio risk record readiness returned.'}
+          columns={[
+            { key: 'symbol', label: 'Symbol' },
+            { key: 'route', label: 'Route', render: (row) => humanize(row.route) },
+            { key: 'exposure_context_complete', label: 'Exposure', render: (row) => <StatusBadge tone={row.exposure_context_complete ? 'positive' : 'warning'}>{row.exposure_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'concentration_context_complete', label: 'Concentration', render: (row) => <StatusBadge tone={row.concentration_context_complete ? 'positive' : 'warning'}>{row.concentration_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'factor_context_complete', label: 'Factors', render: (row) => <StatusBadge tone={row.factor_context_complete ? 'positive' : 'warning'}>{row.factor_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'liquidity_context_complete', label: 'Liquidity', render: (row) => <StatusBadge tone={row.liquidity_context_complete ? 'positive' : 'warning'}>{row.liquidity_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'drawdown_budget_context_complete', label: 'Budget', render: (row) => <StatusBadge tone={row.drawdown_budget_context_complete ? 'positive' : 'warning'}>{row.drawdown_budget_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'candidate_strategy_context_complete', label: 'Candidate', render: (row) => <StatusBadge tone={row.candidate_strategy_context_complete ? 'positive' : 'warning'}>{row.candidate_strategy_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+          ]}
+        />
+      </SectionCard>
+
       <SectionCard title="Safety Boundary" subtitle="Portfolio Risk Intelligence is separate from risk enforcement.">
         <DataTable
           rows={safetyNotes.map((note, index) => ({ note, index }))}
@@ -269,6 +319,8 @@ export default function PortfolioRiskPage() {
           columns={[{ key: 'note', label: 'Safety note' }]}
         />
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

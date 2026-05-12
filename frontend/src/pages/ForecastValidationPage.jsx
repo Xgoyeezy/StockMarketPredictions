@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import LoadingBlock from '../components/LoadingBlock'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -338,6 +339,8 @@ export default function ForecastValidationPage() {
           </tbody>
         </table>
       </SectionCard>
+
+      <FinishTrackerSection tracker={summary?.finish_tracker} loading={loading} />
     </div>
   )
 }

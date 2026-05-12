@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -91,18 +92,30 @@ export default function CategoryReadinessPage() {
     setLoading(true)
     setError('')
     try {
-      const [readinessPayload, gatePayload, chainPayload, backlogPayload] = await Promise.all([
-        getCategoryUpgradeReadiness(),
+      const readinessPayload = await getCategoryUpgradeReadiness()
+      setReport(readinessPayload)
+      setProofGates(readinessPayload?.gates || [])
+      setBacklog(readinessPayload?.backlog || [])
+      setProofChain([])
+      setLoading(false)
+
+      const [gatePayload, chainPayload, backlogPayload] = await Promise.allSettled([
         getCategoryUpgradeProofGates(),
         getCategoryUpgradeProofChain(),
         getCategoryUpgradeBacklog(),
       ])
-      setReport(readinessPayload)
-      setProofGates(gatePayload?.records || readinessPayload?.gates || [])
-      setProofChain(chainPayload?.records || [])
-      setBacklog(backlogPayload?.records || readinessPayload?.backlog || [])
+      if (gatePayload.status === 'fulfilled') {
+        setProofGates(gatePayload.value?.records || readinessPayload?.gates || [])
+      }
+      if (chainPayload.status === 'fulfilled') {
+        setProofChain(chainPayload.value?.records || [])
+      }
+      if (backlogPayload.status === 'fulfilled') {
+        setBacklog(backlogPayload.value?.records || readinessPayload?.backlog || [])
+      }
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Failed to load 10/10 category readiness.')
+      setLoading(false)
     } finally {
       setLoading(false)
     }
@@ -161,8 +174,10 @@ export default function CategoryReadinessPage() {
       <div className="ui-action-row">
         <StatusBadge tone={statusTone(report?.status)}>{humanize(report?.status || (loading ? 'loading' : 'unavailable'))}</StatusBadge>
         <StatusBadge tone="neutral">Current estimated readiness</StatusBadge>
+        <StatusBadge tone="neutral">Proof decides priority</StatusBadge>
         <StatusBadge tone="neutral">No proof of alpha</StatusBadge>
         <StatusBadge tone="neutral">No live-money autonomy</StatusBadge>
+        <StatusBadge tone="neutral">{summary.deferred_expansion_count || 0} deferred expansion items</StatusBadge>
         <Button onClick={load} disabled={loading || Boolean(running)} variant="primary">{loading ? 'Refreshing...' : 'Refresh'}</Button>
       </div>
 
@@ -276,6 +291,8 @@ export default function CategoryReadinessPage() {
           The export excludes secrets, credentials, broker records, raw broker payloads, raw logs, account IDs, and raw local paths.
         </p>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

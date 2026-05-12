@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -299,6 +300,8 @@ export default function EvidenceRewardPage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

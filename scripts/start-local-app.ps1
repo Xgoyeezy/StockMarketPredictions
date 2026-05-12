@@ -90,15 +90,15 @@ $initialBackendListenerPid = Get-ListenerPid -Port $ApiPort
 $initialFrontendListenerPid = Get-ListenerPid -Port $FrontendPort
 
 function Get-ProcessPathSafe {
-    param([int]$Pid)
-    try { return (Get-Process -Id $Pid -ErrorAction Stop).Path } catch { return $null }
+    param([int]$ProcessId)
+    try { return (Get-Process -Id $ProcessId -ErrorAction Stop).Path } catch { return $null }
 }
 
 if ($ForceRestart) { $needRestart = $true }
 
 if (-not $needRestart -and $RequireBackendVenv) {
     if ($initialBackendListenerPid) {
-        $procPath = Get-ProcessPathSafe -Pid $initialBackendListenerPid
+        $procPath = Get-ProcessPathSafe -ProcessId $initialBackendListenerPid
         if ($procPath -and ($procPath.ToLower() -ne $backendPython.ToLower())) {
             $needRestart = $true
         }

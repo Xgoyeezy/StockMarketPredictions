@@ -36,6 +36,7 @@ from backend.routers.orgs import router as orgs_router
 from backend.routers.portfolio import router as portfolio_router
 from backend.routers.portfolio_risk import router as portfolio_risk_router
 from backend.routers.professional_benchmark import router as professional_benchmark_router
+from backend.routers.proof_metrics import router as proof_metrics_router
 from backend.routers.readiness import router as readiness_router
 from backend.routers.research_promotion import router as research_promotion_router
 from backend.routers.risk import router as risk_router
@@ -214,6 +215,7 @@ def create_app() -> FastAPI:
     app.include_router(evidence_reward_router, prefix=settings.api_prefix)
     app.include_router(forecast_validation_router, prefix=settings.api_prefix)
     app.include_router(professional_benchmark_router, prefix=settings.api_prefix)
+    app.include_router(proof_metrics_router, prefix=settings.api_prefix)
     app.include_router(data_completeness_router, prefix=settings.api_prefix)
     app.include_router(walk_forward_router, prefix=settings.api_prefix)
     app.include_router(research_promotion_router, prefix=settings.api_prefix)

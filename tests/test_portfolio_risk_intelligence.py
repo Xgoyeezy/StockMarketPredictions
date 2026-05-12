@@ -9,6 +9,7 @@ from backend.api import create_app
 from backend.services import portfolio_risk_intelligence as pri
 from backend.services.portfolio_risk_intelligence import (
     build_portfolio_risk_report,
+    build_portfolio_risk_proof_summary,
     compute_correlation_heat,
     compute_position_notional,
     normalize_portfolio_risk_record,
@@ -123,6 +124,58 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
         self.assertGreaterEqual(report["missing_fields"].get("beta_to_QQQ", 0), 1)
         self.assertTrue(report["warnings"])
 
+    def test_portfolio_risk_proof_ready_with_full_context(self) -> None:
+        report = build_portfolio_risk_report(
+            records=[
+                _row(record_id="aapl", symbol="AAPL", notional=10000, current_drawdown_pct=0.01),
+                _row(record_id="msft", symbol="MSFT", notional=12000, current_drawdown_pct=0.01),
+                _row(record_id="jpm", symbol="JPM", sector="financials", notional=8000, current_drawdown_pct=0.01),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        proof = build_portfolio_risk_proof_summary(report["records"], report["aggregations"], report["stress_tests"])
+
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(proof["status"], "ready_for_human_review")
+        self.assertEqual(report["summary"]["portfolio_risk_requirements_passed"], 9)
+        self.assertEqual(report["summary"]["portfolio_risk_coverage"], 1.0)
+        self.assertTrue(all(row["research_only"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_limits"] for row in proof["requirements"]))
+
+    def test_portfolio_risk_proof_blocks_missing_context_without_mutating_risk(self) -> None:
+        report = build_portfolio_risk_report(
+            records=[
+                _row(
+                    symbol="ZZZZ",
+                    sector="",
+                    engine="unknown",
+                    setup_type="unknown",
+                    strategy="unknown",
+                    regime="unknown",
+                    beta_to_SPY=None,
+                    beta_to_QQQ=None,
+                    liquidity_score=None,
+                    spread_bps=None,
+                    forecast_confidence=None,
+                    max_risk_dollars=None,
+                    current_drawdown_pct=None,
+                    unrealized_pnl=None,
+                    daily_risk_budget=None,
+                )
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        failed_keys = {row["key"] for row in report["proof_summary"]["requirements"] if not row["passed"]}
+        self.assertIn("factor_context", failed_keys)
+        self.assertIn("liquidity_context", failed_keys)
+        self.assertIn("drawdown_budget_context", failed_keys)
+        self.assertIn("candidate_strategy_context", failed_keys)
+        self.assertFalse(report["proof_summary"]["proof_ready"])
+        self.assertFalse(report["writes_risk_limits"])
+        self.assertFalse(report["writes_risk_config"])
+
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
         original_loader = pri._load_runtime_rows
@@ -147,9 +200,11 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
                 self.assertFalse(data["can_submit_live_orders"])
                 self.assertIn("summary", data)
                 self.assertIn("records", data)
+                self.assertIn("proof_summary", data)
                 self.assertIn("aggregations", data)
                 self.assertIn("warnings", data)
                 self.assertIn("missing_fields", data)
+                self.assertIn("portfolio_risk_proof_ready", data["summary"])
                 self.assertIn("safety_notes", data)
                 self.assertIn("Risk visibility only. Does not enforce, loosen, or change risk gates.", data["safety_notes"])
         finally:

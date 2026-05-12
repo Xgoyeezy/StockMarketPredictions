@@ -11,6 +11,7 @@ from backend import stock_direction_model as sdm
 from backend.services import risk_control_service
 from backend.services.desk_service import filter_frame_to_current_user
 from backend.services.evidence_reward_engine import get_evidence_reward_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -42,6 +43,84 @@ SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "a
 
 DEFAULT_ACCOUNT_SIZE = 100000.0
 DEFAULT_DAILY_RISK_BUDGET_PCT = 0.005
+MIN_PORTFOLIO_RISK_SAMPLE_SIZE = 1
+MIN_PORTFOLIO_RISK_COVERAGE = 0.80
+MIN_STRESS_SCENARIO_COUNT = 9
+
+PORTFOLIO_RISK_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "portfolio_sample",
+        "label": "Portfolio risk sample",
+        "metric": "record_count",
+        "threshold": MIN_PORTFOLIO_RISK_SAMPLE_SIZE,
+        "comparison": ">=",
+        "safe_next_action": "Collect paper-route position, pending order, or candidate exposure rows before treating portfolio risk as reviewable.",
+    },
+    {
+        "key": "exposure_context",
+        "label": "Exposure context coverage",
+        "metric": "exposure_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach notional or quantity-plus-price evidence so gross, net, long, and proxy exposure are reviewable.",
+    },
+    {
+        "key": "concentration_context",
+        "label": "Concentration context coverage",
+        "metric": "concentration_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach sector and correlation bucket context so crowding can be reviewed before promotion.",
+    },
+    {
+        "key": "factor_context",
+        "label": "Factor context coverage",
+        "metric": "factor_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach SPY and QQQ beta evidence or a future factor model before stronger portfolio-risk claims.",
+    },
+    {
+        "key": "liquidity_context",
+        "label": "Liquidity context coverage",
+        "metric": "liquidity_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach liquidity score, average dollar volume, or spread evidence to paper risk rows.",
+    },
+    {
+        "key": "drawdown_budget_context",
+        "label": "Drawdown and budget context",
+        "metric": "drawdown_budget_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach max-risk dollars, daily budget, drawdown, or unrealized P&L evidence to risk rows.",
+    },
+    {
+        "key": "candidate_strategy_context",
+        "label": "Candidate and strategy context",
+        "metric": "candidate_strategy_context_coverage",
+        "threshold": MIN_PORTFOLIO_RISK_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach candidate, engine, setup, strategy, regime, and confidence context to each reviewable row.",
+    },
+    {
+        "key": "stress_context",
+        "label": "Stress scenario coverage",
+        "metric": "stress_scenario_count",
+        "threshold": MIN_STRESS_SCENARIO_COUNT,
+        "comparison": ">=",
+        "safe_next_action": "Keep transparent stress scenarios available for market, liquidity, sector, single-name, data, and broker shocks.",
+    },
+    {
+        "key": "risk_visibility_safety_boundary",
+        "label": "Risk visibility safety boundary",
+        "metric": "risk_visibility_safety_boundary",
+        "threshold": 1,
+        "comparison": ">=",
+        "safe_next_action": "Keep portfolio risk as read-only visibility; do not change risk limits, gates, routes, rankings, or orders.",
+    },
+)
 
 SECTOR_BY_SYMBOL: dict[str, str] = {
     "SPY": "broad_market",
@@ -136,6 +215,21 @@ def _ratio(numerator: float, denominator: float) -> float | None:
     if denominator <= 0:
         return None
     return round(float(numerator) / float(denominator), 6)
+
+
+def _passes_threshold(value: Any, threshold: float, comparison: str) -> bool:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return False
+    if comparison == ">=":
+        return numeric >= threshold
+    if comparison == ">":
+        return numeric > threshold
+    if comparison == "<=":
+        return numeric <= threshold
+    if comparison == "<":
+        return numeric < threshold
+    return numeric == threshold
 
 
 def _listify(value: Any) -> list[Any]:
@@ -319,6 +413,10 @@ def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict
     spread_bps = _first_number(row, ("spread_bps", "spread_at_signal", "bid_ask_spread_bps"))
     forecast_confidence = _first_number(row, ("forecast_confidence", "confidence", "ai_confidence"))
     max_risk_dollars = _first_number(row, ("max_risk_dollars", "risk_dollars", "planned_risk_dollars"))
+    current_drawdown_pct = _first_number(row, ("drawdown_pct", "current_drawdown_pct", "max_drawdown_pct"))
+    unrealized_pnl = _first_number(row, ("unrealized_pnl", "current_unrealized_pnl", "open_pnl", "floating_pnl"))
+    daily_risk_budget = _first_number(row, ("daily_risk_budget", "daily_loss_budget", "loss_budget_dollars"))
+    linked_candidate_id = _first_text(row, ("linked_candidate_id", "candidate_lifecycle_id", "automation_candidate_id"), "").strip() or None
     warnings: list[str] = []
     missing_fields: list[str] = []
     if notional is None:
@@ -333,6 +431,8 @@ def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict
         missing_fields.append("liquidity")
     if forecast_confidence is None:
         missing_fields.append("forecast_confidence")
+    if max_risk_dollars is None and current_drawdown_pct is None and unrealized_pnl is None and daily_risk_budget is None:
+        missing_fields.append("drawdown_or_risk_budget")
     if liquidity_score is not None and liquidity_score < 0.4:
         warnings.append("Liquidity score is weak.")
     if avg_dollar_volume is not None and avg_dollar_volume < 1_000_000:
@@ -341,6 +441,7 @@ def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict
         warnings.append("Spread is wide for portfolio-level risk visibility.")
     normalized = {
         "record_id": _first_text(row, ("record_id", "trade_id", "order_id", "candidate_lifecycle_id"), f"position-{index + 1}"),
+        "linked_candidate_id": linked_candidate_id,
         "source_type": _first_text(row, ("source_type",), "paper_position"),
         "symbol": symbol,
         "timestamp": _first_text(row, ("timestamp", "created_at", "opened_at", "submitted_at"), ""),
@@ -363,6 +464,9 @@ def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict
         "beta_to_SPY": beta_spy,
         "beta_to_QQQ": beta_qqq,
         "forecast_confidence": forecast_confidence,
+        "current_drawdown_pct": current_drawdown_pct,
+        "unrealized_pnl": unrealized_pnl,
+        "daily_risk_budget": daily_risk_budget,
         "warnings": warnings,
         "missing_fields": sorted(set(missing_fields + [str(item) for item in _listify(row.get("missing_fields"))])),
     }
@@ -660,6 +764,167 @@ def compute_stress_tests(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _known_text(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text and text not in {"unknown", "nan", "none", "null"})
+
+
+def _portfolio_row_readiness(row: dict[str, Any]) -> dict[str, Any]:
+    exposure_context = row.get("absolute_exposure") is not None and row.get("signed_exposure") is not None
+    concentration_context = _known_text(row.get("sector")) and _known_text(row.get("correlation_bucket"))
+    factor_context = row.get("beta_to_SPY") is not None and row.get("beta_to_QQQ") is not None
+    liquidity_context = row.get("liquidity_score") is not None or row.get("average_dollar_volume") is not None or row.get("spread_bps") is not None
+    drawdown_budget_context = any(
+        row.get(field) is not None
+        for field in ("max_risk_dollars", "current_drawdown_pct", "unrealized_pnl", "daily_risk_budget")
+    )
+    candidate_strategy_context = bool(row.get("linked_candidate_id") or row.get("record_id")) and all(
+        _known_text(row.get(field)) for field in ("engine", "setup_type", "strategy", "regime")
+    ) and row.get("forecast_confidence") is not None
+    warnings: list[str] = list(row.get("warnings") or [])
+    missing = list(row.get("missing_fields") or [])
+    if not exposure_context:
+        warnings.append("Exposure context is incomplete.")
+    if not concentration_context:
+        warnings.append("Concentration context is incomplete.")
+    if not factor_context:
+        warnings.append("Factor exposure context is incomplete.")
+    if not liquidity_context:
+        warnings.append("Liquidity context is incomplete.")
+    if not drawdown_budget_context:
+        warnings.append("Drawdown or budget context is incomplete.")
+    if not candidate_strategy_context:
+        warnings.append("Candidate or strategy context is incomplete.")
+    return {
+        "record_id": row.get("record_id"),
+        "linked_candidate_id": row.get("linked_candidate_id"),
+        "symbol": row.get("symbol"),
+        "route": row.get("route"),
+        "exposure_context_complete": exposure_context,
+        "concentration_context_complete": concentration_context,
+        "factor_context_complete": factor_context,
+        "liquidity_context_complete": liquidity_context,
+        "drawdown_budget_context_complete": drawdown_budget_context,
+        "candidate_strategy_context_complete": candidate_strategy_context,
+        "warnings": list(dict.fromkeys(warnings)),
+        "missing_fields": missing,
+        "research_only": True,
+        "paper_only": True,
+        "changes_risk_limits": False,
+        "changes_risk_gates": False,
+        "changes_broker_routes": False,
+        "changes_order_submission": False,
+        "changes_ranking_weights": False,
+    }
+
+
+def build_portfolio_risk_proof_summary(
+    records: list[dict[str, Any]],
+    aggregations: dict[str, Any],
+    stress_tests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    record_count = len(records)
+    readiness = [_portfolio_row_readiness(row) for row in records]
+
+    def coverage(field: str) -> float:
+        return _ratio(sum(1 for row in readiness if row.get(field)), record_count) or 0.0
+
+    exposure_context_coverage = coverage("exposure_context_complete")
+    concentration_context_coverage = coverage("concentration_context_complete")
+    factor_context_coverage = coverage("factor_context_complete")
+    liquidity_context_coverage = coverage("liquidity_context_complete")
+    drawdown_budget_context_coverage = coverage("drawdown_budget_context_complete")
+    candidate_strategy_context_coverage = coverage("candidate_strategy_context_complete")
+    portfolio_risk_coverage = round(
+        (
+            exposure_context_coverage
+            + concentration_context_coverage
+            + factor_context_coverage
+            + liquidity_context_coverage
+            + drawdown_budget_context_coverage
+            + candidate_strategy_context_coverage
+        )
+        / 6,
+        6,
+    )
+    analytics_only_stress_count = sum(1 for row in stress_tests if isinstance(row, dict) and row.get("analytics_only") is True)
+    safety_boundary = int(
+        SAFETY_FLAGS["can_submit_orders"] is False
+        and SAFETY_FLAGS["can_submit_live_orders"] is False
+        and SAFETY_FLAGS["writes_risk_config"] is False
+        and SAFETY_FLAGS["writes_risk_limits"] is False
+        and SAFETY_FLAGS["writes_broker_config"] is False
+        and SAFETY_FLAGS["writes_ranking_config"] is False
+    )
+    values = {
+        "record_count": record_count,
+        "exposure_context_coverage": exposure_context_coverage,
+        "concentration_context_coverage": concentration_context_coverage,
+        "factor_context_coverage": factor_context_coverage,
+        "liquidity_context_coverage": liquidity_context_coverage,
+        "drawdown_budget_context_coverage": drawdown_budget_context_coverage,
+        "candidate_strategy_context_coverage": candidate_strategy_context_coverage,
+        "stress_scenario_count": analytics_only_stress_count,
+        "risk_visibility_safety_boundary": safety_boundary,
+    }
+    rows: list[dict[str, Any]] = []
+    for requirement in PORTFOLIO_RISK_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "passed" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Portfolio risk proof is read-only research visibility; it is not risk approval, live-trading readiness, investor performance evidence, or permission to change risk gates.",
+                "research_only": True,
+                "paper_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_risk_limits": False,
+                "changes_ranking_weights": False,
+            }
+        )
+    proof_ready = bool(rows) and all(row["passed"] for row in rows)
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+            "proof_ready": proof_ready,
+            "requirements": rows,
+            "summary": {
+                "record_count": record_count,
+                "portfolio_risk_coverage": portfolio_risk_coverage,
+                "exposure_context_coverage": exposure_context_coverage,
+                "concentration_context_coverage": concentration_context_coverage,
+                "factor_context_coverage": factor_context_coverage,
+                "liquidity_context_coverage": liquidity_context_coverage,
+                "drawdown_budget_context_coverage": drawdown_budget_context_coverage,
+                "candidate_strategy_context_coverage": candidate_strategy_context_coverage,
+                "stress_scenario_count": analytics_only_stress_count,
+                "symbol_concentration": aggregations.get("symbol_concentration"),
+                "sector_concentration": aggregations.get("sector_concentration"),
+                "open_heat": aggregations.get("open_heat", {}).get("open_heat"),
+                "daily_risk_budget_usage": aggregations.get("daily_risk_budget_usage", {}).get("daily_risk_budget_usage"),
+                "requirement_count": len(rows),
+                "passed_requirement_count": sum(1 for row in rows if row["passed"]),
+                "missing_requirement_count": sum(1 for row in rows if not row["passed"]),
+            },
+            "record_readiness": readiness[:100],
+            "safe_next_actions": [row["safe_next_action"] for row in rows if not row["passed"]],
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def _records_from_frame(frame: pd.DataFrame, source_type: str) -> list[dict[str, Any]]:
     if frame is None or frame.empty:
         return []
@@ -711,6 +976,7 @@ def build_portfolio_risk_report(
     normalized = normalize_portfolio_risk_records(records)
     aggregations = compute_portfolio_risk_aggregations(normalized)
     stress_tests = compute_stress_tests(normalized)
+    proof_summary = build_portfolio_risk_proof_summary(normalized, aggregations, stress_tests)
     missing_counter: Counter[str] = Counter()
     for row in normalized:
         missing_counter.update(row.get("missing_fields") or [])
@@ -736,8 +1002,19 @@ def build_portfolio_risk_report(
         "drawdown_state": aggregations.get("drawdown_state", {}).get("drawdown_state"),
         "daily_risk_budget_usage": aggregations.get("daily_risk_budget_usage", {}).get("daily_risk_budget_usage"),
         "open_heat": aggregations.get("open_heat", {}).get("open_heat"),
+        "portfolio_risk_proof_ready": proof_summary["proof_ready"],
+        "portfolio_risk_proof_status": proof_summary["status"],
+        "portfolio_risk_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "portfolio_risk_requirements_total": proof_summary["summary"]["requirement_count"],
+        "portfolio_risk_coverage": proof_summary["summary"]["portfolio_risk_coverage"],
+        "exposure_context_coverage": proof_summary["summary"]["exposure_context_coverage"],
+        "factor_context_coverage": proof_summary["summary"]["factor_context_coverage"],
+        "liquidity_context_coverage": proof_summary["summary"]["liquidity_context_coverage"],
+        "drawdown_budget_context_coverage": proof_summary["summary"]["drawdown_budget_context_coverage"],
+        "candidate_strategy_context_coverage": proof_summary["summary"]["candidate_strategy_context_coverage"],
         **SAFETY_FLAGS,
     }
+    aggregations["portfolio_risk_proof"] = proof_summary
     return serialize_value(
         {
             "status": status,
@@ -746,12 +1023,14 @@ def build_portfolio_risk_report(
             "paper_only": True,
             "summary": summary,
             "records": normalized[:250],
+            "proof_summary": proof_summary,
             "aggregations": aggregations,
             "stress_tests": stress_tests,
             "warnings": list(dict.fromkeys(warnings)),
             "missing_fields": dict(missing_counter),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="portfolio_risk"),
         }
     )
 

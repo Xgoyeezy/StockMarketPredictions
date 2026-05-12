@@ -65,6 +65,37 @@ Needs-more-evidence status applies when:
 - Rewardable count is too small.
 - Forward returns, baseline returns, execution data, or regime labels are missing.
 
+## Research Promotion Proof Gate
+
+Research Promotion now emits a `proof_summary` and `aggregations.research_promotion_proof` block. This is a human-review readiness gate for governance claims, not a deployment or trading gate.
+
+The proof gate checks:
+
+- Research entity sample exists.
+- Every promotion entity has status and safe-explanation traceability.
+- Passed and failed criteria are attached to the entity.
+- Benchmark verdict, sample count, rewardable count, and baseline-relative evidence are traceable.
+- Data-quality, completeness, and rewardability fields are traceable.
+- Walk-forward evidence is linked through frozen or completed experiment context.
+- Execution-adjusted reward or execution-quality evidence is attached.
+- At least one sanitized manual review metadata event exists with reason, previous status, reviewer context when available, and evidence snapshot.
+- Promotion remains metadata only.
+- Safety boundaries remain preserved.
+
+The summary surfaces:
+
+- `promotion_proof_ready`
+- `promotion_proof_status`
+- `promotion_requirements_passed`
+- `promotion_requirements_total`
+- `promotion_traceability_coverage`
+- `benchmark_traceability_coverage`
+- `walk_forward_traceability_coverage`
+- `execution_traceability_coverage`
+- `manual_review_record_count`
+
+If the proof gate is incomplete, governance readiness must remain partial even when promotion records exist. Missing proof does not mean the system is unsafe; it means Research Promotion should not yet be used as firm-style approval evidence.
+
 ## What Paper-Proven Means
 
 `paper_proven` means the entity has passed a research-only paper evidence threshold. It may justify a human review of whether the research hypothesis deserves more controlled testing.
@@ -149,6 +180,8 @@ Manual research statuses are stored as sanitized metadata under:
 - `runtime-exports/research-promotion/promotion_statuses.json`
 
 Secret-like keys and raw local paths are redacted before storage/output. This store is not an execution config.
+
+Manual metadata records include sanitized traceability fields such as previous status, computed status, review action, approval trace id, and evidence snapshot. These records remain research metadata only and must not be interpreted as broker approval, live-trading approval, or risk-gate approval.
 
 ## Test Commands
 

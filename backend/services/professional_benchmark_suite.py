@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from backend.services.evidence_reward_engine import get_evidence_reward_summary
 from backend.services.forecast_validation_engine import get_forecast_validation_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -29,6 +30,7 @@ SAFETY_NOTES: tuple[str, ...] = (
 MIN_EDGE_SAMPLE_SIZE = 5
 FALSE_BLOCK_RETURN_THRESHOLD_PCT = 0.25
 EDGE_THRESHOLD_PCT = 0.10
+MIN_DATA_QUALITY_SCORE = 50.0
 
 BASELINE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
@@ -78,6 +80,114 @@ BASELINE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "label": "Opening range breakout",
         "fields": ("opening_range_breakout_forward_return", "orb_baseline_forward_return"),
         "required": ("opening_range_breakout_forward_return",),
+    },
+)
+
+BENCHMARK_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "sample_size",
+        "label": "Rewardable sample size",
+        "metric": "rewardable_count",
+        "threshold": MIN_EDGE_SAMPLE_SIZE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Collect more rewardable forward-outcome rows before treating benchmark results as reviewable.",
+    },
+    {
+        "key": "explicit_baselines",
+        "label": "Explicit baselines available",
+        "metric": "available_baseline_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Attach at least one same-window forward-only baseline before edge review.",
+    },
+    {
+        "key": "baseline_relative_edge",
+        "label": "Baseline-relative edge",
+        "metric": "baseline_relative_edge",
+        "threshold": EDGE_THRESHOLD_PCT,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Improve data quality or candidate scoring until system forward returns beat explicit baselines by the v1 threshold.",
+    },
+    {
+        "key": "score_bucket_lift",
+        "label": "Score bucket lift",
+        "metric": "score_bucket_lift",
+        "threshold": 0.0,
+        "comparison": "greater_than",
+        "safe_next_action": "Verify that higher score buckets outperform lower score buckets before score quality claims.",
+    },
+    {
+        "key": "after_cost_reward",
+        "label": "After-cost reward",
+        "metric": "slippage_adjusted_reward",
+        "threshold": 0.0,
+        "comparison": "greater_than",
+        "safe_next_action": "Add slippage and spread evidence and verify reward remains positive after paper execution costs.",
+    },
+    {
+        "key": "data_quality",
+        "label": "Data quality floor",
+        "metric": "data_quality_score",
+        "threshold": MIN_DATA_QUALITY_SCORE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Fix missing rewardable outcome fields before using benchmark results as proof.",
+    },
+)
+
+BENCHMARK_HARDENING_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "rewardable_sample_quality",
+        "title": "Rewardable sample and data quality",
+        "priority": "critical",
+        "proof_keys": ("sample_size", "data_quality"),
+        "blocked_claims": ("benchmark_edge_review", "score_quality", "promotion_readiness"),
+        "safe_next_action": "Collect rewardable candidate rows with closed-horizon outcomes, total reward, baseline fields, timestamps, horizons, setup, engine, and regime context.",
+        "done_when": "Rewardable sample size and data quality both pass the benchmark proof gate.",
+    },
+    {
+        "key": "same_window_baselines",
+        "title": "Same-window explicit baselines",
+        "priority": "critical",
+        "proof_keys": ("explicit_baselines",),
+        "blocked_claims": ("baseline_relative_edge", "benchmark_edge_review"),
+        "safe_next_action": "Attach forward-only SPY, QQQ, sector, random-candidate, and simple-strategy baseline returns for the same timestamp and horizon.",
+        "done_when": "At least one explicit same-window baseline is available and every baseline comparison reports its source field.",
+    },
+    {
+        "key": "baseline_relative_edge",
+        "title": "Baseline-relative edge",
+        "priority": "high",
+        "proof_keys": ("baseline_relative_edge",),
+        "blocked_claims": ("benchmark_edge_review", "small_fund_research_claim"),
+        "safe_next_action": "Only evaluate edge after rewardable system returns and explicit baselines exist for the same forward window.",
+        "done_when": "System forward returns beat explicit baselines by the v1 edge threshold.",
+    },
+    {
+        "key": "score_bucket_lift",
+        "title": "Score bucket lift",
+        "priority": "high",
+        "proof_keys": ("score_bucket_lift",),
+        "blocked_claims": ("ranking_quality_claim", "score_quality"),
+        "safe_next_action": "Collect rewardable high-score and low-score rows before claiming the score separates outcomes.",
+        "done_when": "High score buckets beat low score buckets on rewardable, forward-only outcomes.",
+    },
+    {
+        "key": "after_cost_reward",
+        "title": "After-cost reward",
+        "priority": "high",
+        "proof_keys": ("after_cost_reward",),
+        "blocked_claims": ("tradability_claim", "execution_adjusted_edge"),
+        "safe_next_action": "Attach paper spread, slippage, fill delay, route, and fill-price evidence before treating reward as cost-adjusted.",
+        "done_when": "Reward remains positive after explicit paper execution costs.",
+    },
+    {
+        "key": "out_of_sample_split",
+        "title": "Out-of-sample split and frozen versions",
+        "priority": "high",
+        "proof_keys": (),
+        "blocked_claims": ("repeatability_claim", "walk_forward_claim"),
+        "safe_next_action": "Create frozen walk-forward experiments with sample splits, experiment versions, reward formula versions, and data filters before repeatability language.",
+        "done_when": "Out-of-sample stability is available from frozen walk-forward evidence.",
     },
 )
 
@@ -583,6 +693,221 @@ def determine_benchmark_verdict(
     return {"verdict": "no_edge_detected", "reason": "Rewardable rows do not currently beat simple baselines after observed costs."}
 
 
+def _passes_threshold(value: float | int | None, threshold: float | int, comparison: str) -> bool:
+    if value is None:
+        return False
+    if comparison == "greater_than":
+        return float(value) > float(threshold)
+    return float(value) >= float(threshold)
+
+
+def build_benchmark_proof_summary(
+    *,
+    normalized_records: list[dict[str, Any]],
+    core_metrics: dict[str, Any],
+    baselines: dict[str, Any],
+    score_buckets: dict[str, Any],
+    execution: dict[str, Any],
+    data_quality: dict[str, Any],
+) -> dict[str, Any]:
+    rewardable_count = len(_rewardable(normalized_records))
+    available_baseline_count = sum(1 for item in baselines.get("items") or [] if item.get("available"))
+    baseline_edge = _safe_float(baselines.get("average_baseline_relative_edge"))
+    bucket_lift = _safe_float(score_buckets.get("score_bucket_lift"))
+    after_cost_reward = _safe_float(execution.get("slippage_adjusted_reward"))
+    if after_cost_reward is None:
+        after_cost_reward = _safe_float(core_metrics.get("slippage_adjusted_reward"))
+    values = {
+        "rewardable_count": rewardable_count,
+        "available_baseline_count": available_baseline_count,
+        "baseline_relative_edge": baseline_edge,
+        "score_bucket_lift": bucket_lift,
+        "slippage_adjusted_reward": after_cost_reward,
+        "data_quality_score": _safe_float(data_quality.get("quality_score")),
+    }
+    rows: list[dict[str, Any]] = []
+    for requirement in BENCHMARK_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        missing_fields: list[str] = []
+        if requirement["key"] == "explicit_baselines":
+            missing_fields = list(baselines.get("missing_fields") or [])
+        elif requirement["key"] == "score_bucket_lift" and not score_buckets.get("available"):
+            missing_fields = list(score_buckets.get("missing_fields") or [])
+        elif requirement["key"] == "after_cost_reward" and not execution.get("available"):
+            missing_fields = list(execution.get("missing_fields") or [])
+        elif requirement["key"] == "data_quality":
+            missing_fields = list(data_quality.get("missing_field_counts", {}).keys())[:8]
+        rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "ready" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "missing_fields": missing_fields,
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Benchmark proof is for human research review only; it is not proof of alpha, investor performance, repeatability, or live-trading readiness.",
+                "research_only": True,
+                "changes_execution": False,
+                "changes_ranking_weights": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+            }
+        )
+    passed_count = sum(1 for row in rows if row["passed"])
+    proof_ready = passed_count == len(rows)
+    return {
+        "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+        "proof_ready": proof_ready,
+        "requirements": rows,
+        "summary": {
+            "requirement_count": len(rows),
+            "passed_requirement_count": passed_count,
+            "missing_requirement_count": len(rows) - passed_count,
+            "baseline_relative_edge": baseline_edge,
+            "score_bucket_lift": bucket_lift,
+            "slippage_adjusted_reward": after_cost_reward,
+            "available_baseline_count": available_baseline_count,
+            "rewardable_count": rewardable_count,
+            "claim_boundary": "Do not claim proven alpha, guaranteed returns, repeatability, institutional readiness, HFT capability, or live-trading readiness from benchmark proof alone.",
+        },
+        "safe_next_actions": [
+            {
+                "field": row["key"],
+                "action": row["safe_next_action"],
+                "manual_review_only": True,
+                "changes_execution": False,
+            }
+            for row in rows
+            if not row["passed"]
+        ],
+        "research_only": True,
+        **SAFETY_FLAGS,
+    }
+
+
+def build_benchmark_hardening_plan(
+    *,
+    proof_summary: dict[str, Any],
+    out_of_sample_stability: dict[str, Any],
+    normalized_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    all_missing_fields = Counter()
+    for row in normalized_records:
+        all_missing_fields.update(_listify(row.get("missing_fields")))
+
+    items: list[dict[str, Any]] = []
+    for definition in BENCHMARK_HARDENING_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_proof_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        if definition["key"] == "out_of_sample_split":
+            passed = bool(out_of_sample_stability.get("available"))
+            status = "ready" if passed else "needs_evidence"
+            values = {"available": out_of_sample_stability.get("available")}
+            missing_fields = list(out_of_sample_stability.get("missing_fields") or [])
+            safe_next_actions = [definition["safe_next_action"]]
+        else:
+            passed = bool(related_proof_rows) and all(bool(row.get("passed")) for row in related_proof_rows)
+            if not normalized_records:
+                status = "no_records"
+            else:
+                status = "ready" if passed else "needs_evidence"
+            values = {str(row.get("metric")): row.get("value") for row in related_proof_rows}
+            missing_fields = sorted(
+                {
+                    field
+                    for row in related_proof_rows
+                    for field in _listify(row.get("missing_fields"))
+                }
+            )
+            if not missing_fields and not passed:
+                missing_fields = [field for field, _count in all_missing_fields.most_common(8)]
+            safe_next_actions = [
+                str(row.get("safe_next_action"))
+                for row in related_proof_rows
+                if row.get("safe_next_action")
+            ] or [definition["safe_next_action"]]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": values,
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Hardening plan items are internal research gates only; they do not prove alpha, repeatability, investor performance, institutional readiness, or live-trading readiness.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_ranking_weights": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    out_of_sample_ready = bool(out_of_sample_stability.get("available"))
+    return {
+        "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+        "summary": {
+            "item_count": len(items),
+            "open_item_count": len(open_items),
+            "critical_open_items": len(critical_open_items),
+            "ready_item_count": len(items) - len(open_items),
+            "top_hardening_item": open_items[0]["title"] if open_items else None,
+            "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+            "claim_permissions": {
+                "cautious_internal_benchmark_review": proof_ready,
+                "public_alpha_claim": False,
+                "repeatability_claim": bool(proof_ready and out_of_sample_ready),
+                "live_trading_readiness": False,
+                "institutional_readiness": False,
+            },
+            "blocked_claims": [
+                "proven_alpha",
+                "guaranteed_returns",
+                "repeatability",
+                "institutional_readiness",
+                "live_trading_readiness",
+            ],
+            "safe_boundary": "Professional Benchmark hardening only records proof gaps and claim boundaries. It does not authorize orders, route changes, risk-gate changes, or ranking-weight mutation.",
+        },
+        "items": items,
+        "safe_next_actions": [
+            {
+                "field": row["key"],
+                "action": row["safe_next_action"],
+                "manual_review_only": True,
+                "changes_execution": False,
+            }
+            for row in open_items
+        ],
+        "research_only": True,
+        **SAFETY_FLAGS,
+    }
+
+
 def _extract_runtime_records(db: Any = None, current_user: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
     reward_records: list[dict[str, Any]] = []
@@ -625,9 +950,27 @@ def build_professional_benchmark_report(
     execution = compute_execution_quality(normalized_records)
     missed = compute_missed_move_recovery(normalized_records)
     data_quality = compute_data_quality(normalized_records, normalized_forecasts)
+    proof_summary = build_benchmark_proof_summary(
+        normalized_records=normalized_records,
+        core_metrics=core_metrics,
+        baselines=baselines,
+        score_buckets=score_buckets,
+        execution=execution,
+        data_quality=data_quality,
+    )
     reward_by_setup = aggregate_by_key(normalized_records, "setup_type")
     reward_by_engine = aggregate_by_key(normalized_records, "engine")
     reward_by_regime = aggregate_by_key(normalized_records, "regime")
+    out_of_sample_stability = {
+        "available": False,
+        "missing_fields": ["sample_split", "experiment_version"],
+        "reason": "Walk-forward and out-of-sample labels are required before stability can be scored.",
+    }
+    hardening_plan = build_benchmark_hardening_plan(
+        proof_summary=proof_summary,
+        out_of_sample_stability=out_of_sample_stability,
+        normalized_records=normalized_records,
+    )
     verdict = determine_benchmark_verdict(
         records=normalized_records,
         core_metrics=core_metrics,
@@ -649,8 +992,14 @@ def build_professional_benchmark_report(
         warnings.append("Forecast accuracy requires rewardable forecast validation rows.")
     if not execution["available"]:
         warnings.append("Execution-adjusted reward requires slippage or spread cost fields.")
+    if not proof_summary["proof_ready"]:
+        warnings.append("Benchmark proof is not ready for human review until sample size, baselines, baseline-relative edge, score-bucket lift, after-cost reward, and data quality pass.")
+    if hardening_plan["summary"]["open_item_count"]:
+        warnings.append("Benchmark hardening still blocks alpha, repeatability, institutional, and live-trading readiness claims.")
 
     sections = {
+        "benchmark_proof": proof_summary,
+        "benchmark_hardening_plan": hardening_plan,
         "forecast_accuracy": forecast,
         "reward_by_setup": {"available": bool(reward_by_setup), "items": reward_by_setup},
         "reward_by_engine": {"available": bool(reward_by_engine), "items": reward_by_engine},
@@ -662,11 +1011,7 @@ def build_professional_benchmark_report(
         "execution_quality": execution,
         "slippage_adjusted_reward": {"available": execution["available"], "value": execution.get("slippage_adjusted_reward"), "missing_fields": execution.get("missing_fields", [])},
         "baseline_comparison": baselines,
-        "out_of_sample_stability": {
-            "available": False,
-            "missing_fields": ["sample_split", "experiment_version"],
-            "reason": "Walk-forward and out-of-sample labels are required before stability can be scored.",
-        },
+        "out_of_sample_stability": out_of_sample_stability,
         "data_quality": data_quality,
     }
     summary = {
@@ -684,6 +1029,16 @@ def build_professional_benchmark_report(
         "slippage_adjusted_reward": core_metrics["slippage_adjusted_reward"],
         "score_bucket_lift": score_buckets.get("score_bucket_lift"),
         "baseline_relative_edge": baselines.get("average_baseline_relative_edge"),
+        "benchmark_proof_ready": proof_summary["proof_ready"],
+        "benchmark_proof_status": proof_summary["status"],
+        "benchmark_proof_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "benchmark_proof_requirements_total": proof_summary["summary"]["requirement_count"],
+        "benchmark_hardening_status": hardening_plan["status"],
+        "benchmark_hardening_open_items": hardening_plan["summary"]["open_item_count"],
+        "benchmark_hardening_critical_open_items": hardening_plan["summary"]["critical_open_items"],
+        "top_hardening_item": hardening_plan["summary"]["top_hardening_item"],
+        "claim_permissions": hardening_plan["summary"]["claim_permissions"],
+        "edge_after_costs": proof_summary["summary"]["slippage_adjusted_reward"],
         "sample_size_warning": len(_rewardable(normalized_records)) < MIN_EDGE_SAMPLE_SIZE,
         "out_of_sample_status": "missing_sample_split",
         "verdict_rules": {
@@ -698,6 +1053,8 @@ def build_professional_benchmark_report(
     }
     aggregations = {
         "core_metrics": core_metrics,
+        "benchmark_proof": proof_summary,
+        "benchmark_hardening_plan": hardening_plan,
         "reward_by_setup": reward_by_setup,
         "reward_by_engine": reward_by_engine,
         "reward_by_regime": reward_by_regime,
@@ -720,11 +1077,14 @@ def build_professional_benchmark_report(
             "records": normalized_records[:250],
             "aggregations": aggregations,
             "baselines": baselines,
+            "proof_summary": proof_summary,
+            "benchmark_hardening_plan": hardening_plan,
             "sections": sections,
             "warnings": warnings,
             "missing_fields": dict(missing_fields),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="professional_benchmark"),
         }
     )
 
@@ -739,10 +1099,13 @@ def _report_subset(report: dict[str, Any], *, records: list[dict[str, Any]] | No
         "records": records if records is not None else [],
         "aggregations": aggregations if aggregations is not None else {},
         "baselines": baselines if baselines is not None else report.get("baselines", {}),
+        "proof_summary": report.get("proof_summary", {}),
+        "benchmark_hardening_plan": report.get("benchmark_hardening_plan", {}),
         "warnings": report.get("warnings", []),
         "missing_fields": report.get("missing_fields", {}),
         "safety_notes": report.get("safety_notes", list(SAFETY_NOTES)),
         **SAFETY_FLAGS,
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="professional_benchmark_subset"),
     }
 
 

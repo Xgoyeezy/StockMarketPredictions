@@ -6,6 +6,7 @@ from statistics import median, pstdev
 from typing import Any, Iterable
 
 from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -40,8 +41,142 @@ FALSE_POSITIVE_RETURN_THRESHOLD = 0.0
 FALSE_NEGATIVE_RETURN_THRESHOLD = 0.25
 MIN_FEATURE_SAMPLE = 3
 STRONG_LIFT_THRESHOLD = 0.10
+MIN_CALIBRATION_REWARDABLE_SAMPLE = 5
+MIN_SCORE_BUCKET_COVERAGE = 3
+MIN_MONOTONICITY_SCORE = 0.6
 
 SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "apikey", "access_key", "private_key")
+CALIBRATION_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "rewardable_sample_size",
+        "label": "Rewardable sample size",
+        "metric": "rewardable_count",
+        "threshold": MIN_CALIBRATION_REWARDABLE_SAMPLE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Collect more rewardable score records before using calibration as proof.",
+    },
+    {
+        "key": "score_bucket_coverage",
+        "label": "Score bucket coverage",
+        "metric": "score_bucket_coverage",
+        "threshold": MIN_SCORE_BUCKET_COVERAGE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Collect rewardable records across at least three score buckets.",
+    },
+    {
+        "key": "bucket_lift",
+        "label": "Score bucket lift",
+        "metric": "bucket_lift",
+        "threshold": 0.0,
+        "comparison": "greater_than",
+        "safe_next_action": "Verify the highest score bucket outperforms lower buckets before ranking-quality claims.",
+    },
+    {
+        "key": "after_cost_bucket_lift",
+        "label": "After-cost bucket lift",
+        "metric": "after_cost_bucket_lift",
+        "threshold": 0.0,
+        "comparison": "greater_than",
+        "safe_next_action": "Attach execution-adjusted reward and verify high-score buckets still lead after costs.",
+    },
+    {
+        "key": "monotonicity",
+        "label": "Bucket monotonicity",
+        "metric": "monotonicity_score",
+        "threshold": MIN_MONOTONICITY_SCORE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Improve scoring or evidence quality until adjacent score buckets mostly improve with score.",
+    },
+    {
+        "key": "feature_attribution",
+        "label": "Feature attribution coverage",
+        "metric": "sufficient_feature_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Collect enough repeated feature observations to move attribution beyond small-sample review.",
+    },
+    {
+        "key": "manual_review_only",
+        "label": "Manual-review-only recommendations",
+        "metric": "manual_review_only_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Keep recommendations as human research review notes; do not mutate ranking weights automatically.",
+    },
+)
+
+SCORE_CALIBRATION_HARDENING_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "rewardable_score_sample",
+        "title": "Rewardable score sample",
+        "priority": "critical",
+        "proof_keys": ("rewardable_sample_size",),
+        "missing_fields": ("score", "total_reward", "actual_forward_return", "baseline_forward_return"),
+        "blocked_claims": ("score_quality_claim", "ranking_quality_review", "feature_weight_review"),
+        "safe_next_action": "Collect rewardable score records with closed-horizon outcomes, total reward, same-window baselines, and score lineage before reviewing calibration.",
+        "done_when": "Rewardable sample size passes the calibration proof gate with traceable score and outcome fields.",
+    },
+    {
+        "key": "score_bucket_coverage",
+        "title": "Score bucket coverage",
+        "priority": "critical",
+        "proof_keys": ("score_bucket_coverage",),
+        "missing_fields": ("score", "score_bucket", "total_reward"),
+        "blocked_claims": ("score_separation_claim", "ranking_quality_review"),
+        "safe_next_action": "Collect rewardable rows across low, middle, and high score buckets before judging score separation.",
+        "done_when": "At least three score buckets contain rewardable outcomes.",
+    },
+    {
+        "key": "bucket_lift_monotonicity",
+        "title": "Bucket lift and monotonicity",
+        "priority": "high",
+        "proof_keys": ("bucket_lift", "monotonicity"),
+        "missing_fields": ("score_bucket", "total_reward", "actual_forward_return"),
+        "blocked_claims": ("ranking_quality_claim", "score_formula_review"),
+        "safe_next_action": "Verify high-score buckets beat lower buckets and adjacent buckets mostly improve before any score-quality language.",
+        "done_when": "Bucket lift is positive and monotonicity passes the calibration proof threshold.",
+    },
+    {
+        "key": "after_cost_bucket_lift",
+        "title": "After-cost bucket lift",
+        "priority": "high",
+        "proof_keys": ("after_cost_bucket_lift",),
+        "missing_fields": ("execution_adjusted_reward", "slippage_bps", "spread_bps", "paper_fill_price"),
+        "blocked_claims": ("execution_adjusted_score_quality", "tradability_claim"),
+        "safe_next_action": "Attach paper execution cost evidence and confirm score separation survives spread and slippage.",
+        "done_when": "High-score bucket reward remains stronger than lower buckets after explicit paper execution costs.",
+    },
+    {
+        "key": "feature_attribution_coverage",
+        "title": "Feature attribution coverage",
+        "priority": "high",
+        "proof_keys": ("feature_attribution",),
+        "missing_fields": ("setup_type", "engine", "regime", "component_scores", "total_reward"),
+        "blocked_claims": ("feature_driver_claim", "feature_weight_review"),
+        "safe_next_action": "Collect repeated feature observations with outcomes before treating feature lift as more than small-sample research.",
+        "done_when": "At least one repeated feature observation passes the sufficient-sample attribution gate.",
+    },
+    {
+        "key": "manual_review_governance",
+        "title": "Manual review governance",
+        "priority": "high",
+        "proof_keys": ("manual_review_only",),
+        "missing_fields": ("manual_review_note",),
+        "blocked_claims": ("automatic_ranking_change", "ai_weight_change"),
+        "safe_next_action": "Keep all calibration recommendations as manual review notes and keep ranking config unchanged.",
+        "done_when": "Recommendations are present only as manual-review research notes and no ranking mutation is possible.",
+    },
+    {
+        "key": "walk_forward_confirmation",
+        "title": "Walk-forward confirmation",
+        "priority": "high",
+        "proof_keys": (),
+        "missing_fields": ("sample_split", "experiment_version", "out_of_sample_window", "forward_only_outcome"),
+        "blocked_claims": ("repeatability_claim", "promotion_readiness", "public_score_quality_claim"),
+        "safe_next_action": "Confirm any promising score separation in frozen walk-forward experiments before repeatability or promotion language.",
+        "done_when": "Frozen walk-forward evidence confirms score separation out of sample after costs.",
+    },
+)
 
 
 def _utc_now() -> str:
@@ -74,6 +209,16 @@ def _ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return round(numerator / denominator, 6)
+
+
+def _passes_threshold(value: Any, threshold: Any, comparison: str) -> bool:
+    numeric = _safe_float(value)
+    required = _safe_float(threshold)
+    if numeric is None or required is None:
+        return False
+    if comparison == "greater_than":
+        return numeric > required
+    return numeric >= required
 
 
 def _dispersion(values: Iterable[Any]) -> float | None:
@@ -226,6 +371,8 @@ def _execution_adjusted_reward(row: dict[str, Any]) -> float | None:
         return None
     slippage_bps = _first_number(row, ("slippage_bps", "slippage_estimate_bps", "slippage"))
     spread_bps = _first_number(row, ("spread_bps", "spread_at_signal", "spread_cost_bps"))
+    if slippage_bps is None and spread_bps is None:
+        return None
     adjusted = reward
     if slippage_bps is not None:
         adjusted -= abs(slippage_bps) / 100.0
@@ -259,6 +406,19 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
         total_reward = _first_number(row, ("total_reward", "reward"))
         actual_forward_return = _first_number(row, ("actual_forward_return", "forward_return", "actual_return_pct"))
         baseline_forward_return = _first_number(row, ("baseline_forward_return", "baseline_return", "random_candidate_forward_return"))
+        execution_cost_evidence = _first_number(
+            row,
+            (
+                "execution_adjusted_reward",
+                "slippage_adjusted_reward",
+                "slippage_bps",
+                "slippage_estimate_bps",
+                "slippage",
+                "spread_bps",
+                "spread_at_signal",
+                "spread_cost_bps",
+            ),
+        ) is not None
         missing_fields = set(str(item) for item in _listify(row.get("missing_fields")) if str(item).strip())
         if raw_score is None:
             missing_fields.add("score")
@@ -288,6 +448,7 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
                     else None,
                     "forecast_accuracy": _forecast_accuracy(row),
                     "execution_adjusted_reward": _execution_adjusted_reward(row),
+                    "execution_cost_evidence": execution_cost_evidence,
                     "blockers": [str(item) for item in _listify(row.get("blockers") or row.get("blocker")) if str(item).strip()],
                     "allowed": bool(row.get("allowed")),
                     "blocked": bool(row.get("blocked")),
@@ -584,6 +745,244 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
     return recommendations[:25]
 
 
+def _bucket_metric_lift(bucket_report: dict[str, Any], metric: str) -> float | None:
+    items = bucket_report.get("items") if isinstance(bucket_report, dict) else None
+    if not isinstance(items, list):
+        return None
+    high = next((row for row in items if isinstance(row, dict) and row.get("score_bucket") == "80_100"), {})
+    high_avg = _safe_float(high.get(metric)) if isinstance(high, dict) else None
+    low_values = [
+        _safe_float(row.get(metric))
+        for row in items
+        if isinstance(row, dict) and row.get("score_bucket") in {"0_20", "20_40"}
+    ]
+    low_values = [value for value in low_values if value is not None]
+    low_avg = _mean(low_values)
+    if high_avg is None or low_avg is None:
+        return None
+    return round(high_avg - low_avg, 6)
+
+
+def build_calibration_proof_summary(
+    *,
+    records: list[dict[str, Any]],
+    bucket_report: dict[str, Any],
+    feature_report: dict[str, Any],
+    recommendations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    rewardable = _rewardable(records)
+    bucket_items = bucket_report.get("items") if isinstance(bucket_report, dict) else []
+    score_bucket_coverage = sum(
+        1
+        for row in bucket_items or []
+        if isinstance(row, dict) and str(row.get("score_bucket")) != "unknown" and (_safe_float(row.get("rewardable_count")) or 0) > 0
+    )
+    feature_items = feature_report.get("items") if isinstance(feature_report, dict) else []
+    sufficient_features = [
+        row
+        for row in feature_items or []
+        if isinstance(row, dict) and int(row.get("times_seen") or 0) >= MIN_FEATURE_SAMPLE and _safe_float(row.get("lift")) is not None
+    ]
+    manual_review_only_count = sum(1 for row in recommendations if isinstance(row, dict) and row.get("manual_review_only") is True)
+    values = {
+        "rewardable_count": len(rewardable),
+        "score_bucket_coverage": score_bucket_coverage,
+        "bucket_lift": _safe_float(bucket_report.get("bucket_lift")),
+        "after_cost_bucket_lift": _bucket_metric_lift(bucket_report, "execution_adjusted_reward"),
+        "monotonicity_score": _safe_float(bucket_report.get("monotonicity_score")),
+        "sufficient_feature_count": len(sufficient_features),
+        "manual_review_only_count": manual_review_only_count,
+    }
+    rows: list[dict[str, Any]] = []
+    for requirement in CALIBRATION_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "passed" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Calibration proof is for human research review only; it is not proof of alpha, investor performance, guaranteed returns, repeatability, or live-trading readiness.",
+                "research_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+            }
+        )
+    proof_ready = bool(rows) and all(row["passed"] for row in rows)
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+            "proof_ready": proof_ready,
+            "requirements": rows,
+            "summary": {
+                "record_count": len(records),
+                "rewardable_count": len(rewardable),
+                "score_bucket_coverage": score_bucket_coverage,
+                "bucket_lift": values["bucket_lift"],
+                "after_cost_bucket_lift": values["after_cost_bucket_lift"],
+                "monotonicity_score": values["monotonicity_score"],
+                "feature_count": len(feature_items or []),
+                "sufficient_feature_count": len(sufficient_features),
+                "manual_review_only_count": manual_review_only_count,
+                "requirement_count": len(rows),
+                "passed_requirement_count": sum(1 for row in rows if row["passed"]),
+                "missing_requirement_count": sum(1 for row in rows if not row["passed"]),
+            },
+            "feature_readiness": [
+                {
+                    "feature": row.get("feature"),
+                    "times_seen": row.get("times_seen"),
+                    "lift": row.get("lift"),
+                    "confidence_bucket": row.get("confidence_bucket"),
+                    "sample_sufficient": int(row.get("times_seen") or 0) >= MIN_FEATURE_SAMPLE,
+                    "warnings": row.get("warnings") or [],
+                    "research_only": True,
+                    "changes_ranking_weights": False,
+                }
+                for row in (feature_items or [])[:50]
+                if isinstance(row, dict)
+            ],
+            "safe_next_actions": [row["safe_next_action"] for row in rows if not row["passed"]],
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
+def build_score_calibration_hardening_plan(
+    *,
+    records: list[dict[str, Any]],
+    proof_summary: dict[str, Any],
+    bucket_report: dict[str, Any],
+    feature_report: dict[str, Any],
+) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    all_missing_fields: Counter[str] = Counter()
+    for row in records:
+        all_missing_fields.update(str(field) for field in _listify(row.get("missing_fields")))
+
+    items: list[dict[str, Any]] = []
+    for definition in SCORE_CALIBRATION_HARDENING_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_proof_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        if definition["key"] == "walk_forward_confirmation":
+            passed = False
+            status = "no_records" if not records else "needs_evidence"
+            values = {
+                "calibration_proof_ready": bool(proof_summary.get("proof_ready")),
+                "bucket_lift": bucket_report.get("bucket_lift") if isinstance(bucket_report, dict) else None,
+                "feature_count": len(feature_report.get("items") or []) if isinstance(feature_report, dict) else 0,
+            }
+            missing_fields = list(definition.get("missing_fields") or ())
+            safe_next_actions = [str(definition["safe_next_action"])]
+        else:
+            passed = bool(related_proof_rows) and all(bool(row.get("passed")) for row in related_proof_rows)
+            status = "no_records" if not records else "ready" if passed else "needs_evidence"
+            values = {str(row.get("metric")): row.get("value") for row in related_proof_rows}
+            missing_fields = sorted(
+                {
+                    str(field)
+                    for row in related_proof_rows
+                    for field in _listify(row.get("missing_fields"))
+                }
+            )
+            if not missing_fields and not passed:
+                missing_fields = list(definition.get("missing_fields") or ())
+            if not missing_fields and not passed and all_missing_fields:
+                missing_fields = [field for field, _count in all_missing_fields.most_common(8)]
+            safe_next_actions = [
+                str(row.get("safe_next_action"))
+                for row in related_proof_rows
+                if row.get("safe_next_action")
+            ] or [str(definition["safe_next_action"])]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": values,
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Score calibration hardening is an internal research gate only; it does not prove alpha, repeatability, investor performance, ranking quality, or live-trading readiness.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_hardening_item": open_items[0]["title"] if open_items else None,
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_calibration_review": proof_ready,
+                    "ranking_weight_change": False,
+                    "automatic_ranking_mutation": False,
+                    "public_score_quality_claim": False,
+                    "repeatability_claim": False,
+                    "live_trading_readiness": False,
+                },
+                "blocked_claims": [
+                    "proven_score_quality",
+                    "automatic_ranking_change",
+                    "public_alpha_or_performance",
+                    "repeatability",
+                    "promotion_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Score Calibration hardening only records proof gaps and claim boundaries. It does not authorize ranking-weight changes, orders, broker-route changes, or risk-gate changes.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_ranking_weights": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def build_score_calibration_report(
     *,
     records: Iterable[dict[str, Any]] | None = None,
@@ -612,6 +1011,18 @@ def build_score_calibration_report(
     regime_lift = _segment_lift(normalized, "regime")
     relationships = compute_relationships(normalized)
     recommendations = generate_safe_recommendations(bucket_report, feature_report, relationships)
+    proof_summary = build_calibration_proof_summary(
+        records=normalized,
+        bucket_report=bucket_report,
+        feature_report=feature_report,
+        recommendations=recommendations,
+    )
+    hardening_plan = build_score_calibration_hardening_plan(
+        records=normalized,
+        proof_summary=proof_summary,
+        bucket_report=bucket_report,
+        feature_report=feature_report,
+    )
     missing_counter: Counter[str] = Counter()
     for row in normalized:
         missing_counter.update(row.get("missing_fields") or [])
@@ -622,6 +1033,8 @@ def build_score_calibration_report(
         warnings.append(str(bucket_report["calibration_warning"]))
     if missing_counter:
         warnings.append("Some score calibration records are missing fields required for full attribution.")
+    if hardening_plan["summary"]["open_item_count"]:
+        warnings.append("Score calibration hardening still blocks score-quality, automatic ranking, repeatability, promotion, and live-readiness claims.")
     summary = {
         "status": status,
         "candidate_count": len(normalized),
@@ -634,11 +1047,24 @@ def build_score_calibration_report(
         "score_to_reward_correlation": relationships.get("score_to_reward_correlation"),
         "score_to_forecast_accuracy_correlation": relationships.get("score_to_forecast_accuracy_correlation"),
         "score_to_execution_adjusted_reward_correlation": relationships.get("score_to_execution_adjusted_reward_correlation"),
+        "calibration_proof_ready": proof_summary["proof_ready"],
+        "calibration_proof_status": proof_summary["status"],
+        "calibration_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "calibration_requirements_total": proof_summary["summary"]["requirement_count"],
+        "after_cost_bucket_lift": proof_summary["summary"]["after_cost_bucket_lift"],
+        "sufficient_feature_count": proof_summary["summary"]["sufficient_feature_count"],
+        "score_calibration_hardening_status": hardening_plan["status"],
+        "score_calibration_hardening_open_items": hardening_plan["summary"]["open_item_count"],
+        "score_calibration_hardening_critical_open_items": hardening_plan["summary"]["critical_open_items"],
+        "top_hardening_item": hardening_plan["summary"]["top_hardening_item"],
+        "claim_permissions": hardening_plan["summary"]["claim_permissions"],
         **SAFETY_FLAGS,
     }
     aggregations = {
         "score_bucket_separation": bucket_report,
         "feature_attribution": feature_report,
+        "calibration_proof": proof_summary,
+        "score_calibration_hardening_plan": hardening_plan,
         "setup_specific_lift": setup_lift,
         "engine_specific_lift": engine_lift,
         "regime_specific_lift": regime_lift,
@@ -660,11 +1086,14 @@ def build_score_calibration_report(
             "research_only": True,
             "summary": summary,
             "records": normalized[:250],
+            "proof_summary": proof_summary,
+            "score_calibration_hardening_plan": hardening_plan,
             "aggregations": aggregations,
             "warnings": list(dict.fromkeys(warnings)),
             "missing_fields": dict(missing_counter),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="score_calibration"),
         }
     )
 

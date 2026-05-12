@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.services import execution_quality_tca as tca
 from backend.services.execution_quality_tca import (
+    build_execution_quality_proof_summary,
     build_execution_quality_tca_report,
     compute_alpha_decay,
     compute_fill_delay_seconds,
@@ -94,6 +95,77 @@ class ExecutionQualityTcaTests(unittest.TestCase):
         self.assertTrue(report["research_only"])
         self.assertTrue(report["paper_only"])
 
+    def test_execution_proof_ready_with_cost_edge_and_fill_quality(self) -> None:
+        report = build_execution_quality_tca_report(
+            records=[
+                _row(order_id="filled-1"),
+                _row(order_id="filled-2", actual_fill_price=100.20, filled_at="2026-05-06T14:00:04Z"),
+                _row(order_id="filled-3", actual_fill_price=100.10, filled_at="2026-05-06T14:00:03Z"),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        proof = build_execution_quality_proof_summary(report["records"], report["aggregations"], report["summary"])
+
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(proof["status"], "ready_for_human_review")
+        self.assertEqual(proof["summary"]["passed_requirement_count"], 7)
+        self.assertGreater(proof["summary"]["average_cost_adjusted_edge"], 0)
+        for requirement in proof["requirements"]:
+            self.assertFalse(requirement["changes_execution"])
+            self.assertFalse(requirement["changes_order_submission"])
+            self.assertFalse(requirement["changes_broker_routes"])
+            self.assertFalse(requirement["changes_risk_gates"])
+            self.assertFalse(requirement["changes_ranking_weights"])
+        self.assertEqual(report["status"], "ready_for_human_review")
+        self.assertEqual(report["execution_quality_hardening_plan"]["status"], "ready_for_human_review")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_execution_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["public_execution_quality_claim"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
+
+    def test_execution_proof_blocks_missing_costs_and_weak_fill_quality(self) -> None:
+        report = build_execution_quality_tca_report(
+            records=[
+                _row(order_id="missing-costs", actual_fill_price=None, spread_at_signal=None, filled_at=None),
+                _row(order_id="missed", actual_fill_price=None, status="rejected"),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        failed_keys = {row["key"] for row in report["proof_summary"]["requirements"] if not row["passed"]}
+
+        self.assertFalse(report["proof_summary"]["proof_ready"])
+        self.assertIn("paper_execution_sample", failed_keys)
+        self.assertIn("cost_evidence_coverage", failed_keys)
+        self.assertIn("execution_adjusted_reward", failed_keys)
+        self.assertIn("fill_quality", failed_keys)
+        self.assertEqual(report["status"], "needs_evidence")
+
+    def test_execution_quality_hardening_plan_blocks_claims_when_evidence_is_missing(self) -> None:
+        report = build_execution_quality_tca_report(
+            records=[
+                _row(order_id="missing-costs", actual_fill_price=None, spread_at_signal=None, filled_at=None),
+                _row(order_id="missed", actual_fill_price=None, status="rejected"),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        hardening_plan = report["execution_quality_hardening_plan"]
+        by_key = {row["key"]: row for row in hardening_plan["items"]}
+
+        self.assertEqual(hardening_plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["execution_quality_hardening_status"], "blocked_by_evidence")
+        self.assertGreaterEqual(report["summary"]["execution_quality_hardening_open_items"], 5)
+        self.assertGreaterEqual(report["summary"]["execution_quality_hardening_critical_open_items"], 2)
+        self.assertEqual(by_key["cost_evidence_capture"]["status"], "needs_evidence")
+        self.assertIn("fill_price", by_key["cost_evidence_capture"]["missing_fields"])
+        self.assertIn("after_cost_edge", by_key["cost_evidence_capture"]["blocked_claims"])
+        self.assertEqual(by_key["candidate_route_linkage"]["status"], "needs_evidence")
+        self.assertIn("linked_candidate_id", by_key["candidate_route_linkage"]["missing_fields"])
+        self.assertIn("paper_to_live_review", by_key["candidate_route_linkage"]["blocked_claims"])
+        self.assertIn("proven_tradability", hardening_plan["summary"]["blocked_claims"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["automatic_execution_mutation"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in hardening_plan["items"]))
+
     def test_live_route_rows_are_excluded(self) -> None:
         report = build_execution_quality_tca_report(
             records=[_row(order_id="paper", route="broker_paper"), _row(order_id="live", route="broker_live")],
@@ -128,6 +200,11 @@ class ExecutionQualityTcaTests(unittest.TestCase):
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
                 self.assertIn("summary", data)
+                self.assertIn("proof_summary", data)
+                self.assertIn("execution_quality_hardening_plan", data)
+                self.assertIn("execution_proof_status", data["summary"])
+                self.assertIn("execution_quality_hardening_status", data["summary"])
+                self.assertIn("claim_permissions", data["summary"])
                 self.assertIn("records", data)
                 self.assertIn("aggregations", data)
                 self.assertIn("warnings", data)

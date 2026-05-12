@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from backend.services.data_completeness_audit import get_data_completeness_summary
 from backend.services.exceptions import NotFoundError, ValidationServiceError
 from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 from backend.services.storage_utils import read_json_file, write_json_file
 from backend.services.walk_forward_experiment_registry import get_walk_forward_experiments
@@ -68,6 +69,90 @@ MIN_FORECAST_ACCURACY = 0.50
 MAX_AI_FALSE_POSITIVE_RATE = 0.40
 MAX_AI_FALSE_NEGATIVE_RATE = 0.50
 MAX_BLOCKER_FALSE_BLOCK_RATE = 0.50
+MIN_PROMOTION_TRACEABILITY_COVERAGE = 0.80
+
+RESEARCH_PROMOTION_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "research_entity_sample",
+        "label": "Research entity sample",
+        "metric": "record_count",
+        "threshold": 1,
+        "comparison": ">=",
+        "safe_next_action": "Collect at least one research promotion entity before treating promotion status as reviewable.",
+    },
+    {
+        "key": "status_traceability",
+        "label": "Status traceability",
+        "metric": "status_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Ensure every promotion entity has a research status and safe explanation.",
+    },
+    {
+        "key": "criteria_traceability",
+        "label": "Criteria traceability",
+        "metric": "criteria_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Keep passed and failed criteria attached to each promotion entity.",
+    },
+    {
+        "key": "benchmark_traceability",
+        "label": "Benchmark traceability",
+        "metric": "benchmark_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Link promotion entities to benchmark verdict, sample, rewardable count, and baseline-relative evidence.",
+    },
+    {
+        "key": "data_quality_traceability",
+        "label": "Data quality traceability",
+        "metric": "data_quality_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach completeness, rewardability, and data-quality fields to promotion entities.",
+    },
+    {
+        "key": "walk_forward_traceability",
+        "label": "Walk-forward traceability",
+        "metric": "walk_forward_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Link promotion entities to frozen or completed walk-forward experiment evidence before governance claims.",
+    },
+    {
+        "key": "execution_traceability",
+        "label": "Execution traceability",
+        "metric": "execution_traceability_coverage",
+        "threshold": MIN_PROMOTION_TRACEABILITY_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach execution-adjusted reward or explicit execution-quality evidence to promotion entities.",
+    },
+    {
+        "key": "manual_review_traceability",
+        "label": "Manual review traceability",
+        "metric": "manual_review_record_count",
+        "threshold": 1,
+        "comparison": ">=",
+        "safe_next_action": "Record at least one sanitized manual review metadata event with reviewer, reason, previous status, and evidence snapshot.",
+    },
+    {
+        "key": "promotion_metadata_only",
+        "label": "Promotion remains metadata only",
+        "metric": "promotion_metadata_only",
+        "threshold": 1,
+        "comparison": "==",
+        "safe_next_action": "Keep promotion status disconnected from execution, broker routes, risk gates, and ranking weights.",
+    },
+    {
+        "key": "safety_boundary_preserved",
+        "label": "Safety boundary preserved",
+        "metric": "safety_boundary_preserved",
+        "threshold": 1,
+        "comparison": "==",
+        "safe_next_action": "Preserve the paper-first, research-only boundary before treating promotion workflow as governance evidence.",
+    },
+)
 
 
 def _utc_now() -> str:
@@ -93,9 +178,53 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _ratio_or_zero(value: Any) -> float:
     parsed = _safe_float(value)
     return parsed if parsed is not None else 0.0
+
+
+def _ratio(numerator: int | float, denominator: int | float) -> float | None:
+    try:
+        denom = float(denominator)
+        if denom == 0:
+            return None
+        return round(float(numerator) / denom, 6)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _passes_threshold(value: Any, threshold: Any, comparison: str) -> bool:
+    if comparison == "truthy":
+        return bool(value)
+    parsed_value = _safe_float(value)
+    parsed_threshold = _safe_float(threshold)
+    if parsed_value is None or parsed_threshold is None:
+        return False
+    if comparison in {">=", "greater_or_equal"}:
+        return parsed_value >= parsed_threshold
+    if comparison in {">", "greater_than"}:
+        return parsed_value > parsed_threshold
+    if comparison in {"<=", "less_or_equal"}:
+        return parsed_value <= parsed_threshold
+    if comparison in {"<", "less_than"}:
+        return parsed_value < parsed_threshold
+    if comparison in {"==", "equal"}:
+        return parsed_value == parsed_threshold
+    return False
 
 
 def _listify(value: Any) -> list[Any]:
@@ -408,6 +537,156 @@ def _apply_manual_status(entity: dict[str, Any], manual_statuses: dict[str, dict
     return merged
 
 
+def _promotion_row_readiness(entity: dict[str, Any]) -> dict[str, Any]:
+    evidence = _as_dict(entity.get("evidence_used"))
+    manual = _as_dict(entity.get("manual_status"))
+    status_traceable = _has_value(entity.get("promotion_status")) and _has_value(entity.get("safe_explanation"))
+    criteria_traceable = bool(_listify(entity.get("criteria_passed")) or _listify(entity.get("criteria_failed")))
+    benchmark_traceable = (
+        _has_value(evidence.get("benchmark_verdict"))
+        and _safe_int(evidence.get("sample_size")) > 0
+        and _safe_int(evidence.get("rewardable_count")) > 0
+        and _safe_float(evidence.get("baseline_relative_edge")) is not None
+    )
+    data_quality_traceable = (
+        _safe_float(evidence.get("completion_rate")) is not None
+        and _safe_float(evidence.get("rewardability_rate")) is not None
+        and _safe_float(evidence.get("data_quality_score")) is not None
+    )
+    walk_forward_traceable = any(
+        _has_value(evidence.get(field))
+        for field in ("walk_forward_status", "walk_forward_verdict", "walk_forward_experiment_id")
+    )
+    execution_traceable = _safe_float(evidence.get("execution_adjusted_reward")) is not None
+    manual_review_traceable = (
+        _has_value(manual.get("promotion_status"))
+        and _has_value(manual.get("reason"))
+        and _has_value(manual.get("updated_at"))
+        and _has_value(manual.get("previous_promotion_status"))
+        and _has_value(manual.get("evidence_snapshot"))
+    )
+    safety_boundary_preserved = (
+        bool(entity.get("research_only"))
+        and not bool(entity.get("can_submit_orders"))
+        and not bool(entity.get("can_submit_live_orders"))
+        and not bool(entity.get("writes_execution_config"))
+        and not bool(entity.get("writes_broker_config"))
+        and not bool(entity.get("writes_risk_config"))
+        and not bool(entity.get("writes_ranking_config"))
+    )
+    return serialize_value(
+        {
+            "entity_id": entity.get("entity_id"),
+            "entity_type": entity.get("entity_type"),
+            "name": entity.get("name"),
+            "promotion_status": entity.get("promotion_status"),
+            "status_traceable": status_traceable,
+            "criteria_traceable": criteria_traceable,
+            "benchmark_traceable": benchmark_traceable,
+            "data_quality_traceable": data_quality_traceable,
+            "walk_forward_traceable": walk_forward_traceable,
+            "execution_traceable": execution_traceable,
+            "manual_review_traceable": manual_review_traceable,
+            "safety_boundary_preserved": safety_boundary_preserved,
+        }
+    )
+
+
+def build_research_promotion_proof_summary(entities: list[dict[str, Any]]) -> dict[str, Any]:
+    record_count = len(entities)
+    readiness = [_promotion_row_readiness(entity) for entity in entities]
+
+    def coverage(field: str) -> float:
+        return _ratio(sum(1 for row in readiness if row.get(field)), record_count) or 0.0
+
+    status_coverage = coverage("status_traceable")
+    criteria_coverage = coverage("criteria_traceable")
+    benchmark_coverage = coverage("benchmark_traceable")
+    data_quality_coverage = coverage("data_quality_traceable")
+    walk_forward_coverage = coverage("walk_forward_traceable")
+    execution_coverage = coverage("execution_traceable")
+    manual_review_count = sum(1 for row in readiness if row.get("manual_review_traceable"))
+    safety_count = sum(1 for row in readiness if row.get("safety_boundary_preserved"))
+    safety_boundary_preserved = 1 if record_count > 0 and safety_count == record_count else 0
+    promotion_metadata_only = 1 if all(
+        not bool(entity.get("can_submit_orders"))
+        and not bool(entity.get("can_submit_live_orders"))
+        and not bool(entity.get("writes_execution_config"))
+        and not bool(entity.get("writes_broker_config"))
+        and not bool(entity.get("writes_risk_config"))
+        and not bool(entity.get("writes_ranking_config"))
+        for entity in entities
+    ) else 0
+    promotion_traceability_coverage = round(
+        (
+            status_coverage
+            + criteria_coverage
+            + benchmark_coverage
+            + data_quality_coverage
+            + walk_forward_coverage
+            + execution_coverage
+        )
+        / 6,
+        6,
+    )
+    values = {
+        "record_count": record_count,
+        "status_traceability_coverage": status_coverage,
+        "criteria_traceability_coverage": criteria_coverage,
+        "benchmark_traceability_coverage": benchmark_coverage,
+        "data_quality_traceability_coverage": data_quality_coverage,
+        "walk_forward_traceability_coverage": walk_forward_coverage,
+        "execution_traceability_coverage": execution_coverage,
+        "manual_review_record_count": manual_review_count,
+        "manual_review_traceability_coverage": _ratio(manual_review_count, record_count) or 0.0,
+        "promotion_traceability_coverage": promotion_traceability_coverage,
+        "promotion_metadata_only": promotion_metadata_only,
+        "safety_boundary_preserved": safety_boundary_preserved,
+    }
+    requirement_rows: list[dict[str, Any]] = []
+    for requirement in RESEARCH_PROMOTION_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        requirement_rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "passed" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Research promotion proof is governance metadata only; it is not live approval, alpha proof, order authority, or permission to change risk, ranking, broker, or execution settings.",
+                "research_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_risk_limits": False,
+                "changes_ranking_weights": False,
+            }
+        )
+    proof_ready = bool(requirement_rows) and all(row["passed"] for row in requirement_rows)
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+            "proof_ready": proof_ready,
+            "requirements": requirement_rows,
+            "summary": {
+                **values,
+                "requirement_count": len(requirement_rows),
+                "passed_requirement_count": sum(1 for row in requirement_rows if row["passed"]),
+                "missing_requirement_count": sum(1 for row in requirement_rows if not row["passed"]),
+            },
+            "record_readiness": readiness[:100],
+            "safe_next_actions": [row["safe_next_action"] for row in requirement_rows if not row["passed"]],
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def _build_report_from_sources(
     *,
     benchmark_report: dict[str, Any],
@@ -430,6 +709,7 @@ def _build_report_from_sources(
     for entity in entities:
         status_counts[str(entity.get("promotion_status"))] = status_counts.get(str(entity.get("promotion_status")), 0) + 1
         type_counts[str(entity.get("entity_type"))] = type_counts.get(str(entity.get("entity_type")), 0) + 1
+    proof_summary = build_research_promotion_proof_summary(entities)
     summary = {
         "entity_count": len(entities),
         "status_counts": status_counts,
@@ -441,8 +721,20 @@ def _build_report_from_sources(
         "walk_forward_status": context["walk_forward"].get("latest_status"),
         "walk_forward_verdict": context["walk_forward"].get("latest_verdict"),
         "data_quality_score": context["data_quality_score"],
+        "promotion_proof_ready": proof_summary["proof_ready"],
+        "promotion_proof_status": proof_summary["status"],
+        "promotion_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "promotion_requirements_total": proof_summary["summary"]["requirement_count"],
+        "promotion_traceability_coverage": proof_summary["summary"]["promotion_traceability_coverage"],
+        "benchmark_traceability_coverage": proof_summary["summary"]["benchmark_traceability_coverage"],
+        "walk_forward_traceability_coverage": proof_summary["summary"]["walk_forward_traceability_coverage"],
+        "execution_traceability_coverage": proof_summary["summary"]["execution_traceability_coverage"],
+        "manual_review_record_count": proof_summary["summary"]["manual_review_record_count"],
         **SAFETY_FLAGS,
     }
+    warnings = list(dict.fromkeys(str(item) for item in context.get("warnings", []) if item))
+    if not proof_summary["proof_ready"]:
+        warnings.append("Research promotion proof requirements are incomplete.")
     return serialize_value(
         {
             "status": "ready" if entities else "empty",
@@ -457,9 +749,12 @@ def _build_report_from_sources(
                 "walk_forward": context["walk_forward"],
                 "benchmark_ready": context["benchmark_ready"],
             },
-            "warnings": list(dict.fromkeys(str(item) for item in context.get("warnings", []) if item)),
+            "proof_summary": proof_summary,
+            "aggregations": {"research_promotion_proof": proof_summary},
+            "warnings": warnings,
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="research_promotion"),
         }
     )
 
@@ -521,13 +816,33 @@ def update_research_promotion_status(
     if entity is None:
         raise NotFoundError("Research promotion entity was not found.", details={"entity_id": entity_id})
     statuses = _read_manual_statuses(store_path)
+    previous_manual = statuses.get(str(entity_id)) or {}
+    updated_at = _utc_now()
+    evidence = _as_dict(entity.get("evidence_used"))
     statuses[str(entity_id)] = _sanitize_value(
         {
             "entity_id": entity_id,
             "promotion_status": status,
             "reason": (payload or {}).get("reason") or "Manual research status metadata update.",
-            "updated_at": _utc_now(),
+            "updated_at": updated_at,
             "updated_by": _created_by(current_user),
+            "previous_promotion_status": previous_manual.get("promotion_status") or entity.get("promotion_status"),
+            "computed_promotion_status": entity.get("computed_promotion_status") or entity.get("promotion_status"),
+            "review_action": "manual_research_status_update",
+            "approval_trace_id": f"research_promotion:{_safe_entity_part(entity_id)}:{_safe_entity_part(updated_at)}",
+            "evidence_snapshot": {
+                "benchmark_verdict": evidence.get("benchmark_verdict"),
+                "sample_size": evidence.get("sample_size"),
+                "rewardable_count": evidence.get("rewardable_count"),
+                "baseline_relative_edge": evidence.get("baseline_relative_edge"),
+                "score_bucket_lift": evidence.get("score_bucket_lift"),
+                "walk_forward_status": evidence.get("walk_forward_status"),
+                "walk_forward_verdict": evidence.get("walk_forward_verdict"),
+                "walk_forward_experiment_id": evidence.get("walk_forward_experiment_id"),
+                "execution_adjusted_reward": evidence.get("execution_adjusted_reward"),
+                "completion_rate": evidence.get("completion_rate"),
+                "rewardability_rate": evidence.get("rewardability_rate"),
+            },
             "research_only": True,
             **SAFETY_FLAGS,
         }

@@ -13,6 +13,7 @@ from backend.services import human_system_shadow_mode as shadow
 from backend.services.human_system_shadow_mode import (
     build_shadow_comparison_row,
     build_shadow_mode_report,
+    build_shadow_mode_proof_summary,
     compute_shadow_reward,
     create_human_thesis,
 )
@@ -161,6 +162,66 @@ class HumanSystemShadowModeTests(unittest.TestCase):
         self.assertGreaterEqual(biases.get("chasing_extended_moves", 0), 1)
         self.assertGreaterEqual(biases.get("overriding_strong_system_evidence", 0), 1)
 
+    def test_shadow_proof_ready_with_same_opportunity_after_cost_system_improvement(self) -> None:
+        rows = [
+            _human(
+                human_thesis_id=f"human-{index}",
+                system_prediction_id=f"system-{index}",
+                linked_candidate_id=f"candidate-{index}",
+                human_direction="down",
+                system_direction="up",
+                system_confidence=0.82,
+                outcome_window_closed_at="2026-05-06T15:00:00Z",
+                cost_model="spread_slippage_v1",
+                human_reward_after_costs=-0.35,
+                system_reward_after_costs=1.10,
+                spread=0.01,
+                slippage=0.02,
+                fill_assumption="paper_fill_mid_after_spread_slippage",
+                risk_adjustment=0.05,
+                risk_gate_state="active",
+                kill_switch_state="clear",
+                portfolio_exposure=0.12,
+                record_digest=f"digest-{index}",
+                immutable_after_outcome_close=True,
+            )
+            for index in range(3)
+        ]
+        report = build_shadow_mode_report(records=rows, generated_at="2026-05-06T00:00:00Z")
+        proof = build_shadow_mode_proof_summary(report["records"], report["aggregations"])
+
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(proof["status"], "ready_for_human_review")
+        self.assertEqual(report["summary"]["shadow_requirements_passed"], 10)
+        self.assertGreaterEqual(report["summary"]["system_decision_quality_delta"], 0.0)
+        self.assertTrue(all(row["research_only"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_execution"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
+
+    def test_shadow_proof_blocks_missing_context_and_human_outperformance_claims(self) -> None:
+        report = build_shadow_mode_report(
+            records=[
+                _human(
+                    system_direction="down",
+                    system_prediction_id="",
+                    linked_candidate_id="",
+                    outcome_window_closed_at=None,
+                    human_reward_after_costs=1.4,
+                    system_reward_after_costs=0.3,
+                )
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        failed_keys = {row["key"] for row in report["proof_summary"]["requirements"] if not row["passed"]}
+        self.assertIn("same_opportunity_sample", failed_keys)
+        self.assertIn("same_opportunity_linkage", failed_keys)
+        self.assertIn("cost_risk_context", failed_keys)
+        self.assertIn("system_after_cost_improvement", failed_keys)
+        self.assertFalse(report["proof_summary"]["proof_ready"])
+        self.assertFalse(report["can_submit_orders"])
+        self.assertFalse(report["writes_ranking_config"])
+
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
         original_summary = shadow_router.get_shadow_mode_summary
@@ -189,6 +250,8 @@ class HumanSystemShadowModeTests(unittest.TestCase):
                 self.assertTrue(data["research_only"])
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
+                self.assertIn("proof_summary", data)
+                self.assertIn("shadow_proof_ready", data["summary"])
                 self.assertIn("safety_notes", data)
                 self.assertIn("Does not place orders.", data["safety_notes"])
             post = client.post("/api/shadow-mode/human-thesis", json=_human())

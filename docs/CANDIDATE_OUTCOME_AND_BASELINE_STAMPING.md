@@ -26,6 +26,8 @@ Each stamped record uses:
 
 The v1 outcome version is `candidate_outcome_baseline_v1`.
 
+Available outcome rows are final for that key. Unavailable diagnostic rows are append-only observations, but they do not permanently block the same key from being rechecked. If later lifecycle evidence supplies the closed-horizon price and baseline, the service may append a final available row for the same key and reports that it supersedes the earlier unavailable diagnostics.
+
 ## Pre-Move Candidate Contract
 
 Lifecycle capture enriches candidate rows with these fields when they can be derived honestly:
@@ -155,6 +157,8 @@ Missing data produces explicit diagnostics:
 - `reason`
 
 The service does not fabricate returns, baselines, sectors, execution costs, or regimes.
+
+Repeated stamping does not rewrite the same unavailable diagnostic when nothing changed. It rechecks matured horizons, skips duplicate unavailable writes, and only appends again when the missing evidence becomes sufficient for a final available outcome row.
 
 ## Test Commands
 

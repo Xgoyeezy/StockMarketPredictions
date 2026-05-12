@@ -10,6 +10,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from backend import stock_direction_model as sdm
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -773,6 +774,7 @@ def build_evidence_edge_report(
             "top_negative_features": negative_features,
             "recommended_ranking_adjustments": recommendations,
             "candidate_rows": _records_to_rows(records[:250]),
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_edge"),
             **SAFETY_FLAGS,
         }
     )
@@ -787,6 +789,7 @@ def get_evidence_edge_blockers(db: Any = None, *, current_user: Any) -> dict[str
     return {
         "summary": report["summary"],
         "items": report["blocker_effectiveness"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_blockers"),
         **SAFETY_FLAGS,
     }
 
@@ -797,6 +800,7 @@ def get_evidence_edge_setups(db: Any = None, *, current_user: Any) -> dict[str, 
         "summary": report["summary"],
         "items": report["setup_forward_return_stats"],
         "score_bucket_outcomes": report["score_bucket_outcomes"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_setups"),
         **SAFETY_FLAGS,
     }
 
@@ -807,6 +811,7 @@ def get_evidence_edge_engines(db: Any = None, *, current_user: Any) -> dict[str,
         "summary": report["summary"],
         "items": report["engine_forward_return_stats"],
         "regime_forward_return_stats": report["regime_forward_return_stats"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_engines"),
         **SAFETY_FLAGS,
     }
 
@@ -818,5 +823,6 @@ def get_evidence_edge_recommendations(db: Any = None, *, current_user: Any) -> d
         "items": report["recommended_ranking_adjustments"],
         "top_positive_features": report["top_positive_features"],
         "top_negative_features": report["top_negative_features"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_recommendations"),
         **SAFETY_FLAGS,
     }

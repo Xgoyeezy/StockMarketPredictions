@@ -104,6 +104,14 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
         self.assertGreater(report["summary"]["average_reward"], 0)
         self.assertGreater(report["summary"]["baseline_relative_edge"], 0.1)
         self.assertGreater(report["summary"]["score_bucket_lift"], 0)
+        self.assertTrue(report["summary"]["benchmark_proof_ready"])
+        self.assertEqual(report["summary"]["benchmark_proof_requirements_passed"], 6)
+        self.assertEqual(report["proof_summary"]["status"], "ready_for_human_review")
+        self.assertTrue(all(row["research_only"] for row in report["proof_summary"]["requirements"]))
+        self.assertFalse(any(row["changes_execution"] for row in report["proof_summary"]["requirements"]))
+        self.assertTrue(report["benchmark_hardening_plan"]["summary"]["claim_permissions"]["cautious_internal_benchmark_review"])
+        self.assertFalse(report["benchmark_hardening_plan"]["summary"]["claim_permissions"]["public_alpha_claim"])
+        self.assertFalse(report["benchmark_hardening_plan"]["summary"]["claim_permissions"]["live_trading_readiness"])
 
     def test_no_edge_detected_with_fixture_data(self) -> None:
         rows = [
@@ -114,6 +122,41 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "no_edge_detected")
         self.assertLess(report["summary"]["average_reward"], 0)
+        self.assertFalse(report["summary"]["benchmark_proof_ready"])
+        proof = {row["key"]: row for row in report["proof_summary"]["requirements"]}
+        self.assertEqual(proof["baseline_relative_edge"]["status"], "needs_evidence")
+        self.assertEqual(proof["after_cost_reward"]["status"], "needs_evidence")
+
+    def test_benchmark_hardening_plan_blocks_claims_when_evidence_is_missing(self) -> None:
+        rows = [{"symbol": "AAPL", "setup_type": "visual_label_only"} for _ in range(6)]
+        report = build_professional_benchmark_report(records=rows, forecast_records=[], generated_at="2026-05-06T00:00:00Z")
+
+        hardening_plan = report["benchmark_hardening_plan"]
+        by_key = {row["key"]: row for row in hardening_plan["items"]}
+        self.assertEqual(hardening_plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["benchmark_hardening_status"], "blocked_by_evidence")
+        self.assertGreaterEqual(report["summary"]["benchmark_hardening_open_items"], 6)
+        self.assertGreaterEqual(report["summary"]["benchmark_hardening_critical_open_items"], 2)
+        self.assertEqual(by_key["rewardable_sample_quality"]["status"], "needs_evidence")
+        self.assertEqual(by_key["same_window_baselines"]["status"], "needs_evidence")
+        self.assertEqual(by_key["out_of_sample_split"]["status"], "needs_evidence")
+        self.assertIn("actual_forward_return", by_key["rewardable_sample_quality"]["missing_fields"])
+        self.assertIn("baseline_relative_edge", by_key["same_window_baselines"]["blocked_claims"])
+        self.assertIn("proven_alpha", hardening_plan["summary"]["blocked_claims"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["public_alpha_claim"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["repeatability_claim"])
+        self.assertTrue(all(item["manual_review_only"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in hardening_plan["items"]))
+
+    def test_benchmark_proof_blocks_when_after_cost_reward_is_missing(self) -> None:
+        rows = [_reward_row(record_id=f"row-{index}", score_bucket="90_100" if index < 3 else "0_39", total_reward=0.25, actual_forward_return=0.40, slippage_bps=40.0, spread_bps=25.0) for index in range(6)]
+        report = build_professional_benchmark_report(records=rows, forecast_records=[], generated_at="2026-05-06T00:00:00Z")
+
+        proof = {row["key"]: row for row in report["proof_summary"]["requirements"]}
+        self.assertFalse(report["summary"]["benchmark_proof_ready"])
+        self.assertLessEqual(report["summary"]["edge_after_costs"], 0)
+        self.assertEqual(proof["after_cost_reward"]["status"], "needs_evidence")
+        self.assertIn("paper execution costs", proof["after_cost_reward"]["safe_next_action"])
 
     def test_baseline_comparison_math(self) -> None:
         comparison = compute_baseline_comparison(suite._normalize_records(_edge_rows()))
@@ -197,6 +240,12 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
             self.assertIn("records", data)
             self.assertIn("aggregations", data)
             self.assertIn("baselines", data)
+            self.assertIn("proof_summary", data)
+            self.assertIn("benchmark_hardening_plan", data)
+            self.assertIn("benchmark_proof_status", data["summary"])
+            self.assertIn("benchmark_proof_ready", data["summary"])
+            self.assertIn("benchmark_hardening_status", data["summary"])
+            self.assertIn("claim_permissions", data["summary"])
             self.assertIn("warnings", data)
             self.assertIn("missing_fields", data)
             self.assertIn("safety_notes", data)

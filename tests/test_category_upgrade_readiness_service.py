@@ -12,7 +12,9 @@ from backend.services.category_upgrade_readiness_service import (
     build_category_upgrade_proof_chain,
     build_category_upgrade_readiness_report,
     build_category_upgrade_support_export,
+    evaluate_governance_gate,
     evaluate_proof_gates,
+    evaluate_risk_visibility_gate,
     write_category_upgrade_readiness_export,
 )
 
@@ -166,6 +168,11 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertFalse(report["can_submit_live_orders"])
         self.assertIn("category_progress", report)
         self.assertIn("backlog", report)
+        self.assertIn("proof decides priority", report["summary"]["proof_first_rule"].lower())
+        backlog = {item["key"]: item for item in report["backlog"]}
+        self.assertEqual(backlog["market_specialist_desk_registry"]["state"], "future_only")
+        self.assertEqual(backlog["off_exchange_liquidity_dashboard"]["state"], "future_only")
+        self.assertEqual(backlog["cpp_core_accelerators"]["state"], "future_only")
         progress = {row["category_key"]: row for row in report["category_progress"]}
         self.assertTrue(progress["solo_systematic_trader_platform"]["rating_update_allowed"])
         self.assertEqual(progress["solo_systematic_trader_platform"]["planning_progress_to_10_pct"], 100.0)
@@ -254,6 +261,61 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         hft = next(row for row in report["categories"] if row["key"] == "hft_or_elite_execution_platform")
         self.assertEqual(hft["status"], "ready_for_rating_review")
         self.assertEqual(hft["missing_extra_proof"], [])
+
+    def test_risk_visibility_gate_uses_portfolio_proof_when_present(self) -> None:
+        gate = evaluate_risk_visibility_gate(
+            {
+                "status": "ready",
+                "summary": {
+                    "portfolio_risk_coverage": 0.35,
+                    "portfolio_risk_requirements_passed": 4,
+                    "portfolio_risk_requirements_total": 9,
+                },
+                "proof_summary": {
+                    "proof_ready": False,
+                    "summary": {
+                        "portfolio_risk_coverage": 0.35,
+                        "passed_requirement_count": 4,
+                        "requirement_count": 9,
+                    },
+                },
+                "writes_risk_limits": False,
+                "writes_risk_config": False,
+            }
+        )
+
+        self.assertEqual(gate["status"], "partial")
+        self.assertEqual(gate["evidence"]["proof_ready"], False)
+        self.assertFalse(gate["evidence"]["writes_risk_limits"])
+        self.assertEqual(gate["blockers"], [])
+
+    def test_governance_gate_uses_research_promotion_proof_when_present(self) -> None:
+        gate = evaluate_governance_gate(
+            {
+                "status": "ready",
+                "summary": {
+                    "promotion_requirements_passed": 9,
+                    "promotion_requirements_total": 10,
+                },
+                "proof_summary": {
+                    "proof_ready": False,
+                    "summary": {
+                        "promotion_traceability_coverage": 0.84,
+                        "passed_requirement_count": 9,
+                        "requirement_count": 10,
+                    },
+                },
+                "writes_execution_config": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+            },
+            _governance_ready(),
+        )
+
+        self.assertEqual(gate["status"], "partial")
+        self.assertFalse(gate["evidence"]["promotion_proof_ready"])
+        self.assertEqual(gate["evidence"]["promotion_requirements_passed"], 9.0)
+        self.assertIn("promotion_proof_ready", gate["warnings"][0])
 
     def test_priority_backlog_maps_missing_extra_proof_to_correct_stage(self) -> None:
         partial_proof = _category_proof_ready()

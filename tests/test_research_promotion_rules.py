@@ -179,6 +179,57 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertEqual(strategy["promotion_status"], "paper_proven")
         self.assertIn("not live approval", strategy["safe_explanation"].lower())
 
+    def test_proof_summary_blocks_when_manual_review_trace_is_missing(self) -> None:
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses={},
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        proof = report["proof_summary"]
+        summary = proof["summary"]
+
+        self.assertFalse(proof["proof_ready"])
+        self.assertEqual(proof["status"], "needs_evidence")
+        self.assertEqual(summary["manual_review_record_count"], 0)
+        self.assertIn("Research promotion proof requirements are incomplete.", report["warnings"])
+        self.assertFalse(report["can_submit_orders"])
+        self.assertFalse(report["writes_execution_config"])
+        failed = {row["key"] for row in proof["requirements"] if not row["passed"]}
+        self.assertIn("manual_review_traceability", failed)
+
+    def test_proof_summary_ready_with_traceable_evidence_and_manual_review(self) -> None:
+        manual_statuses = {
+            "strategy:quant_evidence_os": {
+                "entity_id": "strategy:quant_evidence_os",
+                "promotion_status": "paper_proven",
+                "reason": "Fixture human review.",
+                "updated_at": "2026-05-06T00:00:00Z",
+                "updated_by": "tester",
+                "previous_promotion_status": "walk_forward_testing",
+                "computed_promotion_status": "paper_proven",
+                "evidence_snapshot": {"benchmark_verdict": "edge_detected", "walk_forward_verdict": "weak_pass"},
+                "research_only": True,
+            }
+        }
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses=manual_statuses,
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        proof = report["proof_summary"]
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(report["summary"]["promotion_proof_status"], "ready_for_human_review")
+        self.assertEqual(report["summary"]["promotion_requirements_passed"], report["summary"]["promotion_requirements_total"])
+        self.assertGreaterEqual(report["summary"]["promotion_traceability_coverage"], 0.8)
+        self.assertEqual(report["aggregations"]["research_promotion_proof"]["proof_ready"], True)
+        self.assertTrue(any(row["manual_review_traceable"] for row in proof["record_readiness"]))
+
     def test_rejected_status(self) -> None:
         report = build_research_promotion_report(
             benchmark_report=_benchmark(status="no_edge_detected", edge=-0.24, lift=-0.08),
@@ -221,6 +272,10 @@ class ResearchPromotionRulesTests(unittest.TestCase):
             self.assertEqual(entity["manual_status"]["reason"], "Manual research hold.")
             self.assertTrue(entity["manual_status"]["research_only"])
             self.assertFalse(entity["manual_status"]["writes_execution_config"])
+            self.assertEqual(entity["manual_status"]["previous_promotion_status"], "candidate")
+            self.assertIn("approval_trace_id", entity["manual_status"])
+            self.assertIn("evidence_snapshot", entity["manual_status"])
+            self.assertEqual(entity["manual_status"]["evidence_snapshot"]["benchmark_verdict"], "edge_detected")
 
     def test_invalid_manual_status_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

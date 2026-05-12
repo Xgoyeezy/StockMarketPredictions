@@ -43,6 +43,104 @@ The platform still should not claim proven edge or repeatability. Professional B
 
 Safety status remains PASS. This follow-up did not change trading behavior, broker routes, order submission, risk gates, kill switches, AI authority, or automatic ranking weights.
 
+Roadmap discipline note:
+
+`docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md` now defines the feature-freeze and expansion-gate discipline that should govern follow-up work. Ambition is allowed, but proof decides priority. Expansion ideas should remain deferred until the current foundation improves proof quality, data completeness, benchmark reliability, walk-forward validity, execution cost realism, risk control, auditability, or operator trust.
+
+## Follow-Up Status: 2026-05-10
+
+Follow-up action added a proof-first Data Completeness cleanup plan to the service, API fallback, report UI, and documentation. This is a diagnostic work queue, not a readiness upgrade: it keeps incomplete records visible and lists the manual evidence tasks needed before stronger benchmark or reward claims are appropriate.
+
+Verification evidence:
+
+- Focused Data Completeness backend/static tests: PASS, 16 passed.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `3284`; frontend listening on `http://localhost:5173` as PID `14304`.
+- Live health checks: `/api/healthz` returned `ok`; frontend returned HTTP 200.
+- Live Data Completeness cleanup result: status `needs_attention`, cleanup status `needs_attention`, 6 open cleanup items, 3 critical open cleanup items, top cleanup item `Missing forward returns`.
+- Live Data Completeness proof result: completion rate `0.001927`, rewardability rate `0.001927`, `proof_field_ready: false`.
+- Browser smoke check: `/data-completeness` rendered `Data Cleanup Plan`, `Missing forward returns`, `Missing baselines`, `Missing execution evidence`, and the project-wide finish tracker.
+
+Remaining proof gap:
+
+Data Completeness is now clearer about what is missing, but it is not proof-clean. The next evidence work is still to stamp closed-horizon forward returns, same-window baselines, forecast actuals, execution-cost fields, regime/context labels, and reward contract fields from observed records without fabricating market outcomes.
+
+Professional Benchmark hardening update:
+
+Follow-up action added a benchmark-specific hardening plan to the Professional Benchmark service, API fallback, report UI, and documentation. This hardening plan keeps the current `data_quality_too_weak` verdict intact while making blocked claims explicit.
+
+Verification evidence:
+
+- Focused Professional Benchmark backend/static tests: PASS, 16 passed.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `17296`; frontend listening on `http://localhost:5173` as PID `17020`.
+- Live health checks: `/api/healthz` returned `ok`; frontend returned HTTP 200.
+- Live Professional Benchmark result: status `data_quality_too_weak`, hardening status `blocked_by_evidence`, 6 open hardening items, 2 critical open hardening items, top hardening item `Rewardable sample and data quality`.
+- Live claim permissions: public alpha claim `false`, repeatability claim `false`.
+- Live proof result: candidate count `215`, rewardable count `0`, benchmark proof requirements passed `0`.
+- Browser smoke check: `/professional-benchmark` rendered `Benchmark Hardening Plan`, `Rewardable sample and data quality`, `Same-window explicit baselines`, `Blocked claims`, and the project-wide finish tracker.
+
+Remaining benchmark proof gap:
+
+Professional Benchmark is now clearer about which claims are blocked, but it is not ready for edge language or repeatability language. The next evidence work is still to produce rewardable candidate rows, same-window baselines, score-bucket separation, after-cost reward evidence, and frozen out-of-sample splits.
+
+Walk-Forward validation update:
+
+Follow-up action added a Walk-Forward validation plan to the registry service, API fallback, report UI, and documentation. This plan keeps the current empty proof state intact while turning repeatability blockers into explicit manual validation tasks and claim boundaries.
+
+Verification evidence:
+
+- Focused Walk-Forward backend/static tests: PASS, 13 passed.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `14816`; frontend listening on `http://localhost:5173` as PID `16160`.
+- Live health checks: `/api/healthz` returned `ok`; frontend returned HTTP 200.
+- Live Walk-Forward result: status `empty`, validation status `blocked_by_evidence`, 6 open validation items, 3 critical open validation items, top validation item `Create and freeze an experiment snapshot`.
+- Live claim permissions: public repeatability claim `false`, live-trading readiness `false`.
+- Live proof result: experiment count `0`, walk-forward proof requirements passed `0`.
+- Browser smoke check: `/walk-forward` rendered `Walk-Forward Validation Plan`, `Create and freeze an experiment snapshot`, `Chronological no-lookahead windows`, `Blocked claims`, and the project-wide finish tracker.
+
+Remaining walk-forward proof gap:
+
+Walk-Forward is now clearer about how repeatability proof must be built, but it is not ready for repeatability language. The next evidence work is still to create and freeze a chronological experiment snapshot, link it to out-of-sample benchmark results, attach after-cost support, and measure pass rate after enough forward-only evidence exists.
+
+Score Calibration hardening update:
+
+Follow-up action added a Score Calibration hardening plan to the calibration service, API fallback, report UI, and documentation. This keeps the current `insufficient_evidence` state intact while making score-quality, ranking-review, feature-attribution, repeatability, promotion, and live-readiness blockers explicit.
+
+Verification evidence:
+
+- Focused Score Calibration backend/static tests plus finish-tracker tests: PASS, 18 passed and 14 subtests passed.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `8448`; frontend listening on `http://localhost:5173` as PID `9512`.
+- Live health checks: `/api/healthz` returned `ok`; frontend returned HTTP 200.
+- Live Score Calibration result: status `insufficient_evidence`, hardening status `blocked_by_evidence`, 6 open hardening items, 2 critical open hardening items, top hardening item `Rewardable score sample`.
+- Live claim permissions: cautious internal calibration review `false`, automatic ranking mutation `false`, public score-quality claim `false`, repeatability claim `false`, live-trading readiness `false`.
+- Live proof result: candidate count `215`, rewardable count `0`, calibration proof requirements passed `1/7`.
+- Browser smoke check: `/score-calibration` rendered `Score Calibration Hardening Plan`, `Rewardable score sample`, `Score bucket coverage`, `Blocked claims`, `215 candidate rows`, and the project-wide finish tracker with no browser console errors.
+
+Remaining score-calibration proof gap:
+
+Score Calibration is now clearer about which claims are blocked, but it is not ready for score-quality, ranking-review, repeatability, promotion, or live-readiness language. The next evidence work is still to produce rewardable score outcomes, fill multiple score buckets, attach after-cost reward evidence, gather repeated feature observations, and confirm any promising separation through frozen walk-forward experiments.
+
+Execution Quality hardening update:
+
+Follow-up action added an Execution Quality hardening plan to the TCA service, API fallback, report UI, and documentation. This changes the report-level live status from broad `ready` to proof-aware `needs_evidence` when paper rows exist but execution proof is incomplete.
+
+Verification evidence:
+
+- Focused Execution Quality backend/static tests plus finish-tracker tests: PASS, 19 passed and 14 subtests passed.
+- Frontend production build: PASS with `NODE_OPTIONS=--max-old-space-size=4096`.
+- Live restart: backend listening on `http://127.0.0.1:8000` as PID `9592`; frontend listening on `http://localhost:5173` as PID `16608`.
+- Live health checks: `/api/healthz` returned `ok`; frontend returned HTTP 200.
+- Live Execution Quality result: status `needs_evidence`, hardening status `blocked_by_evidence`, 4 open hardening items, 2 critical open hardening items, top hardening item `Cost evidence capture`.
+- Live claim permissions: cautious internal execution review `false`, public execution-quality claim `false`, tradability claim `false`, route change `false`, broker-route change `false`, automatic execution mutation `false`, live-trading readiness `false`.
+- Live proof result: trade count `119`, execution proof requirements passed `3/7`, cost evidence coverage `0.0`, candidate-route linkage coverage `0.0`.
+- Browser smoke check: `/execution-quality` rendered `Execution Quality Hardening Plan`, `Cost evidence capture`, `Candidate and route linkage`, the blocked-claims table, and the project-wide finish tracker with no browser console errors.
+
+Remaining execution proof gap:
+
+Execution Quality now avoids treating paper row count as proof. The next evidence work is still to attach slippage, spread, fill-delay, fill-price, candidate lifecycle IDs, same-window baselines, and route evidence to paper rows before making tradability, after-cost edge, route-quality, paper-to-live, or live-readiness claims.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
@@ -312,7 +410,15 @@ The service uses transparent bucket and lift methods. Recommendations are resear
 
 Status: PASS_WITH_WARNINGS
 
-The service is read-only and paper-only. It computes paper execution metrics and does not alter routing. Current output is ready but has missing execution cost fields in places, which should feed Data Completeness improvements.
+The service is read-only and paper-only. It computes paper execution metrics and does not alter routing. Current output is proof-aware: the layer can render and report paper rows, but hardening remains blocked where cost evidence, candidate-route linkage, and after-cost proof are incomplete.
+
+### Risk Gate and Audit Trail Hardening
+
+Status: PASS_WITH_WARNINGS
+
+The new `GET /api/risk/audit-hardening` report is read-only and audit-only. It summarizes risk policies, risk events, audit events, audit exports, replay traceability, kill-switch auditability, and explicit false authority flags. The Risk Center now shows the hardening plan and the shared project finish tracker at the end.
+
+Current proof boundary: this report can support cautious internal review only when every hardening item is complete. It does not authorize live trading, broker-route changes, risk-gate changes, kill-switch clears, order submission, compliance approval, or ranking-weight mutation. Historical kill-switch actions before this change may still lack audit events, so the report is expected to block completeness claims until enough forward audit evidence exists.
 
 ### Portfolio Risk Intelligence
 
@@ -342,7 +448,7 @@ The service exists and is registered, and it returns useful forecast analytics. 
 
 Status: PASS_WITH_WARNINGS
 
-Docs exist for the newly added benchmark, completeness, walk-forward, promotion, score calibration, execution quality, portfolio risk, shadow mode, roadmap, ratings, and positioning layers. Docs generally explain research-only boundaries, safety limits, missing data behavior, UI routes, APIs, limitations, and test commands.
+Docs exist for the newly added benchmark, completeness, walk-forward, promotion, score calibration, execution quality, risk/audit hardening, portfolio risk, shadow mode, roadmap, ratings, and positioning layers. Docs generally explain research-only boundaries, safety limits, missing data behavior, UI routes, APIs, limitations, and test commands.
 
 Gaps:
 
@@ -397,6 +503,9 @@ Docs frame ratings as current estimated readiness and avoid claiming guaranteed 
 5. Add dedicated Evidence Reward and Forecast Validation docs.
    - Document required fields, rewardability, immutability, formulas, missing data behavior, and research-only boundaries.
 
+6. Apply the proof-first roadmap discipline before starting any expansion feature.
+   - Keep new desks, agents, broker-neutral live execution, HFT work, C++ acceleration, and enterprise governance deferred unless they pass the expansion gates in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`.
+
 ## 12. What Was Intentionally Not Changed
 
 - No live trading was enabled.
@@ -427,3 +536,42 @@ Overall status: FAIL
 Safety status: PASS
 
 The platform appears safely isolated from trading execution, but the implementation is not yet verification-clean. The next work should be a narrow fix pass for Forecast Validation test failures, runtime route refresh, and test discovery hygiene before any additional feature work.
+
+## 15. Project Finish Tracker
+
+This tracker is project-wide and must stay at the end of report outputs. It is not limited to the current proof layer.
+
+Summary: 26 tracked items; 6 critical open items; 12 in progress; 6 blocked by evidence; 1 not started; 7 deferred.
+
+Proof-first rule: Ambition is allowed. Proof decides priority.
+
+| Priority | Area | Item | Status | Done when |
+| --- | --- | --- | --- | --- |
+| Critical | Verification | Post-Implementation Verification | In Progress | The verification report is current, cites focused test/build/browser evidence, and lists remaining proof blockers without overclaiming readiness. |
+| Critical | Evidence Quality | Data completeness hardening | In Progress | Data Completeness reports benchmark_ready and proof_field_ready with traceable source coverage. |
+| Critical | Evidence Capture | Candidate outcome and baseline stamping | In Progress | Rewardable candidate outcomes exist with actual_forward_return, baseline_forward_return, cost fields, and append-only lineage. |
+| Critical | Benchmarking | Professional Benchmark proof gate | Blocked By Evidence | Professional Benchmark reaches ready_for_human_review without claiming proven alpha. |
+| High | Repeatability | Walk-forward validation | Blocked By Evidence | Walk-Forward shows frozen, no-lookahead, evaluated records with acceptable pass rate. |
+| High | Ranking Quality | Score calibration and feature attribution | Blocked By Evidence | Calibration proof is ready with sufficient feature coverage and after-cost lift. |
+| High | Execution Quality | Execution Quality and TCA | In Progress | Execution proof is ready with candidate-route linkage and positive after-cost evidence. |
+| Critical | Risk And Audit | Risk Gate and Audit Trail hardening | In Progress | Risk and audit evidence is traceable, sanitized, and confirms no proof layer can bypass controls. |
+| High | Risk Visibility | Portfolio Risk Intelligence | In Progress | Portfolio risk proof is ready with enough exposure and context coverage for review. |
+| Medium | Decision Review | Human vs System Shadow Mode | Blocked By Evidence | Shadow Mode has same-opportunity comparisons with pre-outcome human and system contracts. |
+| High | Promotion Governance | Research promotion rules | Blocked By Evidence | Promotion proof is ready with traceability coverage and no authority crossing. |
+| High | Reward Quality | Evidence Reward and blocker value | Blocked By Evidence | Evidence Reward can explain rewardability, blocker value, and after-cost outcomes without fabricated data or ranking mutation. |
+| Medium | Forecast Quality | Forecast validation hardening | In Progress | Forecast Validation stays ready with broad actual-path coverage and stable reward calculations. |
+| Medium | Proof Visibility | Proof metrics dashboard planning | In Progress | A shared proof-metrics view shows the current proof gaps and which gate each gap blocks. |
+| High | Roadmap Discipline | Proof-first backlog scoring and expansion gates | In Progress | Every future feature has a proof-first decision of near-term, foundation-first, future backlog, or reject for now. |
+| High | Setup Research | Technical Analysis evidence setup admission | In Progress | Technical-analysis methods are classified into evidence-only, research-only, and avoid groups with method-specific fields, controls, and proof gates documented before implementation. |
+| Medium | Ai Research | AI Committee research layer | In Progress | Committee reports add research context without approving trades or mutating live behavior. |
+| Medium | Product Readiness | Operator experience, docs, and report UX | In Progress | Every major report ends with the shared finish tracker and clear next safe actions. |
+| Critical | Live Trading Boundary | Paper-to-live proof gate | Not Started | Live enablement remains explicitly gated by verified paper evidence and human approval. |
+| Future | Future Backlog | Market Specialist Desk registry | Deferred | Deferred until foundation proof is stronger and the smallest safe context-only version is justified. |
+| Future | Future Backlog | Candidate Fusion and Market x Strategy Benchmark | Deferred | Deferred until current benchmark, walk-forward, and candidate evidence can support market x strategy comparisons. |
+| Future | Future Backlog | Off-Exchange Liquidity Dashboard | Deferred | Deferred until it solves a measured proof problem without changing ranking, routing, or order behavior. |
+| Future | Future Backlog | Broker-neutral architecture and provider ROI gates | Deferred | Deferred until data, benchmark, execution, or walk-forward evidence proves a broker/provider bottleneck and ROI case. |
+| Future | Future Backlog | Visual Strategy Evidence Builder | Deferred | Deferred until current evidence contracts are mature enough to make a visual builder proof-focused instead of feature-count-focused. |
+| Future | Future Backlog | Governance, RBAC, model registry, and institutional controls | Deferred | Deferred until the proof chain supports firm-facing control work and the required reviews are scoped. |
+| Future | Future Backlog | C++ Core Accelerators and HFT feasibility study | Deferred | Deferred until profiling proves a research-only acceleration bottleneck or a separate HFT thesis is approved. |
+
+Safety boundary: tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading or expansion implementation. They do not authorize order submission, broker-route changes, risk-gate changes, kill-switch changes, automatic ranking-weight changes, or deferred expansion work without separate proof-first approval.

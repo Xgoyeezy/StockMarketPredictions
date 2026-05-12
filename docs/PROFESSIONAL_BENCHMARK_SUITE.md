@@ -67,11 +67,45 @@ Each response includes:
 - `records`
 - `aggregations`
 - `baselines`
+- `proof_summary`
+- `benchmark_hardening_plan`
 - `warnings`
 - `missing_fields`
 - `safety_notes`
 
 The customer UI route is `/professional-benchmark`.
+
+## Benchmark Proof Gate
+
+The summary includes `proof_summary`, a human-review gate for the roadmap proof items that must pass before any cautious benchmark edge language is considered:
+
+- rewardable sample size
+- explicit forward-only baseline availability
+- baseline-relative edge
+- score bucket lift
+- after-cost reward
+- data quality floor
+
+`proof_summary.proof_ready` means the benchmark evidence is ready for human research review only. It is not proof of alpha, not an investor performance claim, not repeatability proof, not institutional readiness, and not live-trading readiness. Walk-forward proof remains required before any repeatability claim.
+
+Missing proof requirements create manual safe next actions. They do not place orders, change broker routes, bypass risk gates, clear kill switches, alter ranking weights, or approve live trading.
+
+## Benchmark Hardening Plan
+
+The summary also includes `benchmark_hardening_plan`, a proof-first work queue for the benchmark layer. It turns missing proof into explicit claim boundaries instead of stronger marketing language.
+
+The hardening plan tracks:
+
+- rewardable sample and data quality
+- same-window explicit baselines
+- baseline-relative edge
+- score bucket lift
+- after-cost reward
+- out-of-sample split and frozen versions
+
+Each item reports priority, status, linked proof keys, missing fields, blocked claims, a safe next action, and a `done_when` condition. The plan also returns `claim_permissions` so the UI can show that public alpha, repeatability, institutional readiness, live-trading readiness, and guaranteed-return claims remain blocked.
+
+Hardening plan items are internal research gates only. They do not fabricate outcomes or baselines, authorize orders, change broker routes, bypass risk gates, clear kill switches, alter ranking weights, or approve live trading.
 
 ## Verdict Rules
 
@@ -526,3 +560,18 @@ Professional Benchmark v1 consumes candidate forward outcomes through Evidence R
 Candidate Outcome and Baseline Stamping supplies `actual_forward_return`, matched baseline returns, score bucket inputs, and paper-route execution cost fields. Missing outcome, baseline, execution-cost, or regime data keeps benchmark sections unavailable instead of fabricating proof.
 
 Benchmark outputs remain research-only. They do not place trades, change broker routes, bypass risk gates, clear kill switches, or automatically change ranking weights.
+
+## Future Market x Strategy Benchmark
+
+Market x Strategy Benchmark is a future roadmap item only. It should measure outcomes by market context and strategy logic without creating 45 combined market-strategy desks.
+
+Future benchmark dimensions may include:
+
+- Market Specialist Desk context, such as Precious Metals, Rates, FX / Dollar, Energy, Volatility / Risk, or Off-Exchange Liquidity.
+- Current Strategy Desk logic, such as Macro Trend, Stat Arb, Equities Momentum, Event-Driven, or Options Volatility.
+- Candidate Fusion evidence for the combined market context and strategy logic.
+- Baseline-relative edge by market x strategy.
+- Walk-forward performance by market x strategy.
+- Execution-adjusted reward by market x strategy.
+
+This benchmark remains research-only. It cannot place orders, change broker routes, bypass risk gates, clear kill switches, change ranking weights automatically, or merge simulation evidence into real-time market-observed evidence.

@@ -21326,6 +21326,16 @@ def get_tenant_trade_automation_market_session(
     desk_sla = _market_ops_desk_sla_rows(desks, phase=phase)
     due_stale_desks = [item for item in desk_sla if item.get("stale") and item.get("due_state") in {"due_now", "worker_stale"}]
     active_desk_count = len([item for item in desks.get("items") or [] if item.get("enabled") and item.get("armed")])
+    automation_profile = {
+        "enabled": bool(settings_state.get("enabled")),
+        "armed": bool(settings_state.get("armed")),
+        "kill_switch": bool(settings_state.get("kill_switch")),
+    }
+    automation_waiting_for_arm = (
+        automation_profile["enabled"]
+        and not automation_profile["armed"]
+        and not automation_profile["kill_switch"]
+    )
     no_trade_report = _market_ops_no_trade_report_from_parts(
         tenant_slug=tenant.slug,
         desks_payload=desks,
@@ -21480,18 +21490,25 @@ def get_tenant_trade_automation_market_session(
         _market_ops_component(
             "desk_scans",
             "Desk scans",
-            SAFETY_STATE_BLOCKED
+            "watching"
+            if automation_waiting_for_arm
+            else SAFETY_STATE_BLOCKED
             if due_stale_desks and phase.get("active_window")
             else SAFETY_STATE_DEGRADED
             if active_desk_count < len(_TRADE_AUTOMATION_DESK_DEFAULTS)
             else SAFETY_STATE_READY,
-            f"{active_desk_count}/{len(_TRADE_AUTOMATION_DESK_DEFAULTS)} active desks are enabled and armed.",
+            "Automation profile is enabled but not armed; desk scan freshness waits for operator arm."
+            if automation_waiting_for_arm
+            else f"{active_desk_count}/{len(_TRADE_AUTOMATION_DESK_DEFAULTS)} active desks are enabled and armed.",
             next_action=(
+                "Arm the paper automation profile after preflight passes; do not treat stale due desks as a worker failure while disarmed."
+                if automation_waiting_for_arm
+                else
                 "Restart or inspect the worker because due desks are stale."
                 if due_stale_desks
                 else "All active desks are represented; monitor due and last-scan fields."
             ),
-            metadata={"items": desk_sla, "due_stale_desks": [item.get("desk_key") for item in due_stale_desks]},
+            metadata={"items": desk_sla, "due_stale_desks": [item.get("desk_key") for item in due_stale_desks], "automation_profile": automation_profile},
             links={"desks": "/api/orgs/trade-automation/desks"},
         ),
         _market_ops_component(
@@ -22397,6 +22414,7 @@ def get_tenant_trade_automation_market_session(
                 "count": len(desk_sla),
                 "active_armed_count": active_desk_count,
                 "stale_due_count": len(due_stale_desks),
+                "automation_profile": automation_profile,
             },
             "entry_window_explainer": entry_window_explainer,
             "expected_settings_proof": expected_settings_proof,
@@ -22464,6 +22482,7 @@ def get_tenant_trade_automation_market_session(
                 "count": len(desk_sla),
                 "active_armed_count": active_desk_count,
                 "stale_due_count": len(due_stale_desks),
+                "automation_profile": automation_profile,
             },
             "no_trade_escalation": {
                 "stage": no_trade_report.get("escalation_stage"),
@@ -22612,8 +22631,16 @@ def get_tenant_trade_automation_watchdog(
     desk_source = _market_watchdog_component_by_key(market_session, "desk_scans")
     stale_due_count = int(desks.get("stale_due_count") or 0)
     active_armed_count = int(desks.get("active_armed_count") or 0)
+    automation_profile = dict(desks.get("automation_profile") or {})
+    automation_waiting_for_arm = (
+        bool(automation_profile.get("enabled"))
+        and not bool(automation_profile.get("armed"))
+        and not bool(automation_profile.get("kill_switch"))
+    )
     desk_status = (
-        "blocked"
+        "watching"
+        if automation_waiting_for_arm
+        else "blocked"
         if active_window and stale_due_count > 0
         else "degraded"
         if active_armed_count < len(_TRADE_AUTOMATION_DESK_DEFAULTS)
@@ -22723,8 +22750,12 @@ def get_tenant_trade_automation_watchdog(
     entry_window = dict(market_session.get("entry_window_explainer") or {})
     entry_state = str(entry_window.get("state") or "").strip().lower()
     market_closed_like = entry_state in {"market_closed", "pre_open_waiting", "close_cleanup", "post_close_review"}
+    safety_reason = str(safety.get("reason") or "").strip().lower()
+    risk_gate_waiting_for_arm = safety_reason == "automation_disarmed" or "not armed" in str(entry_window.get("current_blocker") or safety.get("blocker") or "").strip().lower()
     risk_gate_status = (
-        "blocked"
+        "watching"
+        if risk_gate_waiting_for_arm
+        else "blocked"
         if active_window and str(safety.get("status") or "").strip().lower() == SAFETY_STATE_BLOCKED and not market_closed_like
         else "watching"
         if market_closed_like or expected_waiting_state
@@ -22930,7 +22961,7 @@ def get_tenant_trade_automation_watchdog(
             risk_gate_status,
             entry_window.get("current_blocker") or "Target lock, loss lock, cooldown, heat, route, and market-session gates.",
             checked_at=now,
-            blocker=entry_window.get("current_blocker") if risk_gate_status in {"blocked", "degraded"} else None,
+            blocker=entry_window.get("current_blocker") if risk_gate_status in {"blocked", "degraded"} and not risk_gate_waiting_for_arm else None,
             next_action=entry_window.get("next_action") or "Expected market-closed and close-cleanup states are not system failures.",
             metadata={"entry_window": entry_window, "safety_state": safety},
             links={"safety_state": links.get("safety_state") or "/api/orgs/trade-automation/safety-state"},
@@ -22952,7 +22983,8 @@ def get_tenant_trade_automation_watchdog(
         {
             "key": item.get("key"),
             "label": item.get("label"),
-            "blocker": item.get("blocker") or item.get("detail"),
+            "blocker": item.get("blocker"),
+            "detail": item.get("detail"),
             "next_action": item.get("next_action"),
         }
         for item in watchdog_components

@@ -8,6 +8,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Iterable
 
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 DEFAULT_ROOT = Path(".")
@@ -897,6 +898,31 @@ def due_lifecycle_rows(
     return due
 
 
+def outcome_row_is_final(row: dict[str, Any]) -> bool:
+    return (
+        bool(row.get("available"))
+        and safe_float(row.get("actual_forward_return")) is not None
+        and safe_float(row.get("baseline_forward_return")) is not None
+    )
+
+
+def final_outcome_keys(outcome_rows: Iterable[dict[str, Any]]) -> set[str]:
+    return {
+        str(row.get("idempotency_key"))
+        for row in outcome_rows
+        if row.get("idempotency_key") and outcome_row_is_final(row)
+    }
+
+
+def outcome_rows_by_idempotency_key(outcome_rows: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in outcome_rows:
+        key = clean_text(row.get("idempotency_key"))
+        if key:
+            grouped[key].append(row)
+    return dict(grouped)
+
+
 def load_outcome_index(root: Path | str = DEFAULT_ROOT, tenant_slug: str = "systematic-equities") -> dict[str, list[dict[str, Any]]]:
     root_path = Path(root)
     index: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -996,8 +1022,8 @@ def stamp_due_candidate_outcomes(
     current = now or datetime.now(timezone.utc)
     lifecycle_rows = load_lifecycle_rows(root_path, tenant_slug)
     outcome_rows = load_outcome_rows(root_path, tenant_slug)
-    existing_keys = {str(row.get("idempotency_key")) for row in outcome_rows if row.get("idempotency_key")}
-    due = due_lifecycle_rows(lifecycle_rows, now=current, existing_keys=existing_keys)
+    existing_rows_by_key = outcome_rows_by_idempotency_key(outcome_rows)
+    due = due_lifecycle_rows(lifecycle_rows, now=current, existing_keys=final_outcome_keys(outcome_rows))
     price_timeline = build_price_timeline(lifecycle_rows)
     records: list[dict[str, Any]] = []
     for item in due[:max_due]:
@@ -1011,11 +1037,32 @@ def stamp_due_candidate_outcomes(
         )
         records.append(record)
 
+    records_to_write: list[dict[str, Any]] = []
+    skipped_unavailable_duplicate_count = 0
+    superseded_unavailable_count = 0
+    for record in records:
+        key = clean_text(record.get("idempotency_key"))
+        existing_rows = existing_rows_by_key.get(key or "", [])
+        existing_final = any(outcome_row_is_final(row) for row in existing_rows)
+        if existing_final:
+            continue
+        if record.get("available"):
+            if existing_rows:
+                record["supersedes_unavailable_count"] = len(existing_rows)
+                superseded_unavailable_count += len(existing_rows)
+            records_to_write.append(record)
+        elif not existing_rows:
+            records_to_write.append(record)
+        else:
+            record["diagnostic_rechecked"] = True
+            record["persisted"] = False
+            skipped_unavailable_duplicate_count += 1
+
     written = 0
     write_errors: list[str] = []
-    if persist and records:
+    if persist and records_to_write:
         rows_by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for record in records:
+        for record in records_to_write:
             rows_by_day[candidate_day(record)].append(record)
         for day, rows in rows_by_day.items():
             target = root_path / "runtime-exports" / "candidate-outcomes" / day / f"{tenant_slug}.jsonl"
@@ -1030,7 +1077,10 @@ def stamp_due_candidate_outcomes(
         "existing_outcome_rows": len(outcome_rows),
         "due_count": len(due),
         "processed_count": len(records),
+        "write_candidate_count": len(records_to_write),
         "written_count": written,
+        "skipped_unavailable_duplicate_count": skipped_unavailable_duplicate_count,
+        "superseded_unavailable_count": superseded_unavailable_count,
         "available_count": sum(1 for row in records if row.get("available")),
         "unavailable_count": sum(1 for row in records if not row.get("available")),
         "baseline_coverage_count": sum(1 for row in records if row.get("baseline_available")),
@@ -1042,10 +1092,12 @@ def stamp_due_candidate_outcomes(
     if write_errors:
         warnings.extend(write_errors)
     if records and summary["available_count"] < len(records):
-        warnings.append("Some matured horizons were stamped as unavailable because required observed prices or baselines were missing.")
+        warnings.append("Some matured horizons remain unavailable because required observed prices or baselines are missing.")
+    if skipped_unavailable_duplicate_count:
+        warnings.append("Unavailable diagnostics were rechecked but not rewritten because matching unavailable rows already exist.")
     return serialize_value(
         {
-            "status": "ready" if records and not write_errors else "empty" if not records else "needs_attention",
+            "status": "ready" if records and summary["available_count"] == len(records) and not write_errors else "empty" if not records else "needs_attention",
             "generated_at": utc_now(),
             "research_only": True,
             "paper_only": True,
@@ -1059,6 +1111,7 @@ def stamp_due_candidate_outcomes(
             "missing_fields": dict(missing_counter),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_outcomes_stamp_due"),
         }
     )
 
@@ -1075,8 +1128,7 @@ def build_evidence_outcomes_report(
     lifecycle_rows = load_lifecycle_rows(root_path, tenant_slug)
     outcome_rows = load_outcome_rows(root_path, tenant_slug)
     outcome_index = load_outcome_index(root_path, tenant_slug)
-    existing_keys = {str(row.get("idempotency_key")) for row in outcome_rows if row.get("idempotency_key")}
-    due = due_lifecycle_rows(lifecycle_rows, now=current, existing_keys=existing_keys)
+    due = due_lifecycle_rows(lifecycle_rows, now=current, existing_keys=final_outcome_keys(outcome_rows))
     stamped_available = [row for row in outcome_rows if row.get("available")]
     baseline_available = [row for row in outcome_rows if row.get("baseline_available") or row.get("baseline_forward_return") is not None]
     execution_available = [
@@ -1154,6 +1206,7 @@ def build_evidence_outcomes_report(
             "missing_fields": dict(missing_counter),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_outcomes"),
         }
     )
 

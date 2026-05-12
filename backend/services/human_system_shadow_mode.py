@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from backend.services.evidence_reward_engine import get_evidence_reward_summary
 from backend.services.forecast_validation_engine import get_forecast_validation_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 from backend.services.storage_utils import read_json_file, write_json_file
 
@@ -45,6 +46,108 @@ REQUIRED_HUMAN_FIELDS: tuple[str, ...] = (
     "human_horizon_minutes",
 )
 REQUIRED_OUTCOME_FIELDS: tuple[str, ...] = ("actual_forward_return", "baseline_forward_return")
+REQUIRED_SYSTEM_FIELDS: tuple[str, ...] = (
+    "system_direction",
+    "system_confidence",
+    "system_target_pct",
+    "system_invalidation_level",
+    "system_horizon_minutes",
+)
+REQUIRED_COST_RISK_FIELDS: tuple[str, ...] = (
+    "cost_model",
+    "spread",
+    "slippage",
+    "fill_assumption",
+    "risk_adjustment",
+    "risk_gate_state",
+    "kill_switch_state",
+    "portfolio_exposure",
+)
+MIN_SHADOW_COMPARISON_COUNT = 3
+MIN_SHADOW_PROOF_COVERAGE = 0.80
+
+SHADOW_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "same_opportunity_sample",
+        "label": "Same-opportunity sample",
+        "metric": "comparison_count",
+        "threshold": MIN_SHADOW_COMPARISON_COUNT,
+        "comparison": ">=",
+        "safe_next_action": "Capture more human and system decisions on the same candidate set before making comparison claims.",
+    },
+    {
+        "key": "same_opportunity_linkage",
+        "label": "Same-opportunity linkage",
+        "metric": "same_opportunity_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Link each human thesis to the exact candidate, system prediction, and matching horizon.",
+    },
+    {
+        "key": "human_thesis_contract",
+        "label": "Human thesis contract",
+        "metric": "human_contract_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Require human direction, confidence, target, invalidation, horizon, and a specific thesis before scoring.",
+    },
+    {
+        "key": "system_forecast_contract",
+        "label": "System forecast contract",
+        "metric": "system_contract_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach system direction, confidence, target, invalidation, and horizon to each comparison row.",
+    },
+    {
+        "key": "outcome_contract",
+        "label": "Outcome contract",
+        "metric": "outcome_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach actual forward return, baseline return, target, invalidation, and outcome-window close evidence.",
+    },
+    {
+        "key": "cost_risk_context",
+        "label": "Cost and risk context",
+        "metric": "cost_risk_context_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Attach spread, slippage, fill assumptions, risk adjustment, gate state, kill-switch state, and portfolio exposure.",
+    },
+    {
+        "key": "decision_quality_metrics",
+        "label": "Decision quality metrics",
+        "metric": "decision_quality_metric_count",
+        "threshold": 6,
+        "comparison": ">=",
+        "safe_next_action": "Report direction accuracy, target hit, false positives, false negatives, override quality, and missed winners for both sides.",
+    },
+    {
+        "key": "system_after_cost_improvement",
+        "label": "System after-cost improvement",
+        "metric": "system_decision_quality_delta",
+        "threshold": 0.0,
+        "comparison": ">=",
+        "safe_next_action": "Do not claim the system improves or beats a skilled trader until system net decision quality is at least as strong after costs and risk adjustment.",
+    },
+    {
+        "key": "pre_outcome_capture",
+        "label": "Pre-outcome capture",
+        "metric": "pre_outcome_capture_coverage",
+        "threshold": MIN_SHADOW_PROOF_COVERAGE,
+        "comparison": ">=",
+        "safe_next_action": "Timestamp human theses before the outcome window closes; do not hindsight-edit thesis records.",
+    },
+    {
+        "key": "shadow_mode_safety_boundary",
+        "label": "Shadow-mode safety boundary",
+        "metric": "shadow_mode_safety_boundary",
+        "threshold": 1,
+        "comparison": ">=",
+        "safe_next_action": "Keep Shadow Mode as research metadata only; do not place, route, approve, or configure trades.",
+    },
+)
 SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "apikey", "access_key", "private_key", "account_id")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORE_PATH = PROJECT_ROOT / "runtime-exports" / "human-system-shadow-mode" / "human_theses.json"
@@ -89,6 +192,36 @@ def _ratio(numerator: int | float, denominator: int | float) -> float | None:
     if denominator <= 0:
         return None
     return round(float(numerator) / float(denominator), 6)
+
+
+def _passes_threshold(value: Any, threshold: float, comparison: str) -> bool:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return False
+    if comparison == ">=":
+        return numeric >= threshold
+    if comparison == ">":
+        return numeric > threshold
+    if comparison == "<=":
+        return numeric <= threshold
+    if comparison == "<":
+        return numeric < threshold
+    return numeric == threshold
+
+
+def _has_value(value: Any) -> bool:
+    return value is not None and value != "" and str(value).strip().lower() not in {"unknown", "nan", "none", "null"}
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _listify(value: Any) -> list[Any]:
@@ -398,14 +531,26 @@ def create_human_thesis(payload: dict[str, Any], *, current_user: Any = None, st
         "system_horizon_minutes": _safe_int(sanitized.get("system_horizon_minutes")),
         "system_forecast_reward": _safe_float(sanitized.get("system_forecast_reward")),
         "system_candidate_reward": _safe_float(sanitized.get("system_candidate_reward")),
+        "cost_model": str(sanitized.get("cost_model") or "").strip() or None,
+        "human_reward_after_costs": _safe_float(sanitized.get("human_reward_after_costs")),
+        "system_reward_after_costs": _safe_float(sanitized.get("system_reward_after_costs")),
+        "spread": _safe_float(sanitized.get("spread")),
+        "slippage": _safe_float(sanitized.get("slippage")),
+        "fill_assumption": str(sanitized.get("fill_assumption") or "").strip() or None,
+        "risk_adjustment": _safe_float(sanitized.get("risk_adjustment")),
+        "risk_gate_state": str(sanitized.get("risk_gate_state") or "").strip() or None,
+        "kill_switch_state": str(sanitized.get("kill_switch_state") or "").strip() or None,
+        "portfolio_exposure": _safe_float(sanitized.get("portfolio_exposure")),
         "actual_forward_return": _safe_float(sanitized.get("actual_forward_return")),
         "baseline_forward_return": _safe_float(sanitized.get("baseline_forward_return")),
+        "outcome_window_closed_at": str(sanitized.get("outcome_window_closed_at") or sanitized.get("outcome_at") or "").strip() or None,
         "target_hit": sanitized.get("target_hit"),
         "invalidation_hit": sanitized.get("invalidation_hit"),
         "max_adverse_excursion": _safe_float(sanitized.get("max_adverse_excursion")),
         "time_to_target": _safe_float(sanitized.get("time_to_target")),
         "blockers": [str(item).strip() for item in _listify(sanitized.get("blockers")) if str(item).strip()],
         "metadata": _sanitize_value(sanitized.get("metadata") or {}),
+        "immutable_after_outcome_close": bool(sanitized.get("immutable_after_outcome_close", False)),
         "research_only": True,
         "paper_route_only": True,
     }
@@ -490,6 +635,10 @@ def build_shadow_comparison_row(human: dict[str, Any], *, system_records: list[d
         missing.append("system_horizon_minutes")
     human_total = _safe_float(human_reward.get("total_reward"))
     system_total = _safe_float(system_reward.get("total_reward"))
+    human_after_costs = _safe_float(human.get("human_reward_after_costs"))
+    system_after_costs = _safe_float(human.get("system_reward_after_costs"))
+    human_net_after_costs = human_after_costs if human_after_costs is not None else human_total
+    system_net_after_costs = system_after_costs if system_after_costs is not None else system_total
     if human_total is None and system_total is None:
         winner = "insufficient_data"
     elif system_total is None or (human_total is not None and human_total > system_total):
@@ -524,13 +673,28 @@ def build_shadow_comparison_row(human: dict[str, Any], *, system_records: list[d
             "system_target_pct": system_target_pct,
             "system_invalidation_level": system_invalidation,
             "system_horizon_minutes": system_horizon,
+            "cost_model": human.get("cost_model"),
+            "human_reward_after_costs": human_after_costs,
+            "system_reward_after_costs": system_after_costs,
+            "human_net_decision_quality_after_costs": human_net_after_costs,
+            "system_net_decision_quality_after_costs": system_net_after_costs,
+            "spread": _safe_float(human.get("spread")),
+            "slippage": _safe_float(human.get("slippage")),
+            "fill_assumption": human.get("fill_assumption"),
+            "risk_adjustment": _safe_float(human.get("risk_adjustment")),
+            "risk_gate_state": human.get("risk_gate_state"),
+            "kill_switch_state": human.get("kill_switch_state"),
+            "portfolio_exposure": _safe_float(human.get("portfolio_exposure")),
             "actual_forward_return": human.get("actual_forward_return"),
             "baseline_forward_return": human.get("baseline_forward_return"),
+            "outcome_window_closed_at": human.get("outcome_window_closed_at") or human.get("outcome_at"),
             "target_hit": human_reward.get("target_hit"),
             "invalidation_hit": human_reward.get("invalidation_hit"),
             "max_adverse_excursion": human.get("max_adverse_excursion"),
             "time_to_target": human.get("time_to_target"),
             "blockers": [str(item) for item in _listify(human.get("blockers"))],
+            "record_digest": human.get("record_digest"),
+            "immutable_after_outcome_close": bool(human.get("immutable_after_outcome_close", False)),
             "human_reward": human_total,
             "system_reward": system_total,
             "human_reward_components": human_reward.get("components", {}),
@@ -630,6 +794,156 @@ def compute_shadow_analytics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _pre_outcome_captured(row: dict[str, Any]) -> bool:
+    created_at = _parse_time(row.get("created_at"))
+    closed_at = _parse_time(row.get("outcome_window_closed_at"))
+    return created_at is not None and closed_at is not None and created_at < closed_at
+
+
+def _shadow_row_readiness(row: dict[str, Any]) -> dict[str, Any]:
+    same_horizon = row.get("human_horizon_minutes") == row.get("system_horizon_minutes")
+    same_opportunity = bool(row.get("linked_candidate_id")) and bool(row.get("system_prediction_id")) and same_horizon
+    human_contract = not human_missing_fields(row) and bool(str(row.get("human_reason") or "").strip())
+    system_contract = all(_has_value(row.get(field)) for field in REQUIRED_SYSTEM_FIELDS)
+    outcome_contract = all(_has_value(row.get(field)) for field in REQUIRED_OUTCOME_FIELDS) and row.get("target_hit") is not None and row.get("invalidation_hit") is not None
+    cost_risk_context = all(_has_value(row.get(field)) for field in REQUIRED_COST_RISK_FIELDS)
+    reward_comparable = row.get("human_net_decision_quality_after_costs") is not None and row.get("system_net_decision_quality_after_costs") is not None
+    pre_outcome = _pre_outcome_captured(row)
+    warnings: list[str] = list(row.get("warnings") or [])
+    if not same_opportunity:
+        warnings.append("Same-opportunity linkage is incomplete.")
+    if not human_contract:
+        warnings.append("Human thesis contract is incomplete.")
+    if not system_contract:
+        warnings.append("System forecast contract is incomplete.")
+    if not outcome_contract:
+        warnings.append("Outcome contract is incomplete.")
+    if not cost_risk_context:
+        warnings.append("Cost or risk context is incomplete.")
+    if not pre_outcome:
+        warnings.append("Pre-outcome capture cannot be proven.")
+    return {
+        "human_thesis_id": row.get("human_thesis_id"),
+        "symbol": row.get("symbol"),
+        "linked_candidate_id": row.get("linked_candidate_id"),
+        "system_prediction_id": row.get("system_prediction_id"),
+        "same_opportunity_complete": same_opportunity,
+        "human_contract_complete": human_contract,
+        "system_contract_complete": system_contract,
+        "outcome_contract_complete": outcome_contract,
+        "cost_risk_context_complete": cost_risk_context,
+        "reward_comparable": reward_comparable,
+        "pre_outcome_capture_proven": pre_outcome,
+        "same_horizon": same_horizon,
+        "human_net_decision_quality_after_costs": row.get("human_net_decision_quality_after_costs"),
+        "system_net_decision_quality_after_costs": row.get("system_net_decision_quality_after_costs"),
+        "winner": row.get("winner"),
+        "warnings": list(dict.fromkeys(warnings)),
+        "missing_fields": row.get("missing_fields") or [],
+        "research_only": True,
+        "changes_execution": False,
+        "changes_order_submission": False,
+        "changes_broker_routes": False,
+        "changes_risk_gates": False,
+        "changes_ranking_weights": False,
+    }
+
+
+def build_shadow_mode_proof_summary(rows: list[dict[str, Any]], aggregations: dict[str, Any]) -> dict[str, Any]:
+    comparison_count = len(rows)
+    readiness = [_shadow_row_readiness(row) for row in rows]
+
+    def coverage(field: str) -> float:
+        return _ratio(sum(1 for row in readiness if row.get(field)), comparison_count) or 0.0
+
+    comparable_rows = [row for row in readiness if row.get("reward_comparable")]
+    system_quality_delta = None
+    if comparable_rows:
+        system_quality_delta = round(
+            (_mean(row.get("system_net_decision_quality_after_costs") for row in comparable_rows) or 0.0)
+            - (_mean(row.get("human_net_decision_quality_after_costs") for row in comparable_rows) or 0.0),
+            6,
+        )
+    metric_values = [
+        aggregations.get("human_direction_accuracy"),
+        aggregations.get("system_direction_accuracy"),
+        aggregations.get("human_target_hit_rate"),
+        aggregations.get("system_target_hit_rate"),
+        aggregations.get("human_false_positive_rate"),
+        aggregations.get("system_false_positive_rate"),
+        aggregations.get("human_false_negative_rate"),
+        aggregations.get("system_false_negative_rate"),
+        (aggregations.get("override_quality") or {}).get("human_override_win_rate"),
+        (aggregations.get("missed_winner_comparison") or {}).get("human_caught_rate"),
+        (aggregations.get("missed_winner_comparison") or {}).get("system_caught_rate"),
+    ]
+    decision_quality_metric_count = sum(1 for value in metric_values if value is not None)
+    safety_boundary = int(
+        SAFETY_FLAGS["can_submit_orders"] is False
+        and SAFETY_FLAGS["can_submit_live_orders"] is False
+        and SAFETY_FLAGS["writes_execution_config"] is False
+        and SAFETY_FLAGS["writes_broker_config"] is False
+        and SAFETY_FLAGS["writes_risk_config"] is False
+        and SAFETY_FLAGS["writes_ranking_config"] is False
+        and SAFETY_FLAGS["writes_order_state"] is False
+    )
+    values = {
+        "comparison_count": comparison_count,
+        "same_opportunity_coverage": coverage("same_opportunity_complete"),
+        "human_contract_coverage": coverage("human_contract_complete"),
+        "system_contract_coverage": coverage("system_contract_complete"),
+        "outcome_coverage": coverage("outcome_contract_complete"),
+        "cost_risk_context_coverage": coverage("cost_risk_context_complete"),
+        "decision_quality_metric_count": decision_quality_metric_count,
+        "system_decision_quality_delta": system_quality_delta,
+        "pre_outcome_capture_coverage": coverage("pre_outcome_capture_proven"),
+        "shadow_mode_safety_boundary": safety_boundary,
+    }
+    requirement_rows: list[dict[str, Any]] = []
+    for requirement in SHADOW_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        requirement_rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "passed" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Shadow-mode proof is same-opportunity research review only; it is not proof of alpha, guaranteed returns, investment advice, live-trading readiness, or order approval.",
+                "research_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+            }
+        )
+    proof_ready = bool(requirement_rows) and all(row["passed"] for row in requirement_rows)
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+            "proof_ready": proof_ready,
+            "requirements": requirement_rows,
+            "summary": {
+                **values,
+                "reward_comparable_count": len(comparable_rows),
+                "requirement_count": len(requirement_rows),
+                "passed_requirement_count": sum(1 for row in requirement_rows if row["passed"]),
+                "missing_requirement_count": sum(1 for row in requirement_rows if not row["passed"]),
+            },
+            "record_readiness": readiness[:100],
+            "safe_next_actions": [row["safe_next_action"] for row in requirement_rows if not row["passed"]],
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def build_shadow_mode_report(
     *,
     records: Iterable[dict[str, Any]] | None = None,
@@ -644,6 +958,7 @@ def build_shadow_mode_report(
     source_warnings.extend(warnings)
     rows = [build_shadow_comparison_row(record, system_records=system_records) for record in human_records if isinstance(record, dict)]
     aggregations = compute_shadow_analytics(rows)
+    proof_summary = build_shadow_mode_proof_summary(rows, aggregations)
     missing_counter: Counter[str] = Counter()
     for row in rows:
         missing_counter.update(row.get("missing_fields") or [])
@@ -665,8 +980,20 @@ def build_shadow_mode_report(
         "human_avg_reward": aggregations.get("human_avg_reward"),
         "system_avg_reward": aggregations.get("system_avg_reward"),
         "human_vs_system_edge": aggregations.get("human_vs_system_edge"),
+        "shadow_proof_ready": proof_summary["proof_ready"],
+        "shadow_proof_status": proof_summary["status"],
+        "shadow_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "shadow_requirements_total": proof_summary["summary"]["requirement_count"],
+        "same_opportunity_coverage": proof_summary["summary"]["same_opportunity_coverage"],
+        "human_contract_coverage": proof_summary["summary"]["human_contract_coverage"],
+        "system_contract_coverage": proof_summary["summary"]["system_contract_coverage"],
+        "outcome_coverage": proof_summary["summary"]["outcome_coverage"],
+        "cost_risk_context_coverage": proof_summary["summary"]["cost_risk_context_coverage"],
+        "pre_outcome_capture_coverage": proof_summary["summary"]["pre_outcome_capture_coverage"],
+        "system_decision_quality_delta": proof_summary["summary"]["system_decision_quality_delta"],
         **SAFETY_FLAGS,
     }
+    aggregations["shadow_proof"] = proof_summary
     return serialize_value(
         {
             "status": status,
@@ -675,11 +1002,13 @@ def build_shadow_mode_report(
             "summary": summary,
             "records": rows[:250],
             "comparisons": rows[:250],
+            "proof_summary": proof_summary,
             "aggregations": aggregations,
             "warnings": list(dict.fromkeys(warnings)),
             "missing_fields": dict(missing_counter),
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="shadow_mode"),
         }
     )
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -28,9 +29,13 @@ function humanize(value, fallback = 'Unknown') {
 
 function verdictTone(verdict) {
   if (verdict === 'edge_detected') return 'positive'
+  if (verdict === 'ready' || verdict === 'ready_for_human_review') return 'positive'
   if (verdict === 'weak_edge_detected') return 'warning'
   if (verdict === 'no_edge_detected') return 'negative'
   if (verdict === 'data_quality_too_weak') return 'warning'
+  if (verdict === 'needs_evidence') return 'warning'
+  if (verdict === 'blocked_by_evidence') return 'warning'
+  if (verdict === 'no_records') return 'neutral'
   return 'neutral'
 }
 
@@ -102,6 +107,11 @@ export default function ProfessionalBenchmarkPage() {
   const outcomeSummary = outcomeReport?.summary || {}
   const sections = report?.sections || {}
   const aggregations = report?.aggregations || {}
+  const proofSummary = report?.proof_summary || sections.benchmark_proof || aggregations.benchmark_proof || {}
+  const proofRows = proofSummary?.requirements || []
+  const hardeningPlan = report?.benchmark_hardening_plan || sections.benchmark_hardening_plan || aggregations.benchmark_hardening_plan || {}
+  const hardeningSummary = hardeningPlan?.summary || {}
+  const hardeningRows = hardeningPlan?.items || []
   const baselineRows = report?.baselines?.items || []
   const scoreBucketSection = sections.score_bucket_separation || aggregations.score_bucket_separation || {}
   const blockerSection = sections.blocker_value || aggregations.blocker_value || {}
@@ -147,6 +157,7 @@ export default function ProfessionalBenchmarkPage() {
           <MetricCard label="Average reward" value={formatNumber(summary.average_reward)} helper="Rewardable prediction contracts only" />
           <MetricCard label="Baseline edge" value={formatNumber(summary.baseline_relative_edge)} helper="System expected value minus explicit baseline average" />
           <MetricCard label="Score bucket lift" value={formatNumber(summary.score_bucket_lift)} helper="80+ score buckets minus 0-59 buckets" />
+          <MetricCard label="After-cost edge" value={formatNumber(summary.edge_after_costs)} helper="Slippage/spread-adjusted reward evidence" />
           <MetricCard label="Data quality" value={`${formatNumber(summary.data_quality_score, 0)}%`} helper={summary.out_of_sample_status || 'Out-of-sample labels pending'} />
         </div>
       </SectionCard>
@@ -158,6 +169,47 @@ export default function ProfessionalBenchmarkPage() {
           <MetricCard label="Baseline coverage" value={formatRatio(outcomeSummary.baseline_coverage_rate)} helper="Primary baseline present" />
           <MetricCard label="Execution-cost coverage" value={formatRatio(outcomeSummary.execution_cost_coverage_rate)} helper="Spread, slippage, or paper fill cost evidence" />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Benchmark Proof Gate" subtitle="Human-review checklist for baseline-relative edge, score-bucket lift, after-cost reward, sample size, and data quality. This is not an alpha or performance claim.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Proof status" value={humanize(proofSummary.status || summary.benchmark_proof_status || 'needs_evidence')} helper={`${summary.benchmark_proof_requirements_passed ?? 0}/${summary.benchmark_proof_requirements_total ?? 6} requirements passed`} />
+          <MetricCard label="Baselines available" value={proofSummary.summary?.available_baseline_count ?? 0} helper="Explicit forward-only baseline rows" />
+          <MetricCard label="After-cost reward" value={formatNumber(proofSummary.summary?.slippage_adjusted_reward)} helper="Positive after-cost evidence required" />
+        </div>
+        <DataTable
+          rows={proofRows}
+          empty={loading ? 'Loading benchmark proof requirements...' : 'No benchmark proof requirements are available.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={verdictTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'value', label: 'Value', render: (row) => formatNumber(row.value) },
+            { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison === 'greater_than' ? '>' : '>='} ${formatNumber(row.threshold)}` },
+            { key: 'missing', label: 'Missing fields', render: (row) => row.missing_fields?.length ? row.missing_fields.join(', ') : 'None' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Benchmark Hardening Plan" subtitle="Proof-first blockers for benchmark review and claim boundaries. Blocked claims stay blocked until the required evidence exists.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Hardening status" value={humanize(hardeningPlan.status || summary.benchmark_hardening_status || 'needs_evidence')} helper={`${hardeningSummary.open_item_count ?? summary.benchmark_hardening_open_items ?? 0} open hardening items`} />
+          <MetricCard label="Critical blockers" value={hardeningSummary.critical_open_items ?? summary.benchmark_hardening_critical_open_items ?? 0} helper={hardeningSummary.top_hardening_item || summary.top_hardening_item || 'No top hardening item'} />
+          <MetricCard label="Internal review" value={hardeningSummary.claim_permissions?.cautious_internal_benchmark_review || summary.claim_permissions?.cautious_internal_benchmark_review ? 'Allowed' : 'Blocked'} helper="Human research review only" />
+          <MetricCard label="Blocked claims" value={(hardeningSummary.blocked_claims || []).length || 0} helper={(hardeningSummary.blocked_claims || []).slice(0, 3).map(humanize).join(', ') || 'None'} />
+        </div>
+        <DataTable
+          rows={hardeningRows}
+          empty={loading ? 'Loading benchmark hardening plan...' : 'No benchmark hardening plan is available.'}
+          columns={[
+            { key: 'title', label: 'Hardening item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={verdictTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing', label: 'Missing evidence', render: (row) => row.missing_fields?.length ? row.missing_fields.join(', ') : 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => row.blocked_claims?.length ? row.blocked_claims.map(humanize).join(', ') : 'None' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Safety Boundary" subtitle="Benchmark reports are analytics only. They cannot route, approve, or force trades.">
@@ -296,6 +348,8 @@ export default function ProfessionalBenchmarkPage() {
           ]}
         />
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

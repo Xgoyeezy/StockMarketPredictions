@@ -10,9 +10,12 @@ This is a planning, roadmap, architecture, acceptance criteria, and backlog docu
 - Current state and professional ratings: `docs/CURRENT_STATE_AND_PROFESSIONAL_RATINGS.md`
 - Buyer positioning: `docs/PRODUCT_POSITIONING_AND_BUYER_CATEGORIES.md`
 - Existing 10/10 roadmap: `docs/TEN_OUT_OF_TEN_ROADMAP.md`
+- Proof-first roadmap discipline: `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`
+- Future expansion backlog: `docs/TEN_OUT_OF_TEN_ROADMAP.md#future-expansion-backlog`
 - Acceptance checklist: `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`
 - 30-60-90 day plan: `docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md`
 - Proof gates: `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`
+- Technical Analysis evidence setup research: `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`
 - Professional Benchmark: `docs/PROFESSIONAL_BENCHMARK_SUITE.md`
 - Walk-Forward: `docs/WALK_FORWARD_EXPERIMENT_REGISTRY.md`
 - Data Completeness: `docs/DATA_COMPLETENESS_LAYER.md`
@@ -37,6 +40,26 @@ These are current estimated readiness scores. They are not official industry rat
 | 4 | Top discretionary trader comparison | 5/10 | The system improves or beats skilled human decision quality on the same opportunity set after costs and risk adjustment. |
 | 5 | Institutional quant desk or enterprise control plane | 3/10 | An evaluator can inspect lineage, controls, approvals, evidence, forecasts, rewards, risks, incidents, and permissions without verbal explanation. |
 | 6 | HFT or elite execution platform | 2/10 | Only if a separate future infrastructure thesis proves latency-sensitive execution against professional market infrastructure. |
+
+## Future Potential Ratings With Roadmap Additions
+
+These are future potential estimates, not current implementation ratings. They are not proof of alpha, not investor performance claims, and not a reason to weaken proof gates. They assume Market Specialist Desks, Visual Strategy Evidence Builder, Hedge Fund AI Role Agents, Off-Exchange Liquidity Dashboard, Broker-Neutral Execution Architecture, Free-First Provider Strategy, Provider ROI Gates, Small Capital Growth Framework, and C++ Core Accelerators are implemented safely as future roadmap work only.
+
+| Rank | Category | Future potential estimate |
+| ---: | --- | ---: |
+| 1 | Retail trading bot | 9.2/10 |
+| 2 | Solo systematic trader platform | 8.4/10 |
+| 3 | Small prop shop or small fund research stack | 7.2/10 |
+| 4 | Top discretionary trader comparison | 6.8/10 |
+| 5 | Institutional quant desk or enterprise control plane | 4.5/10 |
+| 6 | HFT or elite execution platform | 2.3/10 |
+
+Assumptions:
+
+- AI agents and off-exchange liquidity remain research-only.
+- Broker-neutral execution remains gated and manual until separately approved.
+- No autonomous live-money trading is enabled.
+- Category changes require the proof gates in `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`, not roadmap intent.
 
 ## Safety Boundaries
 
@@ -114,6 +137,10 @@ Current major surfaces include Strategies, Market Watchdog, Live Console, Candid
 
 Hedge Fund AI Agents v1 adds a read-only decision-support committee surface. It writes append-only sanitized research memos only, cannot place orders, cannot clear gates, cannot change broker routes, cannot change risk limits, cannot mutate ranking weights, and cannot approve live trading. See `docs/HEDGE_FUND_AI_AGENTS.md`.
 
+Future expansion surfaces are documented in the roadmap backlog only. Market Specialist Desks are context engines, not order bots. The Visual Strategy Evidence Builder is a no-code evidence contract builder, not a no-code trading bot. The Off-Exchange Liquidity Dashboard is passive research context, not a trade trigger. Broker-neutral execution planning means Alpaca becomes one adapter, not that Quant Evidence OS becomes a broker. C++ Core Accelerators are performance helpers only and must not own trading authority.
+
+The future market x strategy design should keep current strategy desks as the strategy layer and add market desks as a separate context layer. Candidate Fusion combines market context and strategy logic into one evidence-backed candidate while risk gates remain authoritative.
+
 Current strategy desks:
 
 - Macro Trend Desk.
@@ -140,6 +167,8 @@ The path to 10/10 is not one feature. It is a staged proof program:
 ## Upgrade Dependency Spine
 
 No category should be marked 10/10 by opinion, UI completeness, or evidence volume alone. A category moves only when the relevant acceptance checklist items are complete and the required proof gates pass.
+
+The proof-first discipline in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md` controls priority before expansion. Ambition is allowed, but proof decides priority. Foundation work on Data Completeness, Professional Benchmark, Walk-Forward, Execution Quality, Score Calibration, Risk Gates, Audit Trail, Evidence Reward, Forecast Validation, Candidate Diagnostics, Portfolio Risk, Human vs System Shadow Mode, and Research Promotion takes priority over new desks, agents, broker expansion, HFT research, C++ accelerators, or enterprise features.
 
 | Dependency | Categories primarily unlocked | Hard stop if missing |
 | --- | --- | --- |
@@ -1197,6 +1226,40 @@ Estimated priority: future only.
 
 What not to build yet: DMA, smart order routing, colocation, low-latency live execution.
 
+## Long-Term Build Sequence With Future Expansion
+
+This sequence captures current maturity work first and later expansion ideas second. It is a backlog order only. It does not implement features, alter runtime behavior, enable live trading, add broker routes, change risk gates, change order submission, or grant AI order authority.
+
+The near-term order is governed by `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. Expansion items below remain deferred unless they pass the Safety Gate, Data Gate, Benchmark Gate, Walk-Forward Gate, and Expansion Justification Gate.
+
+1. Finish current verification and safety audit.
+2. Finish Data Completeness hardening.
+3. Finish Professional Benchmark hardening.
+4. Finish Walk-Forward maturity.
+5. Finish Score Calibration and Feature Attribution.
+6. Finish Execution Quality and TCA maturity.
+7. Finish Portfolio Risk Intelligence maturity.
+8. Finish Human vs System Shadow Mode maturity.
+9. Finish Research Promotion maturity.
+10. Add AI Committee Agents as research-only memos.
+11. Add Market Specialist Desk registry.
+12. Add Candidate Fusion Engine.
+13. Add Market x Strategy Benchmark.
+14. Add Off-Exchange Liquidity Dashboard as passive background research.
+15. Add BrokerAdapter and MarketDataAdapter architecture.
+16. Add Capability Registry and Route Eligibility Engine.
+17. Add Broker Simulator Adapter.
+18. Add ETF Proxy Registry.
+19. Add Visual Strategy Evidence Builder.
+20. Add Retail onboarding and demo evidence mode.
+21. Add Pay Threshold and Provider ROI Gates.
+22. Add Governance, RBAC, model registry, and approval workflows.
+23. Add Institutional data lineage and audit hardening.
+24. Add C++ Core Accelerators only after profiling proves bottlenecks.
+25. Add HFT feasibility study only as a separate future thesis.
+
+Future roadmap additions may improve category readiness if implemented safely, but they do not raise current ratings by themselves. The build vs buy boundary stays intact: build truth, edge, safety, trust, evidence contracts, risk boundaries, and authority controls in-house; buy commodity infrastructure only when proof and provider ROI gates justify it.
+
 ## Feature To Rating Impact Map
 
 Impact labels: high, medium, low, not relevant, future only.
@@ -1254,16 +1317,21 @@ Allowed only when supported by current proof:
 
 ## Highest Priority Build
 
-The highest priority build is not HFT, live trading, or new broker routing. The highest priority is the proof chain:
+The highest priority build is not HFT, live trading, new broker routing, new market desks, visual builders, provider expansion, or C++ acceleration. The highest priority is the proof chain:
 
-1. Verification and safety audit.
-2. Data Completeness hardening.
+1. Post-Implementation Verification.
+2. Data Completeness cleanup.
 3. Professional Benchmark hardening.
-4. Walk-Forward Experiment Registry maturity.
+4. Walk-Forward validation.
 5. Score Calibration and Feature Attribution.
-6. Execution Quality and TCA maturity.
+6. Execution Quality and TCA.
+7. Risk Gate and Audit Trail hardening.
+8. Portfolio Risk cleanup.
+9. Human vs System validation.
+10. Research Promotion cleanup.
+11. Only then revisit expansion features.
 
-This sequence moves the strongest serious buyer category, Solo Systematic Trader Platform, from 7.5/10 toward 10/10 while also improving Retail, Small Fund, Discretionary, and Institutional readiness without changing trading behavior.
+This sequence moves the strongest serious buyer category, Solo Systematic Trader Platform, toward stronger proof while also improving Retail, Small Fund, Discretionary, and Institutional readiness without changing trading behavior. It does not authorize expansion features before the proof-first gates in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md` pass.
 
 ## Readiness Upgrade Rule
 

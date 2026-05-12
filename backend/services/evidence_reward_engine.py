@@ -16,6 +16,7 @@ from backend.services.candidate_outcome_stamping_service import (
     load_outcome_index,
     merge_outcome_into_candidate,
 )
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -1170,6 +1171,7 @@ def build_evidence_reward_report(
             "reward_by_score_bucket": score_buckets,
             "safe_recommendations": recommendations,
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_reward"),
         }
     )
 
