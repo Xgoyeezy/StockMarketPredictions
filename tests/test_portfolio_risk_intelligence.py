@@ -125,6 +125,19 @@ class PortfolioRiskIntelligenceTests(unittest.TestCase):
         self.assertGreaterEqual(report["missing_fields"].get("beta_to_QQQ", 0), 1)
         self.assertTrue(report["warnings"])
 
+    def test_simulation_evidence_rows_are_excluded(self) -> None:
+        report = build_portfolio_risk_report(
+            records=[
+                _row(record_id="paper", route="broker_paper"),
+                _row(record_id="simulation", route="broker_paper", evidence_pool="simulation_evidence"),
+                _row(record_id="nested-simulation", route="broker_paper", payload={"simulation_evidence": True}),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        self.assertEqual(report["summary"]["position_count"], 1)
+        self.assertEqual([record["record_id"] for record in report["records"]], ["paper"])
+
     def test_portfolio_risk_proof_ready_with_full_context(self) -> None:
         report = build_portfolio_risk_report(
             records=[

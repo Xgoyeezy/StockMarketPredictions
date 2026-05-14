@@ -17,7 +17,7 @@ The service reports:
 - `can_submit_live_orders: false`
 - `mutation: "none"`
 
-Portfolio Risk Intelligence is separate from existing safety gates and broker routing. Risk gates remain authoritative, and broker routes remain unchanged.
+Portfolio Risk Intelligence is separate from existing safety gates and broker routing. Risk gates remain authoritative, and broker routes remain unchanged. Rows marked as simulation evidence are excluded from paper-route portfolio risk visibility so simulation evidence remains separate from real-time market-observed evidence.
 
 ## Metrics
 

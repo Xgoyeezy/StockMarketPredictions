@@ -409,6 +409,14 @@ def _is_paper_route(row: dict[str, Any]) -> bool:
     return not route_text.strip()
 
 
+def _is_simulation_evidence(row: dict[str, Any]) -> bool:
+    for source in _nested_sources(row):
+        evidence_pool = str(source.get("evidence_pool") or "").strip().lower()
+        if source.get("simulation_evidence") or evidence_pool == "simulation_evidence":
+            return True
+    return False
+
+
 def _symbol(row: dict[str, Any]) -> str:
     return _first_text(row, ("symbol", "ticker", "underlying_symbol"), "unknown").strip().upper() or "UNKNOWN"
 
@@ -488,7 +496,7 @@ def _account_size(records: list[dict[str, Any]]) -> float:
 
 
 def normalize_portfolio_risk_record(row: dict[str, Any], index: int = 0) -> dict[str, Any] | None:
-    if not isinstance(row, dict) or not _is_paper_route(row):
+    if not isinstance(row, dict) or _is_simulation_evidence(row) or not _is_paper_route(row):
         return None
     symbol = _symbol(row)
     notional = compute_position_notional(row)
