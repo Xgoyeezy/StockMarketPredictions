@@ -143,6 +143,11 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
         self.assertTrue(all(row["manual_review_only"] for row in recommendations))
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertEqual(report["mutation"], "none")
 
     def test_calibration_proof_ready_with_bucket_feature_and_after_cost_lift(self) -> None:
@@ -229,6 +234,13 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
                 self.assertTrue(payload["ok"])
                 data = payload["data"]
                 self.assertTrue(data["research_only"])
+                self.assertFalse(data["can_submit_orders"])
+                self.assertFalse(data["can_submit_live_orders"])
+                self.assertFalse(data["can_change_broker_routes"])
+                self.assertFalse(data["can_bypass_risk_gates"])
+                self.assertFalse(data["can_clear_kill_switch"])
+                self.assertFalse(data["can_change_ranking_weights"])
+                self.assertFalse(data["can_grant_ai_order_authority"])
                 self.assertIn("summary", data)
                 self.assertIn("proof_summary", data)
                 self.assertIn("score_calibration_hardening_plan", data)
