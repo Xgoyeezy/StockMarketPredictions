@@ -704,7 +704,11 @@ def _prediction_reward_components(contract: PredictionContract, *, blocked: bool
 
 
 def _normalize_payload(payload: dict[str, Any], trade_by_candidate: dict[str, dict[str, Any]]) -> RewardRecord | None:
-    if _safe_bool(payload.get("simulation_evidence")) or str(payload.get("source") or "").lower() == "simulation_evidence":
+    if (
+        _safe_bool(payload.get("simulation_evidence"))
+        or str(payload.get("source") or "").lower() == "simulation_evidence"
+        or str(payload.get("evidence_pool") or "").lower() == "simulation_evidence"
+    ):
         return None
     symbol = _clean_text(payload.get("ticker") or payload.get("symbol"))
     if symbol:

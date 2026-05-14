@@ -251,7 +251,10 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
             root = Path(tmp)
             self._write_jsonl(
                 root / "runtime-exports" / "candidate-lifecycle" / "2026-05-05" / "test-tenant.jsonl",
-                [{**self._valid_prediction(candidate_lifecycle_id="sim-only"), "simulation_evidence": True}],
+                [
+                    {**self._valid_prediction(candidate_lifecycle_id="sim-only"), "simulation_evidence": True},
+                    {**self._valid_prediction(candidate_lifecycle_id="sim-pool"), "evidence_pool": "simulation_evidence"},
+                ],
             )
             self._write_jsonl(
                 root / "runtime-exports" / "simulation-evidence" / "2026-05-05" / "test-tenant.jsonl",
