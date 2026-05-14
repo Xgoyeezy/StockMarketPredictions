@@ -112,6 +112,56 @@ class HumanSystemShadowModeTests(unittest.TestCase):
         self.assertLess(row["human_reward"], 0)
         self.assertLess(row["system_reward"], 0)
 
+    def test_simulation_human_rows_are_excluded_from_shadow_report(self) -> None:
+        report = build_shadow_mode_report(
+            records=[
+                _human(human_thesis_id="human-paper"),
+                _human(human_thesis_id="human-simulation", evidence_pool="simulation_evidence"),
+                _human(human_thesis_id="human-nested-simulation", payload={"simulation_evidence": True}),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        self.assertEqual(report["summary"]["record_count"], 1)
+        self.assertEqual([record["human_thesis_id"] for record in report["records"]], ["human-paper"])
+
+    def test_simulation_system_rows_are_not_matched(self) -> None:
+        row = build_shadow_comparison_row(
+            _human(system_direction="unknown", system_prediction_id="", system_confidence=None),
+            system_records=[
+                {
+                    "system_prediction_id": "system-simulation",
+                    "linked_candidate_id": "candidate-1",
+                    "symbol": "AAPL",
+                    "system_direction": "down",
+                    "system_confidence": 0.99,
+                    "simulation_evidence": True,
+                }
+            ],
+        )
+
+        self.assertEqual(row["system_direction"], "unknown")
+        self.assertIsNone(row["system_confidence"])
+        self.assertIn("system_direction", row["missing_fields"])
+
+    def test_linked_human_record_does_not_symbol_fallback_to_unlinked_system_record(self) -> None:
+        row = build_shadow_comparison_row(
+            _human(system_direction="unknown", system_prediction_id="", system_confidence=None),
+            system_records=[
+                {
+                    "system_prediction_id": "system-other",
+                    "linked_candidate_id": "candidate-other",
+                    "symbol": "AAPL",
+                    "system_direction": "down",
+                    "system_confidence": 0.99,
+                }
+            ],
+        )
+
+        self.assertEqual(row["system_direction"], "unknown")
+        self.assertIsNone(row["system_confidence"])
+        self.assertIn("system_direction", row["missing_fields"])
+
     def test_target_and_invalidation_components(self) -> None:
         target_reward = compute_shadow_reward(
             direction="up",

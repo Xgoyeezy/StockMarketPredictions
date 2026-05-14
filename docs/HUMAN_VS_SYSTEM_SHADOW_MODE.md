@@ -14,6 +14,8 @@ Human decisions must be recorded before the outcome window closes. Closed outcom
 
 Methodology outputs are readiness evidence only. They are not proof that the system beats skilled human traders, not investor performance claims, and not live-trading approval.
 
+Rows marked as simulation evidence are excluded from Shadow Mode comparisons so simulated evidence remains separate from real-time market-observed human and system evidence.
+
 ## Safety Boundary
 
 Shadow Mode does not:

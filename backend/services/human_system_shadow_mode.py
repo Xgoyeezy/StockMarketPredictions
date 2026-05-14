@@ -428,6 +428,19 @@ def _first_text(row: dict[str, Any], fields: Iterable[str], fallback: str = "") 
     return fallback
 
 
+def _is_simulation_evidence(row: dict[str, Any]) -> bool:
+    nested = [row]
+    for key in ("payload", "candidate", "paper_trade_outcome", "prediction_contract", "system_prediction", "reward_components", "component_scores", "evaluation"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            nested.append(value)
+    for source in nested:
+        evidence_pool = str(source.get("evidence_pool") or "").strip().lower()
+        if source.get("simulation_evidence") or evidence_pool == "simulation_evidence":
+            return True
+    return False
+
+
 def _field_missing(row: dict[str, Any], field: str) -> bool:
     value = row.get(field)
     return value is None or value == ""
@@ -580,9 +593,14 @@ def _match_system_record(human: dict[str, Any], system_records: list[dict[str, A
     symbol = str(human.get("symbol") or "").strip().upper()
     if linked:
         for row in system_records:
+            if _is_simulation_evidence(row):
+                continue
             if linked in {str(row.get("linked_candidate_id") or ""), str(row.get("system_prediction_id") or "")}:
                 return row
+        return None
     for row in system_records:
+        if _is_simulation_evidence(row):
+            continue
         if symbol and str(row.get("symbol") or "").strip().upper() == symbol:
             return row
     return None
@@ -1150,7 +1168,11 @@ def build_shadow_mode_report(
     human_records = list(records) if records is not None else _read_human_records(store_path)
     system_records, warnings = _load_system_records(db, current_user)
     source_warnings.extend(warnings)
-    rows = [build_shadow_comparison_row(record, system_records=system_records) for record in human_records if isinstance(record, dict)]
+    rows = [
+        build_shadow_comparison_row(record, system_records=system_records)
+        for record in human_records
+        if isinstance(record, dict) and not _is_simulation_evidence(record)
+    ]
     aggregations = compute_shadow_analytics(rows)
     proof_summary = build_shadow_mode_proof_summary(rows, aggregations)
     validation_plan = build_shadow_mode_validation_plan(rows=rows, proof_summary=proof_summary)
