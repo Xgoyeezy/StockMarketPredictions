@@ -205,6 +205,26 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertFalse(report["writes_execution_config"])
         failed = {row["key"] for row in proof["requirements"] if not row["passed"]}
         self.assertIn("manual_review_traceability", failed)
+        self.assertFalse(any(row["changes_execution"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_broker_routes"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_limits"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_ranking_weights"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_change_broker_routes"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_bypass_risk_gates"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_change_ranking_weights"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_grant_ai_order_authority"] for row in proof["requirements"]))
+        for action in proof["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_risk_limits"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_proof_summary_ready_with_traceable_evidence_and_manual_review(self) -> None:
         manual_statuses = {
@@ -239,6 +259,17 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertFalse(report["summary"]["claim_permissions"]["automatic_strategy_promotion"])
         self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
         self.assertTrue(any(row["manual_review_traceable"] for row in proof["record_readiness"]))
+        for row in proof["record_readiness"]:
+            self.assertFalse(row["changes_execution"])
+            self.assertFalse(row["changes_order_submission"])
+            self.assertFalse(row["changes_broker_routes"])
+            self.assertFalse(row["changes_risk_gates"])
+            self.assertFalse(row["changes_risk_limits"])
+            self.assertFalse(row["changes_ranking_weights"])
+            self.assertFalse(row["can_change_broker_routes"])
+            self.assertFalse(row["can_bypass_risk_gates"])
+            self.assertFalse(row["can_change_ranking_weights"])
+            self.assertFalse(row["can_grant_ai_order_authority"])
 
     def test_cleanup_plan_blocks_governance_and_mutation_claims_when_proof_is_missing(self) -> None:
         report = build_research_promotion_report(
@@ -269,6 +300,22 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertFalse(any(item["changes_risk_limits"] for item in plan["items"]))
         self.assertFalse(any(item["changes_ranking_weights"] for item in plan["items"]))
         self.assertFalse(any(item["clears_kill_switch"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["can_bypass_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in plan["items"]))
+        for action in plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_risk_limits"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["clears_kill_switch"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_rejected_status(self) -> None:
         report = build_research_promotion_report(
