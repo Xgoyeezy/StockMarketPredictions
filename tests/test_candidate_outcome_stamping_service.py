@@ -295,6 +295,12 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
 
             self.assertTrue(report["research_only"])
             self.assertTrue(report["paper_only"])
+            self.assertFalse(report["changes_execution"])
+            self.assertFalse(report["changes_order_submission"])
+            self.assertFalse(report["changes_broker_routes"])
+            self.assertFalse(report["changes_risk_gates"])
+            self.assertFalse(report["clears_kill_switch"])
+            self.assertFalse(report["changes_ranking_weights"])
             self.assertFalse(report["can_submit_orders"])
             self.assertFalse(report["can_submit_live_orders"])
             self.assertFalse(report["can_change_broker_routes"])
@@ -302,6 +308,12 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             self.assertFalse(report["can_clear_kill_switch"])
             self.assertFalse(report["can_change_ranking_weights"])
             self.assertFalse(report["can_grant_ai_order_authority"])
+            self.assertFalse(report["summary"]["changes_execution"])
+            self.assertFalse(report["summary"]["changes_order_submission"])
+            self.assertFalse(report["summary"]["changes_broker_routes"])
+            self.assertFalse(report["summary"]["changes_risk_gates"])
+            self.assertFalse(report["summary"]["clears_kill_switch"])
+            self.assertFalse(report["summary"]["changes_ranking_weights"])
             self.assertIn("summary", report)
             self.assertIn("records", report)
             self.assertIn("aggregations", report)
@@ -314,6 +326,12 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             "generated_at": "2026-05-05T15:00:00+00:00",
             "research_only": True,
             "paper_only": True,
+            "changes_execution": False,
+            "changes_order_submission": False,
+            "changes_broker_routes": False,
+            "changes_risk_gates": False,
+            "clears_kill_switch": False,
+            "changes_ranking_weights": False,
             "summary": {},
             "records": [],
             "aggregations": {},
@@ -346,6 +364,12 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
                 data = response.json()["data"]
                 self.assertTrue(data["research_only"])
                 self.assertTrue(data["paper_only"])
+                self.assertFalse(data["changes_execution"])
+                self.assertFalse(data["changes_order_submission"])
+                self.assertFalse(data["changes_broker_routes"])
+                self.assertFalse(data["changes_risk_gates"])
+                self.assertFalse(data["clears_kill_switch"])
+                self.assertFalse(data["changes_ranking_weights"])
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
                 self.assertFalse(data["can_change_broker_routes"])
