@@ -236,6 +236,20 @@ class ForecastValidationEngineUnitTests(unittest.TestCase):
         self.assertFalse(any(item["changes_broker_routes"] for item in plan["items"]))
         self.assertFalse(any(item["changes_risk_gates"] for item in plan["items"]))
         self.assertFalse(any(item["changes_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["can_bypass_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in plan["items"]))
+        for action in plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_missing_contract_fields_do_not_compute_reward(self) -> None:
         prediction = make_prediction(
