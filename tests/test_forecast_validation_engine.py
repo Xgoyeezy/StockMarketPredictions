@@ -200,6 +200,13 @@ class ForecastValidationEngineUnitTests(unittest.TestCase):
         summary = get_forecast_validation_summary()
 
         self.assertTrue(summary["research_only"])
+        self.assertFalse(summary["can_submit_orders"])
+        self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_change_broker_routes"])
+        self.assertFalse(summary["can_bypass_risk_gates"])
+        self.assertFalse(summary["can_clear_kill_switch"])
+        self.assertFalse(summary["can_change_ranking_weights"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("Research only. Does not affect trading.", summary["safety_notes"])
         self.assertIn("summary", summary)
         self.assertIn("records", summary)
