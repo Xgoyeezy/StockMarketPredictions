@@ -207,6 +207,13 @@ class EvidenceEdgeAnalyticsServiceTests(unittest.TestCase):
                         "simulation_evidence": True,
                         "final_state": "eligible",
                         "forward_return_30m_pct": 99.0,
+                    },
+                    {
+                        "candidate_lifecycle_id": "sim-pool",
+                        "ticker": "QQQ",
+                        "evidence_pool": "simulation_evidence",
+                        "final_state": "eligible",
+                        "forward_return_30m_pct": 99.0,
                     }
                 ],
             )

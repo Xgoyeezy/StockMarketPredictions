@@ -314,7 +314,11 @@ def _index_trade_rows(frames: Iterable[pd.DataFrame]) -> tuple[dict[str, dict[st
 
 
 def _normalize_candidate_row(payload: dict[str, Any], trade_by_candidate: dict[str, dict[str, Any]]) -> EvidenceRecord | None:
-    if _safe_bool(payload.get("simulation_evidence")) or str(payload.get("source") or "").lower() == "simulation_evidence":
+    if (
+        _safe_bool(payload.get("simulation_evidence"))
+        or str(payload.get("source") or "").lower() == "simulation_evidence"
+        or str(payload.get("evidence_pool") or "").lower() == "simulation_evidence"
+    ):
         return None
     symbol = _clean_text(payload.get("ticker") or payload.get("symbol"))
     if symbol:
