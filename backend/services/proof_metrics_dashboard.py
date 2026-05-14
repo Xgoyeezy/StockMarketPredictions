@@ -594,6 +594,9 @@ def build_gate_groups(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "top_gap": open_rows[0]["label"] if open_rows else None,
                 "blocked_claims": blocked_claims,
                 "safe_next_actions": [row["safe_next_action"] for row in open_rows[:3]],
+                "manual_review_only": True,
+                "research_only": True,
+                **SAFETY_FLAGS,
             }
         )
     return groups

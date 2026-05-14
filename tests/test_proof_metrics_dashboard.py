@@ -125,6 +125,8 @@ class ProofMetricsDashboardTests(unittest.TestCase):
         data_gate = next(row for row in report["gate_groups"] if row["gate"] == "Data Gate")
         self.assertEqual(data_gate["status"], "blocked_by_evidence")
         self.assertIn("benchmark_ready", data_gate["blocked_claims"])
+        self.assertFalse(data_gate["can_grant_ai_order_authority"])
+        self.assertFalse(data_gate["can_submit_orders"])
 
     def test_all_ready_inputs_allow_human_review_but_not_trading(self) -> None:
         report = build_proof_metrics_dashboard_report(source_reports=_ready_reports(), generated_at="2026-05-12T00:00:00Z")

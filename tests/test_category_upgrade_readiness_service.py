@@ -245,6 +245,7 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertFalse(by_gate["execution_costs_handled"]["broker_route_mutation"])
         self.assertFalse(by_gate["risk_visibility_complete"]["risk_gate_mutation"])
         self.assertFalse(by_gate["baselines_beaten"]["ranking_mutation"])
+        self.assertFalse(by_gate["safety_intact"]["can_grant_ai_order_authority"])
 
     def test_hft_requires_separate_future_thesis(self) -> None:
         report = build_category_upgrade_readiness_report(

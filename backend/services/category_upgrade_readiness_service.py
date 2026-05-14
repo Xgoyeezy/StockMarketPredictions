@@ -1717,6 +1717,7 @@ def build_category_upgrade_proof_chain(report: dict[str, Any] | None = None, *, 
                 "broker_route_mutation": False,
                 "risk_gate_mutation": False,
                 "ranking_mutation": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     blocked = [row for row in rows if row["status"] == "blocked"]
