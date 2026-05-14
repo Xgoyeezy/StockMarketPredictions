@@ -475,6 +475,10 @@ def _record_readiness(record: dict[str, Any]) -> dict[str, Any]:
             "changes_broker_routes": False,
             "changes_risk_gates": False,
             "changes_ranking_weights": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
         }
     )
 
@@ -517,6 +521,10 @@ def build_walk_forward_proof_summary(records: list[dict[str, Any]]) -> dict[str,
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     proof_ready = bool(rows) and all(row["passed"] for row in rows)
@@ -592,6 +600,10 @@ def build_walk_forward_validation_plan(records: list[dict[str, Any]], proof_summ
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     open_items = [row for row in items if row["status"] != "ready"]
@@ -630,6 +642,13 @@ def build_walk_forward_validation_plan(records: list[dict[str, Any]], proof_summ
                     "action": row["safe_next_action"],
                     "manual_review_only": True,
                     "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_items
             ],

@@ -185,6 +185,10 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
                 self.assertFalse(requirement["changes_broker_routes"])
                 self.assertFalse(requirement["changes_risk_gates"])
                 self.assertFalse(requirement["changes_ranking_weights"])
+                self.assertFalse(requirement["can_change_broker_routes"])
+                self.assertFalse(requirement["can_bypass_risk_gates"])
+                self.assertFalse(requirement["can_change_ranking_weights"])
+                self.assertFalse(requirement["can_grant_ai_order_authority"])
 
     def test_walk_forward_validation_plan_blocks_claims_when_no_experiments_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,6 +210,22 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
             self.assertFalse(validation_plan["summary"]["claim_permissions"]["live_trading_readiness"])
             self.assertTrue(all(item["manual_review_only"] for item in validation_plan["items"]))
             self.assertFalse(any(item["changes_execution"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_broker_routes"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_risk_gates"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_ranking_weights"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_change_broker_routes"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_bypass_risk_gates"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_change_ranking_weights"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_grant_ai_order_authority"] for item in validation_plan["items"]))
+            for action in validation_plan["safe_next_actions"]:
+                self.assertFalse(action["changes_execution"])
+                self.assertFalse(action["changes_broker_routes"])
+                self.assertFalse(action["changes_risk_gates"])
+                self.assertFalse(action["changes_ranking_weights"])
+                self.assertFalse(action["can_change_broker_routes"])
+                self.assertFalse(action["can_bypass_risk_gates"])
+                self.assertFalse(action["can_change_ranking_weights"])
+                self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_walk_forward_proof_blocks_lookahead_and_missing_after_costs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
