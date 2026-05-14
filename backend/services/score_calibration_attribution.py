@@ -688,6 +688,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                 "type": "insufficient_data",
                 "recommendation": "Collect rewardable score records before reviewing score calibration.",
                 "manual_review_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     elif bucket_lift <= 0 or (monotonicity is not None and monotonicity < 0.5):
@@ -696,6 +704,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                 "type": "review_score_formula",
                 "recommendation": "Score bucket separation is poor; review the score formula before changing ranking logic.",
                 "manual_review_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     elif monotonicity is not None and monotonicity >= 0.75:
@@ -704,6 +720,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                 "type": "validate_score_separation",
                 "recommendation": "Score bucket separation is strong but needs walk-forward validation before any ranking change is considered.",
                 "manual_review_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     for row in feature_report.get("top_positive_features") or []:
@@ -714,6 +738,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                     "feature": row["feature"],
                     "recommendation": f"Review weight of {row['feature']}; it has positive research lift but must not change automatically.",
                     "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
             )
     for row in feature_report.get("top_negative_features") or []:
@@ -724,6 +756,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                     "feature": row["feature"],
                     "recommendation": f"{row['feature']} has weak or negative lift; review whether it should remain prominent in research scoring.",
                     "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
             )
     for row in feature_report.get("false_positive_drivers") or []:
@@ -734,6 +774,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                     "feature": row["feature"],
                     "recommendation": f"{row['feature']} is associated with high-score losing records; review false-positive handling.",
                     "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
             )
     for row in feature_report.get("false_negative_drivers") or []:
@@ -744,6 +792,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                     "feature": row["feature"],
                     "recommendation": f"{row['feature']} appears in low-ranked or blocked winners; review missed-winner handling.",
                     "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
             )
     forecast_corr = _safe_float(relationships.get("score_to_forecast_accuracy_correlation"))
@@ -753,6 +809,14 @@ def generate_safe_recommendations(bucket_report: dict[str, Any], feature_report:
                 "type": "forecast_quality_misalignment",
                 "recommendation": "Candidate scores are negatively correlated with forecast quality; review forecast-score alignment.",
                 "manual_review_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     return recommendations[:25]
@@ -827,6 +891,10 @@ def build_calibration_proof_summary(
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     proof_ready = bool(rows) and all(row["passed"] for row in rows)
@@ -858,7 +926,14 @@ def build_calibration_proof_summary(
                     "sample_sufficient": int(row.get("times_seen") or 0) >= MIN_FEATURE_SAMPLE,
                     "warnings": row.get("warnings") or [],
                     "research_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
                     "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in (feature_items or [])[:50]
                 if isinstance(row, dict)
@@ -945,6 +1020,10 @@ def build_score_calibration_hardening_plan(
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -986,7 +1065,13 @@ def build_score_calibration_hardening_plan(
                     "action": row["safe_next_action"],
                     "manual_review_only": True,
                     "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
                     "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_items
             ],
