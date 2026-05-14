@@ -47,6 +47,7 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
         self.assertTrue(summary["read_only"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
 
     def test_guided_onboarding_and_health_states_are_operator_safe(self) -> None:
         onboarding = build_guided_onboarding_checklist(paper_ready=True)

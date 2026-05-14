@@ -37,6 +37,7 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
         self.assertFalse(summary["current_colocation"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("does not make the current platform HFT-capable", summary["claim_boundary"])
 
     def test_hft_data_microstructure_venue_and_kill_switch_contracts_are_future_only(self) -> None:

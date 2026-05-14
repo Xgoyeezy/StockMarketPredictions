@@ -57,6 +57,7 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
         self.assertTrue(summary["read_only"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertFalse(summary["writes_execution_config"])
         self.assertIn("not institutional-grade", summary["claim_boundary"])
 

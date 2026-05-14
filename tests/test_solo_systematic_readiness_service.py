@@ -60,6 +60,7 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
         self.assertTrue(summary["read_only"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("not proof of edge", summary["claim_boundary"])
 
     def test_combined_review_bundle_and_view_separation_are_read_only(self) -> None:

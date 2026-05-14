@@ -61,6 +61,7 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         self.assertFalse(summary["can_submit_live_orders"])
         self.assertFalse(summary["can_change_broker_routes"])
         self.assertFalse(summary["can_bypass_risk_gates"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("do not prove institutional-grade readiness", summary["claim_boundary"])
 
     def test_institutional_evaluator_inspection_contract(self) -> None:
