@@ -54,6 +54,7 @@ def _reward_row(
         "simple_mean_reversion_forward_return": -0.02,
         "simple_vwap_reclaim_forward_return": 0.07,
         "opening_range_breakout_forward_return": 0.01,
+        "previous_close_forward_return": 0.02,
         "slippage_bps": slippage_bps,
         "spread_bps": spread_bps,
         "confidence": 0.75 if total_reward > 0 else 0.8,
@@ -165,6 +166,10 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
         self.assertTrue(spy["available"])
         self.assertAlmostEqual(spy["baseline_expected_value"], 0.03)
         self.assertAlmostEqual(spy["baseline_relative_edge"], 0.436667)
+        previous_close = next(row for row in comparison["items"] if row["key"] == "previous_close_drift")
+        self.assertTrue(previous_close["available"])
+        self.assertEqual(previous_close["source_field"], "previous_close_forward_return")
+        self.assertAlmostEqual(previous_close["baseline_expected_value"], 0.02)
 
     def test_score_bucket_separation(self) -> None:
         section = compute_score_bucket_separation(suite._normalize_records(_edge_rows()))

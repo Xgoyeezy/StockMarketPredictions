@@ -81,6 +81,12 @@ BASELINE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "fields": ("opening_range_breakout_forward_return", "orb_baseline_forward_return"),
         "required": ("opening_range_breakout_forward_return",),
     },
+    {
+        "key": "previous_close_drift",
+        "label": "Previous close drift",
+        "fields": ("previous_close_forward_return", "previous_close_drift", "baseline_previous_close_return"),
+        "required": ("previous_close_forward_return",),
+    },
 )
 
 BENCHMARK_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (

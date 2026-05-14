@@ -451,6 +451,7 @@ V1 recognizes these explicit baseline fields:
 - Simple mean reversion: `simple_mean_reversion_forward_return` or `mean_reversion_baseline_forward_return`.
 - Simple VWAP reclaim: `simple_vwap_reclaim_forward_return` or `vwap_reclaim_baseline_forward_return`.
 - Opening range breakout: `opening_range_breakout_forward_return` or `orb_baseline_forward_return`.
+- Previous close drift: `previous_close_forward_return`, `previous_close_drift`, or `baseline_previous_close_return`.
 
 If these fields are absent, the baseline remains unavailable. The suite does not substitute current price, hindsight labels, or simulation-only outcomes.
 
