@@ -916,11 +916,16 @@ def _portfolio_row_readiness(row: dict[str, Any]) -> dict[str, Any]:
         "missing_fields": missing,
         "research_only": True,
         "paper_only": True,
+        "changes_execution": False,
         "changes_risk_limits": False,
         "changes_risk_gates": False,
         "changes_broker_routes": False,
         "changes_order_submission": False,
         "changes_ranking_weights": False,
+        "can_change_broker_routes": False,
+        "can_bypass_risk_gates": False,
+        "can_change_ranking_weights": False,
+        "can_grant_ai_order_authority": False,
     }
 
 
@@ -997,6 +1002,10 @@ def build_portfolio_risk_proof_summary(
                 "changes_risk_gates": False,
                 "changes_risk_limits": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     proof_ready = bool(rows) and all(row["passed"] for row in rows)
@@ -1024,7 +1033,25 @@ def build_portfolio_risk_proof_summary(
                 "missing_requirement_count": sum(1 for row in rows if not row["passed"]),
             },
             "record_readiness": readiness[:100],
-            "safe_next_actions": [row["safe_next_action"] for row in rows if not row["passed"]],
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_risk_limits": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                }
+                for row in rows
+                if not row["passed"]
+            ],
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
         }
@@ -1096,6 +1123,10 @@ def build_portfolio_risk_cleanup_plan(
                 "changes_risk_gates": False,
                 "changes_risk_limits": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -1141,7 +1172,14 @@ def build_portfolio_risk_cleanup_plan(
                     "manual_review_only": True,
                     "changes_execution": False,
                     "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
                     "changes_risk_limits": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_items
             ],
