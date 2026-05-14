@@ -6,7 +6,7 @@ Execution Quality and Transaction Cost Analysis v1 measures whether correct fore
 
 ## Paper-Only Boundary
 
-The service only reports paper-route evidence. Rows that clearly look like live-route evidence are excluded. Every response includes:
+The service only reports paper-route evidence. Rows that clearly look like live-route evidence or simulation evidence are excluded. Every response includes:
 
 - `research_only: true`
 - `paper_only: true`

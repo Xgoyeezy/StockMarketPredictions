@@ -175,6 +175,19 @@ class ExecutionQualityTcaTests(unittest.TestCase):
         self.assertEqual(report["summary"]["trade_count"], 1)
         self.assertEqual(report["records"][0]["order_id"], "paper")
 
+    def test_simulation_evidence_rows_are_excluded(self) -> None:
+        report = build_execution_quality_tca_report(
+            records=[
+                _row(order_id="paper", route="broker_paper"),
+                _row(order_id="simulation", route="broker_paper", evidence_pool="simulation_evidence"),
+                _row(order_id="nested-simulation", route="broker_paper", payload={"simulation_evidence": True}),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        self.assertEqual(report["summary"]["trade_count"], 1)
+        self.assertEqual([record["order_id"] for record in report["records"]], ["paper"])
+
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
         with patch.object(tca, "execution_quality_summary", lambda db=None, current_user=None: {"rows": [_row()]}), patch.object(

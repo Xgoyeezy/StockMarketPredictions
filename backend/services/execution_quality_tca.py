@@ -341,6 +341,14 @@ def _is_paper_route(row: dict[str, Any]) -> bool:
     return not text.strip()
 
 
+def _is_simulation_evidence(row: dict[str, Any]) -> bool:
+    for source in _nested_sources(row):
+        evidence_pool = str(source.get("evidence_pool") or "").strip().lower()
+        if source.get("simulation_evidence") or evidence_pool == "simulation_evidence":
+            return True
+    return False
+
+
 def compute_slippage_bps(intended_price: Any, fill_price: Any, explicit_slippage: Any = None) -> float | None:
     explicit = _safe_float(explicit_slippage)
     if explicit is not None:
@@ -403,7 +411,7 @@ def compute_execution_adjusted_reward(row: dict[str, Any], slippage_bps: float |
 
 
 def normalize_execution_quality_record(row: dict[str, Any], index: int = 0) -> dict[str, Any] | None:
-    if not isinstance(row, dict) or not _is_paper_route(row):
+    if not isinstance(row, dict) or _is_simulation_evidence(row) or not _is_paper_route(row):
         return None
     intended_price = _first_number(row, ("intended_price", "expected_entry_price", "expected_price", "submitted_price", "limit_price"))
     fill_price = _first_number(row, ("actual_fill_price", "fill_price", "filled_price", "broker_filled_avg_price", "filled_avg_price"))
