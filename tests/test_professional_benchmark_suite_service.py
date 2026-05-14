@@ -153,6 +153,11 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
         self.assertFalse(hardening_plan["summary"]["claim_permissions"]["repeatability_claim"])
         self.assertTrue(all(item["manual_review_only"] for item in hardening_plan["items"]))
         self.assertFalse(any(item["changes_ranking_weights"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in hardening_plan["items"]))
+        self.assertFalse(any(action["can_change_broker_routes"] for action in hardening_plan["safe_next_actions"]))
+        self.assertFalse(any(action["can_bypass_risk_gates"] for action in hardening_plan["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_ranking_weights"] for action in hardening_plan["safe_next_actions"]))
+        self.assertFalse(any(action["can_grant_ai_order_authority"] for action in hardening_plan["safe_next_actions"]))
 
     def test_benchmark_proof_blocks_when_after_cost_reward_is_missing(self) -> None:
         rows = [_reward_row(record_id=f"row-{index}", score_bucket="90_100" if index < 3 else "0_39", total_reward=0.25, actual_forward_return=0.40, slippage_bps=40.0, spread_bps=25.0) for index in range(6)]

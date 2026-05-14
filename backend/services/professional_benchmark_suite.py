@@ -767,6 +767,7 @@ def build_benchmark_proof_summary(
                 "changes_ranking_weights": False,
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     passed_count = sum(1 for row in rows if row["passed"])
@@ -792,6 +793,10 @@ def build_benchmark_proof_summary(
                 "action": row["safe_next_action"],
                 "manual_review_only": True,
                 "changes_execution": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
             for row in rows
             if not row["passed"]
@@ -872,6 +877,7 @@ def build_benchmark_hardening_plan(
                 "changes_ranking_weights": False,
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -911,6 +917,10 @@ def build_benchmark_hardening_plan(
                 "action": row["safe_next_action"],
                 "manual_review_only": True,
                 "changes_execution": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
             for row in open_items
         ],
