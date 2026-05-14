@@ -57,6 +57,13 @@ class InstitutionalQuantReadinessServiceTests(unittest.TestCase):
         for key in INSTITUTIONAL_FINAL_NINE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
         self.assertTrue(summary["read_only"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["changes_risk_limits"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
         self.assertFalse(summary["can_change_broker_routes"])
