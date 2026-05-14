@@ -952,6 +952,10 @@ def _shadow_row_readiness(row: dict[str, Any]) -> dict[str, Any]:
         "changes_broker_routes": False,
         "changes_risk_gates": False,
         "changes_ranking_weights": False,
+        "can_change_broker_routes": False,
+        "can_bypass_risk_gates": False,
+        "can_change_ranking_weights": False,
+        "can_grant_ai_order_authority": False,
     }
 
 
@@ -1027,6 +1031,10 @@ def build_shadow_mode_proof_summary(rows: list[dict[str, Any]], aggregations: di
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     proof_ready = bool(requirement_rows) and all(row["passed"] for row in requirement_rows)
@@ -1043,7 +1051,24 @@ def build_shadow_mode_proof_summary(rows: list[dict[str, Any]], aggregations: di
                 "missing_requirement_count": sum(1 for row in requirement_rows if not row["passed"]),
             },
             "record_readiness": readiness[:100],
-            "safe_next_actions": [row["safe_next_action"] for row in requirement_rows if not row["passed"]],
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                }
+                for row in requirement_rows
+                if not row["passed"]
+            ],
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
         }
@@ -1106,6 +1131,10 @@ def build_shadow_mode_validation_plan(
                 "changes_ranking_weights": False,
                 "can_submit_orders": False,
                 "can_submit_live_orders": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -1152,6 +1181,10 @@ def build_shadow_mode_validation_plan(
                     "changes_broker_routes": False,
                     "changes_risk_gates": False,
                     "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_items
             ],
