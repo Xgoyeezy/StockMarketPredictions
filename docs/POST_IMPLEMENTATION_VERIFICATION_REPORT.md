@@ -495,6 +495,20 @@ Remaining startup proof gap:
 
 The local app now starts through the standard script on the reviewed branch, but this does not prove alpha, repeatability, live readiness, broker readiness, or institutional readiness. Future verification should keep startup checks tied to proof surfaces and should still fail closed when backend health is unavailable.
 
+Root test discovery hardening update:
+
+Follow-up action added a pytest configuration that limits root test discovery to the tracked `tests/` tree and excludes ignored runtime/generated directories. This resolves the earlier verification blocker where copied exported tests under generated runtime folders could be collected by root pytest runs.
+
+Verification evidence:
+
+- Root pytest collection: PASS, collected tracked tests from `tests/`.
+- Focused route-health pytest: PASS.
+- Git diff whitespace check: PASS.
+
+Remaining test-discovery proof gap:
+
+This improves verification hygiene only. It does not make the full suite pass by itself, prove alpha, approve expansion work, enable live trading, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI authority, or change ranking weights.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
