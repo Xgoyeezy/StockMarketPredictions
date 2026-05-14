@@ -127,7 +127,7 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
 
     def test_simulation_evidence_is_not_rewardable_for_calibration(self) -> None:
         row = _row(record_id="sim-row", score=90, reward=0.50, actual=0.60)
-        row["evidence_pool"] = "simulation_evidence"
+        row["evidence_pool"] = " Simulation_Evidence "
 
         report = build_score_calibration_report(records=[row], generated_at="2026-05-06T00:00:00Z")
 

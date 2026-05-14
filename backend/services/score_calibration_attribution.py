@@ -426,7 +426,10 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
             missing_fields.add("total_reward")
         if baseline_forward_return is None:
             missing_fields.add("baseline_forward_return")
-        simulation_evidence = bool(row.get("simulation_evidence") or row.get("evidence_pool") == "simulation_evidence")
+        simulation_evidence = bool(
+            row.get("simulation_evidence")
+            or str(row.get("evidence_pool") or "").strip().lower() == "simulation_evidence"
+        )
         warnings = [str(item) for item in _listify(row.get("warnings")) if str(item).strip()]
         if simulation_evidence:
             warnings.append("Simulation evidence remains separate and is not counted as real-time market-observed calibration evidence.")
