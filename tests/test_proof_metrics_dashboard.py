@@ -124,6 +124,10 @@ class ProofMetricsDashboardTests(unittest.TestCase):
         self.assertIn("Proof-field coverage", report["summary"]["top_blockers"])
         safe_action = report["safe_next_actions"][0]
         self.assertFalse(safe_action["changes_execution"])
+        self.assertFalse(safe_action["changes_order_submission"])
+        self.assertFalse(safe_action["changes_broker_routes"])
+        self.assertFalse(safe_action["changes_risk_gates"])
+        self.assertFalse(safe_action["changes_ranking_weights"])
         self.assertFalse(safe_action["can_change_broker_routes"])
         self.assertFalse(safe_action["can_bypass_risk_gates"])
         self.assertFalse(safe_action["can_change_ranking_weights"])
@@ -133,6 +137,16 @@ class ProofMetricsDashboardTests(unittest.TestCase):
         self.assertIn("benchmark_ready", data_gate["blocked_claims"])
         self.assertFalse(data_gate["can_grant_ai_order_authority"])
         self.assertFalse(data_gate["can_submit_orders"])
+        gate_action = data_gate["safe_next_actions"][0]
+        self.assertFalse(gate_action["changes_execution"])
+        self.assertFalse(gate_action["changes_order_submission"])
+        self.assertFalse(gate_action["changes_broker_routes"])
+        self.assertFalse(gate_action["changes_risk_gates"])
+        self.assertFalse(gate_action["changes_ranking_weights"])
+        self.assertFalse(gate_action["can_change_broker_routes"])
+        self.assertFalse(gate_action["can_bypass_risk_gates"])
+        self.assertFalse(gate_action["can_change_ranking_weights"])
+        self.assertFalse(gate_action["can_grant_ai_order_authority"])
 
     def test_all_ready_inputs_allow_human_review_but_not_trading(self) -> None:
         report = build_proof_metrics_dashboard_report(source_reports=_ready_reports(), generated_at="2026-05-12T00:00:00Z")
