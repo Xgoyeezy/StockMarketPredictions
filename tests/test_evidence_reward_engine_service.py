@@ -313,6 +313,21 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
         self.assertFalse(any(item["changes_risk_gates"] for item in live_plan["items"]))
         self.assertFalse(any(item["changes_ranking_weights"] for item in live_plan["items"]))
         self.assertFalse(any(item["clears_kill_switch"] for item in live_plan["items"]))
+        self.assertFalse(any(item["can_change_broker_routes"] for item in live_plan["items"]))
+        self.assertFalse(any(item["can_bypass_risk_gates"] for item in live_plan["items"]))
+        self.assertFalse(any(item["can_change_ranking_weights"] for item in live_plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in live_plan["items"]))
+        for action in live_plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["clears_kill_switch"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_api_response_shape_has_safety_flags(self) -> None:
         client = TestClient(create_app())
