@@ -658,6 +658,10 @@ def build_execution_quality_proof_summary(records: list[dict[str, Any]], aggrega
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     proof_ready = bool(rows) and all(row["passed"] for row in rows)
@@ -700,8 +704,15 @@ def build_execution_quality_proof_summary(records: list[dict[str, Any]], aggrega
                     "warnings": row.get("warnings") or [],
                     "research_only": True,
                     "paper_only": True,
+                    "changes_execution": False,
                     "changes_broker_routes": False,
                     "changes_order_submission": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in records[:100]
             ],
@@ -776,6 +787,10 @@ def build_execution_quality_hardening_plan(
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -819,6 +834,13 @@ def build_execution_quality_hardening_plan(
                     "manual_review_only": True,
                     "changes_execution": False,
                     "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_items
             ],
