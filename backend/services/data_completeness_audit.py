@@ -531,6 +531,7 @@ def build_proof_field_coverage(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "changes_ranking_weights": False,
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     ready_count = sum(1 for row in rows if row["status"] == "ready")
@@ -554,6 +555,10 @@ def build_proof_field_coverage(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "action": row["safe_next_action"],
                 "manual_review_only": True,
                 "changes_execution": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
             for row in missing_rows
         ],
@@ -657,6 +662,7 @@ def build_data_cleanup_plan(
                 "changes_ranking_weights": False,
                 "changes_broker_routes": False,
                 "changes_risk_gates": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     open_items = [row for row in items if row["status"] != "ready"]
@@ -687,6 +693,10 @@ def build_data_cleanup_plan(
                 "action": row["safe_next_action"],
                 "manual_review_only": True,
                 "changes_execution": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
             for row in open_items
         ],
@@ -901,6 +911,10 @@ def _safe_next_actions(priority_fields: list[dict[str, Any]]) -> list[dict[str, 
                     "action": action_map[field],
                     "manual_review_only": True,
                     "changes_execution": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
             )
     return actions

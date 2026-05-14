@@ -207,6 +207,10 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
         self.assertIn("slippage", by_key["execution_costs"]["missing_group_counts"])
         self.assertTrue(all(action["manual_review_only"] for action in coverage["safe_next_actions"]))
         self.assertFalse(any(action["changes_execution"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_broker_routes"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_bypass_risk_gates"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_ranking_weights"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_grant_ai_order_authority"] for action in coverage["safe_next_actions"]))
 
     def test_cleanup_plan_counts_missing_forecast_horizon_context(self) -> None:
         forecast = _complete_forecast()
@@ -224,6 +228,10 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
         self.assertIn("horizon_minutes", {row["field"] for row in report["summary"]["benchmark_blockers"]})
         self.assertTrue(all(action["manual_review_only"] for action in report["safe_next_actions"]))
         self.assertFalse(any(action["changes_execution"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_broker_routes"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_bypass_risk_gates"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_ranking_weights"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_grant_ai_order_authority"] for action in report["safe_next_actions"]))
 
     def test_proof_field_coverage_ready_when_required_roadmap_fields_are_present(self) -> None:
         report = build_data_completeness_report(
