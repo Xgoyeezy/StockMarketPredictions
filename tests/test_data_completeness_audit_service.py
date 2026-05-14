@@ -337,7 +337,7 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
 
     def test_simulation_evidence_is_visible_but_not_rewardable(self) -> None:
         candidate = _complete_candidate()
-        candidate["evidence_pool"] = "simulation_evidence"
+        candidate["evidence_pool"] = " Simulation_Evidence "
         row = audit_record(candidate, source_type="candidate")
 
         self.assertTrue(row["complete"])

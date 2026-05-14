@@ -369,7 +369,7 @@ def audit_record(row: dict[str, Any], *, source_type: str, index: int = 0) -> di
     warnings: list[str] = []
     if not complete:
         warnings.append("Record is visible but not complete enough for reward or benchmark attribution.")
-    if row.get("simulation_evidence") or row.get("evidence_pool") == "simulation_evidence":
+    if row.get("simulation_evidence") or str(row.get("evidence_pool") or "").strip().lower() == "simulation_evidence":
         warnings.append("Simulation evidence remains separate and is not counted as real-time market-observed evidence.")
         rewardable = False
     clean_fields = {
