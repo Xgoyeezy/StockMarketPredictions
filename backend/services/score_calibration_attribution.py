@@ -426,6 +426,10 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
             missing_fields.add("total_reward")
         if baseline_forward_return is None:
             missing_fields.add("baseline_forward_return")
+        simulation_evidence = bool(row.get("simulation_evidence") or row.get("evidence_pool") == "simulation_evidence")
+        warnings = [str(item) for item in _listify(row.get("warnings")) if str(item).strip()]
+        if simulation_evidence:
+            warnings.append("Simulation evidence remains separate and is not counted as real-time market-observed calibration evidence.")
         normalized.append(
             _sanitize_value(
                 {
@@ -439,7 +443,7 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
                     "score": round(normalized_score, 6) if normalized_score is not None else None,
                     "raw_score": raw_score,
                     "score_bucket": assign_score_bucket(raw_score, multiplier=multiplier),
-                    "rewardable": bool(row.get("rewardable")) and total_reward is not None,
+                    "rewardable": bool(row.get("rewardable")) and total_reward is not None and not simulation_evidence,
                     "total_reward": total_reward,
                     "actual_forward_return": actual_forward_return,
                     "baseline_forward_return": baseline_forward_return,
@@ -453,6 +457,7 @@ def normalize_calibration_records(records: Iterable[dict[str, Any]] | None) -> l
                     "allowed": bool(row.get("allowed")),
                     "blocked": bool(row.get("blocked")),
                     "missing_fields": sorted(missing_fields),
+                    "warnings": warnings,
                     "score_scale": scale["scale"],
                 }
             )

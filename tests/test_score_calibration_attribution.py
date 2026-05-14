@@ -125,6 +125,16 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
         self.assertIn("total_reward", report["missing_fields"])
         self.assertEqual(report["summary"]["rewardable_count"], 1)
 
+    def test_simulation_evidence_is_not_rewardable_for_calibration(self) -> None:
+        row = _row(record_id="sim-row", score=90, reward=0.50, actual=0.60)
+        row["evidence_pool"] = "simulation_evidence"
+
+        report = build_score_calibration_report(records=[row], generated_at="2026-05-06T00:00:00Z")
+
+        self.assertEqual(report["summary"]["rewardable_count"], 0)
+        self.assertFalse(report["records"][0]["rewardable"])
+        self.assertIn("Simulation evidence remains separate", report["records"][0]["warnings"][0])
+
     def test_safe_recommendation_generation(self) -> None:
         report = build_score_calibration_report(records=_calibration_rows()[:5], generated_at="2026-05-06T00:00:00Z")
         recommendations = report["aggregations"]["recommendations"]
