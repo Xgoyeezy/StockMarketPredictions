@@ -251,13 +251,13 @@ The Professional Benchmark Suite v1 is working as intended, but it is blocked by
 
 This tracker is project-wide and must stay at the end of report outputs. It is not limited to the Professional Benchmark layer.
 
-Summary: 26 tracked items; 6 critical open items; 11 in progress; 6 blocked by evidence; 2 not started; 7 deferred.
+Summary: 26 tracked items; 5 critical open items; 1 done; 11 in progress; 6 blocked by evidence; 1 not started; 7 deferred.
 
 Proof-first rule: Ambition is allowed. Proof decides priority.
 
 | Priority | Area | Item | Status | Done when |
 | --- | --- | --- | --- | --- |
-| Critical | Verification | Post-Implementation Verification | In Progress | The verification report is current, cites focused test/build/browser evidence, and lists remaining proof blockers without overclaiming readiness. |
+| Critical | Verification | Post-Implementation Verification | Done | The verification report is current, cites focused test/build/browser evidence, and lists remaining proof blockers without overclaiming readiness. |
 | Critical | Evidence Quality | Data completeness hardening | In Progress | Data Completeness reports benchmark_ready and proof_field_ready with traceable source coverage. |
 | Critical | Evidence Capture | Candidate outcome and baseline stamping | In Progress | Rewardable candidate outcomes exist with actual_forward_return, baseline_forward_return, cost fields, and append-only lineage. |
 | Critical | Benchmarking | Professional Benchmark proof gate | Blocked By Evidence | Professional Benchmark reaches ready_for_human_review without claiming proven alpha. |
