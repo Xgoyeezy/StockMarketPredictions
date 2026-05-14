@@ -433,6 +433,9 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         report["diagnostics"] = {
             "account_id": "ACCT-123456",
             "api_token": "token-value",
+            "authorization_header": "Bearer live-auth-token",
+            "environment_value": "BROKER_SECRET=unsafe",
+            "database_file": "app.db",
             "raw_log": "raw broker response",
             "note": "review artifact at D:\\sensitive\\raw.log",
             "safe_relative_doc": "docs/TEN_OUT_OF_TEN_PROOF_GATES.md",
@@ -446,11 +449,17 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertFalse(export["support_export_safety"]["path_exposed_in_payload"])
         self.assertNotIn("ACCT-123456", serialized)
         self.assertNotIn("token-value", serialized)
+        self.assertNotIn("Bearer live-auth-token", serialized)
+        self.assertNotIn("BROKER_SECRET=unsafe", serialized)
+        self.assertNotIn("app.db", serialized)
         self.assertNotIn("raw broker response", serialized)
         self.assertNotIn("D:\\sensitive\\raw.log", serialized)
         self.assertIn("[redacted]", serialized)
         self.assertIn("[local_path_redacted]", serialized)
         self.assertIn("docs/TEN_OUT_OF_TEN_PROOF_GATES.md", serialized)
+        self.assertIn("database_files", export["support_export_safety"]["excludes"])
+        self.assertIn("environment_values", export["support_export_safety"]["excludes"])
+        self.assertIn("authorization_headers", export["support_export_safety"]["excludes"])
 
     def test_written_support_export_avoids_absolute_paths_in_result_and_payload(self) -> None:
         report = build_category_upgrade_readiness_report(
