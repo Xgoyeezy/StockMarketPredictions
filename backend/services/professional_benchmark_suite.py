@@ -84,7 +84,7 @@ BASELINE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "previous_close_drift",
         "label": "Previous close drift",
-        "fields": ("previous_close_forward_return", "previous_close_drift", "baseline_previous_close_return"),
+        "fields": ("previous_close_forward_return", "previous_close_drift_forward_return", "previous_close_drift", "baseline_previous_close_return"),
         "required": ("previous_close_forward_return",),
     },
 )

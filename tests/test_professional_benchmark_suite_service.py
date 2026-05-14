@@ -171,6 +171,18 @@ class ProfessionalBenchmarkSuiteServiceTests(unittest.TestCase):
         self.assertEqual(previous_close["source_field"], "previous_close_forward_return")
         self.assertAlmostEqual(previous_close["baseline_expected_value"], 0.02)
 
+    def test_previous_close_baseline_accepts_stamped_outcome_alias(self) -> None:
+        row = _reward_row(record_id="previous-close-alias", score_bucket="80_89", total_reward=0.25, actual_forward_return=0.40)
+        row.pop("previous_close_forward_return")
+        row["previous_close_drift_forward_return"] = 0.03
+
+        comparison = compute_baseline_comparison(suite._normalize_records([row]))
+        previous_close = next(item for item in comparison["items"] if item["key"] == "previous_close_drift")
+
+        self.assertTrue(previous_close["available"])
+        self.assertEqual(previous_close["source_field"], "previous_close_drift_forward_return")
+        self.assertAlmostEqual(previous_close["baseline_expected_value"], 0.03)
+
     def test_score_bucket_separation(self) -> None:
         section = compute_score_bucket_separation(suite._normalize_records(_edge_rows()))
 
