@@ -376,6 +376,10 @@ def build_risk_audit_hardening_plan(
                 "changes_risk_gates": False,
                 "changes_ranking_weights": False,
                 "clears_kill_switch": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
             }
         )
 
@@ -407,7 +411,24 @@ def build_risk_audit_hardening_plan(
             },
             "metrics": metrics,
             "items": items,
-            "safe_next_actions": [row["safe_next_action"] for row in open_items],
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "clears_kill_switch": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                }
+                for row in open_items
+            ],
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
         }

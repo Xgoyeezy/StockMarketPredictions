@@ -81,6 +81,25 @@ class RiskAuditHardeningTests(unittest.TestCase):
         self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
         self.assertFalse(any(row["changes_broker_routes"] for row in plan["items"]))
         self.assertFalse(any(row["clears_kill_switch"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_execution"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_order_submission"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in plan["items"]))
+        self.assertFalse(any(row["changes_ranking_weights"] for row in plan["items"]))
+        self.assertFalse(any(row["can_change_broker_routes"] for row in plan["items"]))
+        self.assertFalse(any(row["can_bypass_risk_gates"] for row in plan["items"]))
+        self.assertFalse(any(row["can_change_ranking_weights"] for row in plan["items"]))
+        self.assertFalse(any(row["can_grant_ai_order_authority"] for row in plan["items"]))
+        for action in plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["clears_kill_switch"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_report_allows_internal_review_only_when_hardening_evidence_is_complete(self) -> None:
         report = build_risk_audit_hardening_report(
