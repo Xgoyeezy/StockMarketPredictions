@@ -208,6 +208,23 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
         self.assertTrue(all(action["manual_review_only"] for action in coverage["safe_next_actions"]))
         self.assertFalse(any(action["changes_execution"] for action in coverage["safe_next_actions"]))
 
+    def test_cleanup_plan_counts_missing_forecast_horizon_context(self) -> None:
+        forecast = _complete_forecast()
+        forecast.pop("horizon_minutes")
+        report = build_data_completeness_report(
+            forecast_records=[forecast],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        cleanup_by_key = {row["key"]: row for row in report["data_cleanup_plan"]["items"]}
+        lineage_context = cleanup_by_key["missing_lineage_and_context"]
+
+        self.assertEqual(lineage_context["status"], "needs_cleanup")
+        self.assertIn("horizon_minutes", lineage_context["missing_field_counts"])
+        self.assertIn("horizon_minutes", {row["field"] for row in report["summary"]["benchmark_blockers"]})
+        self.assertTrue(all(action["manual_review_only"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["changes_execution"] for action in report["safe_next_actions"]))
+
     def test_proof_field_coverage_ready_when_required_roadmap_fields_are_present(self) -> None:
         report = build_data_completeness_report(
             candidate_records=[_complete_candidate()],

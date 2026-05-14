@@ -244,7 +244,7 @@ CLEANUP_PLAN_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "title": "Missing lineage and context",
         "priority": "high",
         "source_types": ("candidate", "forecast", "ai_review", "blocker", "missed_move", "paper_trade", "execution"),
-        "fields": ("timestamp", "prediction_created_at", "prediction_horizon_minutes", "engine", "setup_type", "regime"),
+        "fields": ("timestamp", "prediction_created_at", "horizon_minutes", "prediction_horizon_minutes", "engine", "setup_type", "regime"),
         "proof_requirements": ("regime_labels",),
         "blocks": ("Data Completeness", "Walk-Forward", "Score Calibration", "Audit Trail"),
         "safe_next_action": "Backfill only point-in-time metadata that is already known from the original event, source file, or append-only lifecycle artifact.",
@@ -449,7 +449,7 @@ def aggregate_completeness(records: list[dict[str, Any]]) -> dict[str, Any]:
         "benchmark_blockers": [
             {"field": field, "count": count}
             for field, count in missing_counter.most_common(10)
-            if field in {"actual_forward_return", "baseline_forward_return", "forecast_series", "actual_series", "slippage", "spread_at_signal", "prediction_horizon_minutes", "predicted_target_pct"}
+            if field in {"actual_forward_return", "baseline_forward_return", "forecast_series", "actual_series", "slippage", "spread_at_signal", "horizon_minutes", "prediction_horizon_minutes", "predicted_target_pct"}
         ],
     }
 
@@ -882,6 +882,7 @@ def _safe_next_actions(priority_fields: list[dict[str, Any]]) -> list[dict[str, 
         "actual_series": "Attach post-prediction actual path data for forecast validation.",
         "spread_at_signal": "Capture spread at signal time for execution-adjusted reward.",
         "slippage": "Capture expected and realized slippage fields for execution quality.",
+        "horizon_minutes": "Emit a prediction horizon before movement is measured.",
         "prediction_horizon_minutes": "Emit a prediction horizon before movement is measured.",
         "predicted_target_pct": "Emit an explicit target percentage before movement is measured.",
     }
