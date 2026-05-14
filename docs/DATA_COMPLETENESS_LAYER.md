@@ -195,7 +195,7 @@ The summary report computes:
 - `cleanup_plan_critical_open_items`
 - `top_cleanup_item`
 
-Benchmark blockers highlight fields that most directly prevent Professional Benchmark Suite proof, such as forward returns, baseline returns, forecast paths, actual paths, slippage, and spread fields.
+Benchmark blockers highlight fields that most directly prevent Professional Benchmark Suite proof, such as forward returns, baseline returns, forecast paths, actual paths, forecast horizons, slippage, and spread fields.
 
 ## Proof Field Coverage
 
