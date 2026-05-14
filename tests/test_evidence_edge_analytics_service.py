@@ -38,6 +38,11 @@ class EvidenceEdgeAnalyticsServiceTests(unittest.TestCase):
         self.assertTrue(report["research_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertEqual(report["mutation"], "none")
         self.assertEqual(report["recommended_ranking_adjustments"][0]["type"], "insufficient_data")
 
