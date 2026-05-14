@@ -144,6 +144,11 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertTrue(report["research_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
 
     def test_candidate_status(self) -> None:
         report = build_research_promotion_report(
@@ -359,6 +364,13 @@ class ResearchPromotionRulesTests(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     data = payload["data"]
                     self.assertTrue(data["research_only"])
+                    self.assertFalse(data["can_submit_orders"])
+                    self.assertFalse(data["can_submit_live_orders"])
+                    self.assertFalse(data["can_change_broker_routes"])
+                    self.assertFalse(data["can_bypass_risk_gates"])
+                    self.assertFalse(data["can_clear_kill_switch"])
+                    self.assertFalse(data["can_change_ranking_weights"])
+                    self.assertFalse(data["can_grant_ai_order_authority"])
                     self.assertIn("summary", data)
                     self.assertIn("research_promotion_cleanup_plan", data)
                     self.assertIn("claim_permissions", data["summary"])
