@@ -398,11 +398,11 @@ def _has_chronological_windows(record: dict[str, Any]) -> bool:
     validation_start, validation_end = _window_bounds(record.get("validation_window"))
     test_start, test_end = _window_bounds(record.get("test_window"))
     paper_start, paper_end = _window_bounds(record.get("paper_forward_window"))
-    if not all((train_start, train_end, validation_start, validation_end, test_start, test_end)):
+    if not all((train_start, train_end, validation_start, validation_end, test_start, test_end, paper_start, paper_end)):
         return False
     if not (train_end < validation_start and validation_end < test_start):
         return False
-    if paper_start is not None and paper_end is not None and not (test_end < paper_start):
+    if not (test_end < paper_start):
         return False
     return True
 

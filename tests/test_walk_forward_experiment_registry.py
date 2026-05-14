@@ -221,6 +221,25 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
             self.assertIn("after_cost_support", failed_keys)
             self.assertTrue(proof["record_readiness"][0]["warnings"])
 
+    def test_walk_forward_proof_requires_paper_forward_window(self) -> None:
+        payload = _payload(status="completed")
+        payload.pop("paper_forward_window")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "experiments.json"
+            created = create_walk_forward_experiment(
+                payload,
+                benchmark_report=_benchmark("edge_detected"),
+                store_path=store,
+            )
+
+            proof = build_walk_forward_proof_summary([created["record"]])
+            no_lookahead = next(row for row in proof["requirements"] if row["key"] == "no_lookahead_windows")
+
+            self.assertFalse(proof["proof_ready"])
+            self.assertFalse(no_lookahead["passed"])
+            self.assertIn("Train, validation, test, and paper-forward windows are incomplete", proof["record_readiness"][0]["warnings"][0])
+
     def test_api_response_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp) / "experiments.json"
