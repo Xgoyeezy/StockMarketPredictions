@@ -18,6 +18,12 @@ from backend.services.storage_utils import read_json_file, write_json_file
 SAFETY_FLAGS: dict[str, Any] = {
     "research_only": True,
     "paper_route_only": True,
+    "changes_execution": False,
+    "changes_order_submission": False,
+    "changes_broker_routes": False,
+    "changes_risk_gates": False,
+    "clears_kill_switch": False,
+    "changes_ranking_weights": False,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
     "can_change_broker_routes": False,
