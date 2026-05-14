@@ -33,6 +33,7 @@ SAFETY_FLAGS: dict[str, Any] = {
     "can_bypass_risk_gates": False,
     "can_clear_kill_switch": False,
     "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "writes_execution_config": False,
     "writes_broker_config": False,
     "writes_risk_config": False,

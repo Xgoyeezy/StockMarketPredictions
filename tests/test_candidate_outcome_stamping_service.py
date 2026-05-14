@@ -297,6 +297,11 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             self.assertTrue(report["paper_only"])
             self.assertFalse(report["can_submit_orders"])
             self.assertFalse(report["can_submit_live_orders"])
+            self.assertFalse(report["can_change_broker_routes"])
+            self.assertFalse(report["can_bypass_risk_gates"])
+            self.assertFalse(report["can_clear_kill_switch"])
+            self.assertFalse(report["can_change_ranking_weights"])
+            self.assertFalse(report["can_grant_ai_order_authority"])
             self.assertIn("summary", report)
             self.assertIn("records", report)
             self.assertIn("aggregations", report)
@@ -317,6 +322,11 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             "safety_notes": ["Research only. Does not affect trading."],
             "can_submit_orders": False,
             "can_submit_live_orders": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_clear_kill_switch": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
         }
         with (
             patch("backend.routers.evidence_outcomes.cached_research_report", side_effect=lambda **kwargs: kwargs["builder"]()),
@@ -338,6 +348,11 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
                 self.assertTrue(data["paper_only"])
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
+                self.assertFalse(data["can_change_broker_routes"])
+                self.assertFalse(data["can_bypass_risk_gates"])
+                self.assertFalse(data["can_clear_kill_switch"])
+                self.assertFalse(data["can_change_ranking_weights"])
+                self.assertFalse(data["can_grant_ai_order_authority"])
                 self.assertIn("summary", data)
                 self.assertIn("records", data)
                 self.assertIn("warnings", data)
