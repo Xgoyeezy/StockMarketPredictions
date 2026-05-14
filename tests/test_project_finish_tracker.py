@@ -73,12 +73,13 @@ class ProjectFinishTrackerTests(unittest.TestCase):
         self.assertEqual(tracker["report_name"], "unit_test")
         self.assertEqual(ids, EXPECTED_TRACKER_IDS)
         self.assertIn("docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md", tracker["source_docs"])
-        self.assertEqual(tracker["summary"]["critical_open_items"], 6)
+        self.assertEqual(tracker["summary"]["critical_open_items"], 5)
         self.assertIn("do not authorize live trading", tracker["summary"]["safe_boundary"].lower())
         self.assertIn("technical_analysis_evidence_setup_admission", ids)
         self.assertIn("docs/PROOF_METRICS_DASHBOARD.md", tracker["source_docs"])
         self.assertEqual(tracker["summary"]["status_counts"]["deferred"], 7)
-        self.assertEqual(tracker["summary"]["status_counts"]["in_progress"], 12)
+        self.assertEqual(tracker["summary"]["status_counts"]["done"], 1)
+        self.assertEqual(tracker["summary"]["status_counts"]["in_progress"], 11)
         self.assertIn("proof decides priority", tracker["summary"]["proof_first_rule"].lower())
 
     def test_major_report_builders_include_finish_tracker(self) -> None:

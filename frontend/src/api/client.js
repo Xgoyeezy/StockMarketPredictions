@@ -1321,7 +1321,7 @@ export async function getOrganizationTradeAutomationReplayReport(params = {}) {
 }
 
 const FALLBACK_FINISH_TRACKER_ITEMS = [
-  { id: 'post_implementation_verification', area: 'verification', title: 'Post-Implementation Verification', status: 'in_progress', priority: 'critical', remaining_work: ['Keep backend, frontend, report, route, and safety-boundary checks current after each proof-layer change.'], done_when: 'The verification report is current and lists remaining proof blockers without overclaiming readiness.' },
+  { id: 'post_implementation_verification', area: 'verification', title: 'Post-Implementation Verification', status: 'done', priority: 'critical', remaining_work: ['Maintain backend, frontend, report, route, and safety-boundary checks after each proof-layer change.'], done_when: 'The verification report is current and lists remaining proof blockers without overclaiming readiness.' },
   { id: 'data_completeness_hardening', area: 'evidence_quality', title: 'Data completeness hardening', status: 'in_progress', priority: 'critical', remaining_work: ['Raise proof-field coverage for forward returns, baselines, actual paths, costs, regimes, and reward fields.'], done_when: 'Data Completeness reports benchmark_ready and proof_field_ready with traceable coverage.' },
   { id: 'candidate_outcome_baseline_stamping', area: 'evidence_capture', title: 'Candidate outcome and baseline stamping', status: 'in_progress', priority: 'critical', remaining_work: ['Capture entry, closed-horizon outcome, baseline, cost, and lineage fields for candidate rows.'], done_when: 'Rewardable candidate outcomes exist with actual returns, baseline returns, cost fields, and append-only lineage.' },
   { id: 'professional_benchmark_proof', area: 'benchmarking', title: 'Professional Benchmark proof gate', status: 'blocked_by_evidence', priority: 'critical', remaining_work: ['Collect enough rewardable outcomes to verify baseline-relative edge, score-bucket lift, and after-cost reward.'], done_when: 'Professional Benchmark reaches ready_for_human_review without claiming proven alpha.' },
@@ -1355,9 +1355,9 @@ const FALLBACK_FINISH_TRACKER = {
   scope: 'project_wide',
   summary: {
     total_items: FALLBACK_FINISH_TRACKER_ITEMS.length,
-    status_counts: { in_progress: 12, blocked_by_evidence: 6, not_started: 1, deferred: 7 },
+    status_counts: { done: 1, in_progress: 11, blocked_by_evidence: 6, not_started: 1, deferred: 7 },
     priority_counts: { critical: 6, high: 8, medium: 5, future: 7 },
-    critical_open_items: 6,
+    critical_open_items: 5,
     safe_boundary: 'Tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading or expansion implementation.',
     proof_first_rule: 'Ambition is allowed. Proof decides priority.',
   },
