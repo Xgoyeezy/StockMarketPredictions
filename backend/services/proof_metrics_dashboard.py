@@ -695,6 +695,10 @@ def build_proof_metrics_dashboard_report(
                     "action": row["safe_next_action"],
                     "manual_review_only": True,
                     "changes_execution": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
                 }
                 for row in open_metrics[:10]
             ],

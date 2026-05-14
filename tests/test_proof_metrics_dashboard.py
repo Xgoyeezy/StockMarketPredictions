@@ -122,6 +122,12 @@ class ProofMetricsDashboardTests(unittest.TestCase):
         self.assertIn("finish_tracker", report)
         self.assertGreaterEqual(report["summary"]["critical_open_metric_count"], 1)
         self.assertIn("Proof-field coverage", report["summary"]["top_blockers"])
+        safe_action = report["safe_next_actions"][0]
+        self.assertFalse(safe_action["changes_execution"])
+        self.assertFalse(safe_action["can_change_broker_routes"])
+        self.assertFalse(safe_action["can_bypass_risk_gates"])
+        self.assertFalse(safe_action["can_change_ranking_weights"])
+        self.assertFalse(safe_action["can_grant_ai_order_authority"])
         data_gate = next(row for row in report["gate_groups"] if row["gate"] == "Data Gate")
         self.assertEqual(data_gate["status"], "blocked_by_evidence")
         self.assertIn("benchmark_ready", data_gate["blocked_claims"])
