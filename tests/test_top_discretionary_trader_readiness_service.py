@@ -94,6 +94,7 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
         self.assertFalse(summary["can_submit_live_orders"])
         self.assertFalse(summary["can_change_broker_routes"])
         self.assertFalse(summary["can_bypass_risk_gates"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("not proof", summary["claim_boundary"])
 
     def test_same_opportunity_and_post_session_review_contracts(self) -> None:
