@@ -513,11 +513,13 @@ This improves verification hygiene only. It does not make the full suite pass by
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
 
-The active running backend did not expose several newer route groups during runtime probing, returning 404 for Professional Benchmark, Data Completeness, Walk-Forward, Research Promotion, Score Calibration, Execution Quality, Portfolio Risk, and Shadow Mode. This appears to be a stale runtime or not-yet-restarted backend, because the app object in code registers those routes correctly.
+Follow-up verification has resolved the original stale-runtime route availability finding. The active app has since been restarted through the standard local startup script, `/api/healthz` and `/api/readyz` have returned HTTP 200 in follow-up probes, and the newer foundation route groups have been verified through focused API, static frontend, and live route checks recorded above.
 
-Backend compile validation passed and the frontend production build passed. The focused backend analytics test set has three failures in Forecast Validation. The full `tests` suite has the same three failures. The root `python -m pytest` command fails during collection because copied tests under `runtime-exports/...` are collected as tests and cannot import project test modules.
+The original focused Forecast Validation failures have been resolved in follow-up work. Backend compile validation, focused backend/static tests for the proof surfaces, frontend production builds, local startup probes, and draft PR backend/frontend checks have passed in the follow-up evidence above. Root pytest discovery is now constrained to the tracked `tests/` tree so copied exported tests under generated runtime folders are not collected by root pytest runs.
 
 No audit evidence showed that the new research/analytics modules submit orders, enable live trading, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or mutate risk limits.
+
+The remaining product blocker is proof quality, not route registration or startup availability. Data Completeness, Professional Benchmark, Walk-Forward, Score Calibration, Execution Quality, Evidence Reward, Forecast Validation, Portfolio Risk, Human vs System Shadow Mode, Research Promotion, Risk Gate and Audit Trail hardening, and Proof Metrics still need stronger observed evidence before edge, repeatability, paper-to-live, live-readiness, small-fund, institutional, or HFT claims are appropriate.
 
 ## 2. Inventory
 
