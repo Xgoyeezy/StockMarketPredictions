@@ -4,11 +4,15 @@ Generated: 2026-05-06
 
 Scope: Verification-only audit of the research, analytics, benchmark, roadmap, frontend, API, docs, tests, and safety boundaries added to Quant Evidence OS / StockMarketPredictions. Paths in this report are repo-relative.
 
-Overall status: FAIL
+Original audit status: FAIL
+
+Current follow-up status: BLOCKED_BY_EVIDENCE
 
 Safety status: PASS
 
-Reason for overall status: core safety boundaries remain intact, but verification found failing Forecast Validation tests, stale live runtime route availability for several newer analytics route groups, weak rewardability/data completeness, and root test discovery failures caused by exported copied tests.
+Reason for original audit status: core safety boundaries remained intact, but the original verification found failing Forecast Validation tests, stale live runtime route availability for several newer analytics route groups, weak rewardability/data completeness, and root test discovery failures caused by exported copied tests.
+
+Reason for current follow-up status: follow-up work resolved the focused Forecast Validation failures, stale live runtime route availability, local backend startup blocker, and root pytest discovery blocker. The remaining blocker is evidence quality: weak rewardability/data completeness, incomplete benchmarkable outcomes, missing walk-forward proof, incomplete after-cost evidence, and unresolved proof-plan items still block edge, repeatability, paper-to-live, live-readiness, small-fund, institutional, and HFT claims.
 
 ## Follow-Up Status: 2026-05-08
 
