@@ -166,6 +166,7 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertTrue(report["read_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertIn("category_progress", report)
         self.assertIn("backlog", report)
         self.assertIn("proof decides priority", report["summary"]["proof_first_rule"].lower())
