@@ -471,6 +471,30 @@ External review evidence packet update:
 
 Follow-up action expanded the external review packet contract so any future firm-facing review must reference approval, audit, model, feature, benchmark and walk-forward, risk, execution, incident, and release evidence in addition to the existing sanitized report, environment separation, permission, and safety-boundary evidence. This is review-packet evidence only; it does not certify compliance, approve live trading, or grant broker/order/risk authority.
 
+Local backend startup hardening update:
+
+Follow-up action hardened local backend startup and the local app launcher after runtime verification exposed Windows socket/resource startup failures. This is runtime resilience only; it does not change trading behavior, broker routes, order submission, risk gates, kill-switch behavior, AI authority, ranking weights, forecast records, reward inputs, or live-trading readiness.
+
+Verification evidence:
+
+- Backend compile check: PASS.
+- Focused route-health test: PASS.
+- Git diff whitespace check: PASS.
+- Local app startup script: PASS.
+- Live backend health probe: PASS, status `ok`.
+- Local frontend probe: PASS, HTTP 200.
+- Draft PR CI checks: PASS for backend and frontend.
+
+Updated files:
+
+- `backend/__init__.py`
+- `backend/app.py`
+- `scripts/start-local-app.ps1`
+
+Remaining startup proof gap:
+
+The local app now starts through the standard script on the reviewed branch, but this does not prove alpha, repeatability, live readiness, broker readiness, or institutional readiness. Future verification should keep startup checks tied to proof surfaces and should still fail closed when backend health is unavailable.
+
 ## 1. Executive Summary
 
 The implementation exists broadly across backend services, routers, frontend pages, tests, and docs. Code-level FastAPI registration is present for all requested route groups, and TestClient confirms the analytics GET routes return safe research-only responses.
