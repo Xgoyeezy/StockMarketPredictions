@@ -46,6 +46,18 @@ BLOCKED_CLAIMS: tuple[str, ...] = (
     "live_trading_readiness",
 )
 
+SECRET_KEY_MARKERS = (
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "account_id",
+)
+
 RISK_AUDIT_HARDENING_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "active_risk_policy",
@@ -156,6 +168,26 @@ def _records(items: Iterable[Any] | None) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             rows.append(dict(item))
     return rows
+
+
+def _looks_like_local_path(value: str) -> bool:
+    cleaned = value.strip()
+    return (len(cleaned) >= 3 and cleaned[1:3] in {":\\", ":/"}) or cleaned.startswith("\\\\")
+
+
+def _sanitize_value(value: Any, *, key: str = "") -> Any:
+    key_lower = key.lower()
+    if any(marker in key_lower for marker in SECRET_KEY_MARKERS):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(child_key): _sanitize_value(child_value, key=str(child_key)) for child_key, child_value in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value(item, key=key) for item in value]
+    if isinstance(value, tuple) or isinstance(value, set):
+        return [_sanitize_value(item, key=key) for item in value]
+    if isinstance(value, str) and _looks_like_local_path(value):
+        return "[local_path_redacted]"
+    return value
 
 
 def _present(value: Any) -> bool:
@@ -435,12 +467,12 @@ def build_risk_audit_hardening_report(
             "status": hardening_plan["status"],
             "generated_at": generated_at or _utc_now(),
             "summary": summary,
-            "risk_policies": policies[:100],
-            "risk_events": events[:100],
-            "audit_events": audits[:100],
-            "audit_exports": exports[:100],
-            "trade_replays": replays[:100],
-            "safety_summary": safety_summary or {},
+            "risk_policies": _sanitize_value(policies[:100]),
+            "risk_events": _sanitize_value(events[:100]),
+            "audit_events": _sanitize_value(audits[:100]),
+            "audit_exports": _sanitize_value(exports[:100]),
+            "trade_replays": _sanitize_value(replays[:100]),
+            "safety_summary": _sanitize_value(safety_summary or {}),
             "risk_audit_hardening_plan": hardening_plan,
             "warnings": list(dict.fromkeys(warnings)),
             "safety_notes": list(SAFETY_NOTES),

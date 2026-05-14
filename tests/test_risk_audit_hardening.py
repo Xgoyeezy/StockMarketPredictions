@@ -105,6 +105,28 @@ class RiskAuditHardeningTests(unittest.TestCase):
         self.assertEqual(plan["summary"]["open_item_count"], 0)
         self.assertTrue(all(row["manual_review_only"] for row in plan["items"]))
 
+    def test_report_sanitizes_secret_keys_and_raw_local_paths(self) -> None:
+        report = build_risk_audit_hardening_report(
+            risk_policies=[_policy(api_key="secret-value")],
+            risk_events=[_risk_event(payload={"path": r"D:\private\raw.log", "account_id": "acct-123"})],
+            audit_events=[_audit_event(payload={"reason": "operator review", "token": "token-123"})],
+            audit_exports=[{"id": "export-1", "status": "queued", "export_type": "audit_bundle", "file_path": r"C:\raw\audit.json"}],
+            trade_replays=[_trade_replay(broker_snapshot={"provider": "alpaca", "account_id": "acct-456"})],
+            safety_summary={"records": [{"local_path": r"D:\runtime\ledger.json", "password": "pw"}]},
+            generated_at="2026-05-10T00:00:00Z",
+        )
+
+        rendered = str(report)
+        self.assertNotIn("secret-value", rendered)
+        self.assertNotIn("token-123", rendered)
+        self.assertNotIn("acct-123", rendered)
+        self.assertNotIn("acct-456", rendered)
+        self.assertNotIn("D:\\private\\raw.log", rendered)
+        self.assertNotIn("C:\\raw\\audit.json", rendered)
+        self.assertNotIn("D:\\runtime\\ledger.json", rendered)
+        self.assertIn("[redacted]", rendered)
+        self.assertIn("[local_path_redacted]", rendered)
+
     def test_api_response_shape_and_kill_switch_audit_event(self) -> None:
         context = build_test_context(slug="risk-audit-hardening-test", plan_key="professional")
         client = build_test_client(context)
