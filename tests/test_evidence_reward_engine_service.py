@@ -97,6 +97,11 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
         self.assertTrue(report["research_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertEqual(report["mutation"], "none")
 
     def test_reward_component_functions_are_transparent(self) -> None:
@@ -341,6 +346,11 @@ class EvidenceRewardEngineServiceTests(unittest.TestCase):
             self.assertIn("missing_fields", payload["data"])
             self.assertFalse(payload["data"]["can_submit_orders"])
             self.assertFalse(payload["data"]["can_submit_live_orders"])
+            self.assertFalse(payload["data"]["can_change_broker_routes"])
+            self.assertFalse(payload["data"]["can_bypass_risk_gates"])
+            self.assertFalse(payload["data"]["can_clear_kill_switch"])
+            self.assertFalse(payload["data"]["can_change_ranking_weights"])
+            self.assertFalse(payload["data"]["can_grant_ai_order_authority"])
             self.assertEqual(payload["data"]["mutation"], "none")
 
     def test_evidence_reward_service_has_no_execution_mutation_calls(self) -> None:
