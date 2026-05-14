@@ -16,19 +16,47 @@ $BackendLogs = Join-Path $LogsRoot "backend"
 $FrontendLogs = Join-Path $LogsRoot "frontend"
 New-Item -ItemType Directory -Force -Path $BackendLogs | Out-Null
 New-Item -ItemType Directory -Force -Path $FrontendLogs | Out-Null
+$StartupDebugLog = Join-Path $LogsRoot "start-local-app.debug.log"
+
+function Write-StartupPhase {
+    param([string]$Phase)
+    try {
+        $timestamp = (Get-Date).ToUniversalTime().ToString("o")
+        "$timestamp $Phase" | Add-Content -Path $StartupDebugLog -Encoding UTF8
+    } catch { }
+}
+
+Write-StartupPhase -Phase "script_started"
 
 function Get-ListenerPid {
     param([int]$Port)
-    $line = (netstat -ano | Select-String -Pattern (":$Port\s+.*LISTENING") | Select-Object -First 1)
-    if ($line) {
-        $pidText = ($line.ToString().Trim() -replace "\\s+"," " -split " ")[-1]
-        try { return [int]$pidText } catch { }
-    }
-
     try {
-        $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop | Select-Object -First 1
-        if ($conn -and $conn.OwningProcess) { return [int]$conn.OwningProcess }
-    } catch { }
+        $netstatPath = Join-Path $env:SystemRoot "System32\netstat.exe"
+        $netstatOut = Join-Path $env:TEMP "stock-signals-netstat-$PID-$Port.out"
+        $netstatErr = Join-Path $env:TEMP "stock-signals-netstat-$PID-$Port.err"
+        Remove-Item $netstatOut, $netstatErr -ErrorAction SilentlyContinue
+        $netstatProc = Start-Process `
+            -FilePath $netstatPath `
+            -ArgumentList @("-ano", "-p", "tcp") `
+            -RedirectStandardOutput $netstatOut `
+            -RedirectStandardError $netstatErr `
+            -WindowStyle Hidden `
+            -PassThru
+        if (-not $netstatProc.WaitForExit(5000)) {
+            Stop-Process -Id $netstatProc.Id -Force -ErrorAction SilentlyContinue
+            Write-StartupPhase -Phase "listener_check_timeout port=$Port"
+            return $null
+        }
+        $line = (Get-Content $netstatOut -ErrorAction SilentlyContinue | Select-String -Pattern (":$Port\s+.*LISTENING") | Select-Object -First 1)
+        if ($line) {
+            $pidText = ($line.ToString().Trim() -replace "\\s+"," " -split " ")[-1]
+            try { return [int]$pidText } catch { }
+        }
+    } catch {
+        Write-StartupPhase -Phase "listener_check_error port=$Port"
+    } finally {
+        Remove-Item $netstatOut, $netstatErr -ErrorAction SilentlyContinue
+    }
 
     return $null
 }
@@ -69,25 +97,46 @@ function Probe-Http {
     }
 }
 
+function New-NoListenerProbe {
+    param([string]$Url)
+    return [ordered]@{ ok=$false; url=$Url; status_code=$null; payload=$null; error="No listener is bound for this local app port." }
+}
+
 function New-RunStamp { return (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ") }
 $stamp = New-RunStamp
+
+function Set-DefaultEnv {
+    param([string]$Name, [string]$Value)
+    if (-not [Environment]::GetEnvironmentVariable($Name, "Process")) {
+        [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+    }
+}
+
+Set-DefaultEnv -Name "ENTERPRISE_RUNTIME_PROFILE" -Value "operator-local"
+Set-DefaultEnv -Name "JOB_WORKER_ENABLED" -Value "false"
+Set-DefaultEnv -Name "TRADE_AUTOMATION_WORKER_ENABLED" -Value "false"
+Set-DefaultEnv -Name "EVIDENCE_ACCELERATOR_ENABLED" -Value "false"
+Set-DefaultEnv -Name "REALTIME_STREAM_ENABLED" -Value "false"
 
 $healthzUrl = "$ApiBaseUrl/api/healthz"
 $backendPython = Join-Path $RepoRoot "backend\\.venv\\Scripts\\python.exe"
 $backendSitePackages = Join-Path $RepoRoot "backend\\.venv\\Lib\\site-packages"
 if (-not (Test-Path $backendPython)) { throw "Backend python not found: $backendPython" }
 if (-not (Test-Path $backendSitePackages)) { throw "Backend site-packages not found: $backendSitePackages" }
-
-$needRestart = $false
-$initial = [ordered]@{
-    backend = (Probe-Json -Url $healthzUrl -TimeoutSec 2)
-    frontend = (Probe-Http -Url $FrontendUrl -TimeoutSec 3)
-}
-if (-not ($initial.backend.ok -and (($initial.backend.payload.status -as [string]).ToLower() -eq "ok"))) { $needRestart = $true }
-if (-not $initial.frontend.ok) { $needRestart = $true }
+Write-StartupPhase -Phase "backend_runtime_checked"
 
 $initialBackendListenerPid = Get-ListenerPid -Port $ApiPort
 $initialFrontendListenerPid = Get-ListenerPid -Port $FrontendPort
+Write-StartupPhase -Phase "initial_listener_check backend=$initialBackendListenerPid frontend=$initialFrontendListenerPid"
+
+$needRestart = $false
+$initial = [ordered]@{
+    backend = $(if ($initialBackendListenerPid) { Probe-Json -Url $healthzUrl -TimeoutSec 2 } else { New-NoListenerProbe -Url $healthzUrl })
+    frontend = $(if ($initialFrontendListenerPid) { Probe-Http -Url $FrontendUrl -TimeoutSec 3 } else { New-NoListenerProbe -Url $FrontendUrl })
+}
+Write-StartupPhase -Phase "initial_probe_complete backend_ok=$($initial.backend.ok) frontend_ok=$($initial.frontend.ok)"
+if (-not ($initial.backend.ok -and (($initial.backend.payload.status -as [string]).ToLower() -eq "ok"))) { $needRestart = $true }
+if (-not $initial.frontend.ok) { $needRestart = $true }
 
 function Get-ProcessPathSafe {
     param([int]$ProcessId)
@@ -190,27 +239,31 @@ if (-not $needRestart) {
 
 $result.stop.frontend = (Stop-Listener -Port $FrontendPort)
 $result.stop.backend = (Stop-Listener -Port $ApiPort)
+Write-StartupPhase -Phase "stopped_existing_listeners"
 
-# Backend: start with required PYTHONPATH (repo root + backend venv site-packages)
+# Backend: start with required PYTHONPATH (repo root + backend venv site-packages).
+# Start python directly so the reported PID is the backend process and failures
+# can be stopped cleanly without leaving a wrapper process behind.
 $pyPathValue = "$RepoRoot;$backendSitePackages"
-$escapedPyPath = $pyPathValue -replace "'", "''"
-$escapedEnvFile = $EnvFile -replace "'", "''"
-$escapedBackendPython = $backendPython -replace "'", "''"
-$backendCommand = @(
-    "`$ErrorActionPreference='Stop';",
-    "`$env:PYTHONPATH='$escapedPyPath';",
-    "`$env:ENV_FILE='$escapedEnvFile';",
-    "& '$escapedBackendPython' -m backend.app"
-) -join " "
-
-$backendProc = Start-Process `
-    -FilePath powershell `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $backendCommand) `
-    -WorkingDirectory $RepoRoot `
-    -RedirectStandardOutput $result.backend.logs.stdout `
-    -RedirectStandardError $result.backend.logs.stderr `
-    -WindowStyle Hidden `
-    -PassThru
+$previousPyPath = $env:PYTHONPATH
+$previousEnvFile = $env:ENV_FILE
+try {
+    $env:PYTHONPATH = $pyPathValue
+    $env:ENV_FILE = $EnvFile
+    Write-StartupPhase -Phase "starting_backend"
+    $backendProc = Start-Process `
+        -FilePath $backendPython `
+        -ArgumentList @("-m", "backend.app") `
+        -WorkingDirectory $RepoRoot `
+        -RedirectStandardOutput $result.backend.logs.stdout `
+        -RedirectStandardError $result.backend.logs.stderr `
+        -WindowStyle Hidden `
+        -PassThru
+    Write-StartupPhase -Phase "backend_started pid=$($backendProc.Id)"
+} finally {
+    $env:PYTHONPATH = $previousPyPath
+    $env:ENV_FILE = $previousEnvFile
+}
 $result.backend.spawn_pid = $backendProc.Id
 
 # Wait for backend healthz
@@ -223,6 +276,7 @@ do {
         break
     }
 } while ((Get-Date) -lt $deadline)
+Write-StartupPhase -Phase "backend_wait_complete"
 
 $result.backend.listener_pid = Get-ListenerPid -Port $ApiPort
 if (-not $result.backend.healthz) {
@@ -230,6 +284,29 @@ if (-not $result.backend.healthz) {
     if (-not $result.backend.healthz.ok) {
         $result.blocker = "Backend failed to become healthy within ${BackendWaitSeconds}s."
     }
+}
+
+if (-not ($result.backend.healthz.ok -and (($result.backend.healthz.payload.status -as [string]).ToLower() -eq "ok"))) {
+    try {
+        if ($backendProc -and -not $backendProc.HasExited) {
+            Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+    $result.frontend.http = [ordered]@{
+        ok = $false
+        url = $FrontendUrl
+        status_code = $null
+        error = "Frontend not started because backend health check failed."
+    }
+    $result.finished_at = (Get-Date).ToUniversalTime().ToString("o")
+    $result.ok = $false
+
+    $reportPath = Join-Path $LogsRoot "start-local-app.$stamp.json"
+    $result | ConvertTo-Json -Depth 10 | Set-Content -Path $reportPath -Encoding UTF8
+    $result.report_path = $reportPath
+
+    $result | ConvertTo-Json -Depth 10
+    exit 1
 }
 
 # Frontend: start Vite only after backend is reachable (prevents ECONNREFUSED proxy spam)
