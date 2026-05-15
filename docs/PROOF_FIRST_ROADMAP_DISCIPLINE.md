@@ -274,6 +274,21 @@ Benchmark integrity checklist:
 - Simulation evidence is not counted as real-time market-observed evidence.
 - Results are not concentrated in one symbol, one session, or hindsight-selected setup.
 
+Benchmark review evidence to record before claiming improvement:
+
+- `benchmark_report_id`
+- `candidate_outcome_snapshot_id`
+- `baseline_definition_version`
+- `cost_model_version`
+- `score_bucket_method`
+- `benchmarkable_record_count`
+- `missing_field_summary`
+- `concentration_check`
+- `simulation_separation_check`
+- `claim_boundary`
+
+If any field is missing, the benchmark stays review-only and must not support edge, alpha, repeatability, paper-to-live, or rating-upgrade language.
+
 Walk-forward integrity checklist:
 
 - Rules are frozen before evaluation.
@@ -281,6 +296,22 @@ Walk-forward integrity checklist:
 - No mid-test mutation occurs.
 - Data source, feature version, reward formula, score formula, and baseline definition are versioned.
 - Verdict is pass, fail, or insufficient evidence.
+
+Walk-forward review evidence to record before claiming repeatability:
+
+- `walk_forward_experiment_id`
+- `frozen_snapshot_id`
+- `freeze_timestamp`
+- `evaluation_window`
+- `ranking_formula_version`
+- `reward_formula_version`
+- `feature_version`
+- `baseline_definition_version`
+- `out_of_sample_verdict`
+- `mid_test_mutation_check`
+- `claim_boundary`
+
+If any field is missing, the experiment stays review-only and must not support repeatability, promotion, paper-to-live, or rating-upgrade language.
 
 Data completeness cleanup plan:
 

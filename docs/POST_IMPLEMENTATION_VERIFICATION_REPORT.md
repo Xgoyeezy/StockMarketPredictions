@@ -317,6 +317,20 @@ Remaining expansion-scoring proof gap:
 
 The expansion backlog is now scored at a planning level, but those scores do not approve build work. Any item with high safety risk or high complexity still needs a separate future project, explicit proof-gate evidence, rollback plan, and human review before it can leave future backlog.
 
+Benchmark and walk-forward review-evidence update:
+
+Follow-up action hardened the proof-first roadmap discipline with required review evidence for benchmark integrity and walk-forward integrity checks. This is documentation-only proof discipline; it does not add services, routes, pages, execution behavior, broker behavior, order behavior, risk-gate behavior, kill-switch behavior, AI authority, ranking-weight behavior, or rating upgrades.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated document: `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, kill-switch, AI-authority, or ranking code changed.
+
+Remaining benchmark and walk-forward proof gap:
+
+The integrity checklists now name the review evidence that must exist, but they do not prove edge or repeatability. Benchmark and walk-forward claims still require complete candidate outcome evidence, same-window baselines, cost models, frozen snapshots, out-of-sample verdicts, no mutation, and honest insufficient-evidence handling.
+
 Paper-to-live proof gate documentation update:
 
 Follow-up action hardened the paper-to-live proof gate in `docs/live_trading_flow.md` and cross-referenced it from `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`. This is documentation-only safety discipline for a future review packet; it does not enable live trading, change broker routes, modify order submission, weaken risk gates, clear kill switches, grant AI order authority, or let analytics change ranking weights.
