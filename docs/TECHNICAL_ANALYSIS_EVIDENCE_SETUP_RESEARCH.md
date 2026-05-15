@@ -98,6 +98,23 @@ Every method-specific row must keep these blocked claims until evidence is compl
 
 The safe next action for any incomplete method is to document the missing fields, controls, costs, folds, and provenance. The safe next action is not to add a detector, trade from the method, or tune ranking weights.
 
+## Baseline Definition Requirements
+
+These baseline definitions must exist before detector work starts. They are research contracts only; they do not implement signals, change ranking weights, submit orders, change broker routes, bypass risk gates, or approve trading.
+
+| Method family | Required baseline definitions | Baseline evidence blocker |
+| --- | --- | --- |
+| Momentum and trend indicators | `buy_hold_same_window`, `simple_time_series_momentum`, `neighboring_parameter_momentum`, `no_trend_filter_variant` | No momentum-quality claim until every candidate compares against same-window buy-hold, simple momentum, and nearby-parameter baselines after costs. |
+| Volume indicators | `price_only_setup`, `no_volume_confirmation_variant`, `average_volume_threshold`, `random_volume_threshold` | No volume-incremental claim until volume features beat price-only and simple-volume controls net of turnover and spread. |
+| Support and resistance | `random_horizontal_level`, `prior_bar_extrema`, `round_number_level`, `touch_count_only_level` | No support/resistance claim until causal levels beat naive level baselines without lookahead and with expiry rules applied. |
+| Dynamic support and resistance | `static_support_resistance`, `moving_average_crossover`, `rolling_regression_trend`, `distance_to_average_only` | No dynamic-level claim until dynamic anchors add value beyond static levels, simple trend, and distance-only controls. |
+| Breakout patterns | `donchian_channel`, `prior_high_low_breakout`, `random_level_breakout`, `breakout_without_retest_filter` | No breakout-edge claim until the proposed breakout rule beats simpler breakout controls after slippage, failed-break handling, and retest assumptions. |
+| Reversal patterns | `simple_swing_reversal`, `rsi_reversal`, `prior_trend_mean_reversion`, `random_pivot_reversal` | No reversal-quality claim until causal pivot rules beat simple reversal controls with invalidation and target logic fixed before outcomes. |
+| Market structure | `moving_average_regime`, `rolling_regression_trend`, `simple_higher_high_lower_low_count`, `random_pivot_structure` | No market-structure claim until no-lookahead pivots improve setup selection beyond simpler regime and trend baselines. |
+| Break of structure | `plain_swing_break`, `donchian_continuation`, `prior_high_low_continuation`, `failed_break_counterfactual` | No BOS claim until frozen pivot breaks beat continuation baselines and include failed-break counterfactuals after costs. |
+
+Each baseline definition must record `baseline_id`, `universe`, `session_model`, `timeframe`, `lookback_window`, `entry_timestamp_rule`, `exit_or_horizon_rule`, `cost_model`, `wf_fold_id`, and `provenance_hash`. Missing baseline definitions keep the method research-only and block score-quality, edge, repeatability, paper-to-live, and live-trading language.
+
 ## Universal Acceptance Criteria
 
 A method can be documented as an evidence setup only when all of these gates are satisfied:
@@ -113,7 +130,7 @@ A method can be documented as an evidence setup only when all of these gates are
 ## Near-Term Docs Backlog
 
 1. Add method-specific setup contracts for the eight high-priority families.
-2. Add baseline definitions for each family before detector work starts.
+2. Keep baseline definitions for each family complete before detector work starts.
 3. Add "research-only" and "avoid" labels to roadmap references so weak methods do not drift into active implementation.
 4. Keep all technical-analysis method work behind Professional Benchmark, Data Completeness, Execution Quality, and Walk-Forward proof gates.
 5. Do not count synthetic chart transforms as executable proof.

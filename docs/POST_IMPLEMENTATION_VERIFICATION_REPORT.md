@@ -275,6 +275,20 @@ Remaining Technical Analysis proof gap:
 
 Technical-analysis setup admission is still not implementation-ready. The next evidence work is to keep method families behind causal field completeness, matched controls, executable prices, after-cost walk-forward evidence, parameter stability, and provenance before any detector or ranking work is considered.
 
+Technical Analysis baseline-definition update:
+
+Follow-up action added baseline definition requirements for the eight high-priority technical-analysis families already listed in the research backlog. This is documentation-only admission discipline for future evidence contracts; it does not add detectors, services, routes, pages, execution logic, broker logic, order logic, risk-gate logic, kill-switch behavior, AI authority, or ranking-weight logic.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated document: `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, kill-switch, AI-authority, or ranking code changed.
+
+Remaining Technical Analysis baseline proof gap:
+
+Baseline definitions are now documented, but no technical-analysis method is implementation-ready. Each method family still needs causal rules, executable prices, matched baseline evidence, after-cost walk-forward evidence, parameter stability, and provenance before detectors, ranking use, or any stronger claim can be considered.
+
 Proof-first expansion scoring update:
 
 Follow-up action added initial proof-first scores and decisions for the deferred expansion backlog in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. This preserves strategic ideas while keeping them out of active implementation unless they pass the documented expansion gates.
