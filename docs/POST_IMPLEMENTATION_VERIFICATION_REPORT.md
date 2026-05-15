@@ -289,6 +289,20 @@ Remaining Technical Analysis baseline proof gap:
 
 Baseline definitions are now documented, but no technical-analysis method is implementation-ready. Each method family still needs causal rules, executable prices, matched baseline evidence, after-cost walk-forward evidence, parameter stability, and provenance before detectors, ranking use, or any stronger claim can be considered.
 
+Technical Analysis roadmap-label update:
+
+Follow-up action hardened the main roadmap reference so weak or interpretive chart methods remain explicitly labeled research-only, confirmation-only, or avoid unless future proof gates clear. This is documentation-only roadmap discipline; it does not add detectors, services, routes, pages, execution logic, broker logic, order logic, risk-gate logic, kill-switch behavior, AI authority, or ranking-weight logic.
+
+Verification evidence:
+
+- Docs diff check: PASS.
+- Updated document: `docs/TEN_OUT_OF_TEN_ROADMAP.md`.
+- Scope check: docs-only; no backend, frontend, route, execution, broker, risk, order, kill-switch, AI-authority, or ranking code changed.
+
+Remaining Technical Analysis roadmap-label proof gap:
+
+Roadmap labels now make the weak-method boundary clearer, but technical-analysis setup admission remains proof-gated. No method should move from research-only or avoid status into setup admission until causal rules, executable prices, matched baselines, after-cost walk-forward evidence, parameter stability, and provenance exist.
+
 Proof-first expansion scoring update:
 
 Follow-up action added initial proof-first scores and decisions for the deferred expansion backlog in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. This preserves strategic ideas while keeping them out of active implementation unless they pass the documented expansion gates.

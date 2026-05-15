@@ -20,7 +20,7 @@ This roadmap is summarized into a full category upgrade plan in `docs/TEN_OUT_OF
 
 Hedge Fund AI Agents v1 is documented in `docs/HEDGE_FUND_AI_AGENTS.md`. It is a read-only decision-support committee layer that writes append-only sanitized research memos only. It does not add trading authority, order authority, broker-route authority, risk-gate authority, kill-switch authority, risk-limit authority, live-trading approval, or automatic ranking-weight changes.
 
-Technical Analysis evidence setup admission is documented in `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`. It narrows setup backlog work to objective, executable-price, benchmarkable, walk-forward-testable method families. Momentum/trend, volume, support/resistance, dynamic support/resistance, breakouts, reversals, market structure, and BOS may be documented as evidence-only setup candidates. More interpretive methods stay research-only or avoid unless future proof gates clear.
+Technical Analysis evidence setup admission is documented in `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`. It narrows setup backlog work to objective, executable-price, benchmarkable, walk-forward-testable method families. Momentum/trend, volume, support/resistance, dynamic support/resistance, breakouts, reversals, market structure, and BOS may be documented as evidence-only setup candidates. Trend lines, oscillators, divergence, candlestick patterns, Fibonacci, fair value gaps, supply/demand and orderblocks, and change of character remain research-only or confirmation-only until they beat simpler controls. Heikin Ashi, Renko, weak harmonic variants, Elliott Wave, Gann methods, moon phases, and similar chart-lore methods stay in the avoid group unless a separate future proof review clears unusually strict out-of-sample gates.
 
 Proof Metrics Dashboard v1 is documented in `docs/PROOF_METRICS_DASHBOARD.md`. It is a read-only proof visibility layer that aggregates gaps across Data Completeness, Evidence Outcomes, Professional Benchmark, Walk-Forward, Score Calibration, Evidence Reward, Execution Quality, Risk/Audit, Portfolio Risk, Forecast Validation, Shadow Mode, Research Promotion, and AI Committee safety. It does not approve expansion work, live trading, broker changes, risk-gate changes, kill-switch changes, or ranking-weight mutation.
 
@@ -80,6 +80,7 @@ Required builds:
 - Forecast Validation Engine hardening.
 - Baseline Lab.
 - Technical Analysis evidence setup admission contracts.
+- Technical Analysis research-only and avoid labels for weak or interpretive chart methods.
 - Walk-Forward Validator.
 - Experiment Registry.
 - Score Bucket Validator.
