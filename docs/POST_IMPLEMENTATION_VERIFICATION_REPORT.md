@@ -930,21 +930,21 @@ Docs frame ratings as current estimated readiness and avoid claiming guaranteed 
 
 ## 11. Recommended Next Actions
 
-1. Fix Forecast Validation tests first.
-   - Make `missing_data` response shape match the intended contract, or add a separate `missing_data_fields` list while preserving a boolean field.
-   - Fix `time_to_target` to report the first target-reaching timestamp within the forward path.
-
-2. After tests pass, restart or redeploy the active backend runtime from the current D checkout and re-probe all analytics routes.
-   - Do not change trading settings while doing this.
-
-3. Fix root pytest discovery hygiene.
-   - Exclude `runtime-exports/**` from test collection or move exported copied tests outside discoverable paths.
-
-4. Improve Data Completeness for rewardable candidate contracts.
+1. Improve Data Completeness for rewardable candidate contracts.
    - Add forward-known `actual_forward_return`, `baseline_forward_return`, prediction contract fields, engine/setup/regime labels, spread/slippage/fill fields, and linked blocker/AI outcomes where missing.
+   - Keep incomplete records visible and do not fabricate missing market outcomes.
 
-5. Add dedicated Evidence Reward and Forecast Validation docs.
-   - Document required fields, rewardability, immutability, formulas, missing data behavior, and research-only boundaries.
+2. Harden Professional Benchmark inputs.
+   - Produce rewardable candidate rows, same-window baselines, score-bucket separation, after-cost reward evidence, and frozen out-of-sample splits before any edge language.
+
+3. Mature Walk-Forward validation.
+   - Create and freeze chronological experiment snapshots, link them to out-of-sample benchmark results, attach after-cost support, and report pass/fail/insufficient-evidence verdicts.
+
+4. Continue Score Calibration, Execution Quality, Portfolio Risk, Human vs System, and Research Promotion proof cleanup.
+   - Keep recommendations manual-review-only and disconnected from execution, broker routes, risk gates, kill switches, AI authority, and ranking-weight mutation.
+
+5. Keep verification hygiene current.
+   - Re-run focused backend tests, frontend build/tests where relevant, route probes only when runtime behavior was touched or the app is already running, and CI checks on the draft PR.
 
 6. Apply the proof-first roadmap discipline before starting any expansion feature.
    - Keep new desks, agents, broker-neutral live execution, HFT work, C++ acceleration, and enterprise governance deferred unless they pass the expansion gates in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`.
@@ -978,7 +978,7 @@ Overall status: FAIL
 
 Safety status: PASS
 
-The platform appears safely isolated from trading execution, but the implementation is not yet verification-clean. The next work should be a narrow fix pass for Forecast Validation test failures, runtime route refresh, and test discovery hygiene before any additional feature work.
+The platform appears safely isolated from trading execution, and the earlier Forecast Validation, route-refresh, and root test-discovery blockers have been resolved in follow-up work. The implementation is still not proof-clean. The next work should stay focused on Data Completeness, benchmarkable rewardable outcomes, walk-forward proof, after-cost evidence, and manual-review-only proof cleanup before any expansion feature work.
 
 ## 15. Project Finish Tracker
 
