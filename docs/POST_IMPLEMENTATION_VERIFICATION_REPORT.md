@@ -242,6 +242,19 @@ Remaining Forecast Validation proof gap:
 
 Forecast Validation now exposes a proof-first hardening plan, but it is not ready for forecast-accuracy, forecast-edge, repeatability, paper-to-live, live-readiness, or ranking-mutation language. The next evidence work is still to broaden actual post-prediction path coverage, attach target/invalidation timing metrics, and prove calibration/regime stability while keeping immutable forecast records separate from validation outcomes and disconnected from execution, broker routes, risk gates, kill switches, ranking weights, and AI order authority.
 
+Forecast Validation contract documentation update:
+
+Follow-up action added `docs/FORECAST_VALIDATION_ENGINE.md` as the dedicated Forecast Validation contract document requested by the proof audit. This is documentation only. It records required forecast fields, forward-only validation requirements, reward formula, missing-data behavior, hardening-plan semantics, output consumers, and safety boundaries.
+
+Verification evidence:
+
+- Documentation diff whitespace check: PASS.
+- Forecast Validation backend/API focused tests: PASS.
+
+Remaining Forecast Validation documentation proof gap:
+
+The dedicated doc closes the missing-contract-doc item, but it does not create new forecast evidence. Forecast Validation still needs broader actual post-prediction path coverage, target/invalidation timing evidence, calibration context, and regime stability before forecast accuracy, forecast edge, repeatability, paper-to-live, live-readiness, or rating-upgrade language is appropriate.
+
 Proof Metrics plan-awareness update:
 
 Follow-up action made the existing Proof Metrics Dashboard read attached cleanup, hardening, and validation plans from the foundation reports. This keeps Proof Metrics read-only while making plan-level blocker counts visible alongside the metric value and gate.
@@ -644,8 +657,8 @@ The remaining product blocker is proof quality, not route registration or startu
 
 ### Missing or weak docs
 
-- No dedicated Evidence Reward contract doc was found.
-- No dedicated Forecast Validation contract doc was found.
+- Dedicated Evidence Reward contract documentation exists in `docs/EVIDENCE_REWARD_ENGINE.md`.
+- Dedicated Forecast Validation contract documentation now exists in `docs/FORECAST_VALIDATION_ENGINE.md`.
 - Some feature docs could be more explicit about formulas or paper-only boundaries, especially where the feature consumes paper-route execution evidence.
 
 ### Duplicates and cleanup risks
@@ -882,8 +895,8 @@ Docs exist for the newly added benchmark, completeness, walk-forward, promotion,
 
 Gaps:
 
-- Dedicated Evidence Reward contract documentation should be added or consolidated.
-- Dedicated Forecast Validation contract documentation should be added or consolidated.
+- Dedicated Evidence Reward contract documentation exists in `docs/EVIDENCE_REWARD_ENGINE.md`.
+- Dedicated Forecast Validation contract documentation exists in `docs/FORECAST_VALIDATION_ENGINE.md`.
 - Some docs should make formula definitions and paper-only evidence boundaries more explicit.
 - Docs should explicitly mention the current benchmark bottleneck: insufficient rewardable forward-known candidate outcomes.
 
