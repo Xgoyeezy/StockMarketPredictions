@@ -322,6 +322,24 @@ Data completeness cleanup plan:
 - Identify missing setup, engine, regime, and timestamp fields.
 - Keep incomplete evidence visible, not fabricated.
 
+Data completeness review evidence to record before treating cleanup as proof-ready:
+
+- `data_completeness_report_id`
+- `source_snapshot_id`
+- `required_field_version`
+- `proof_field_coverage`
+- `rewardability_rate`
+- `benchmark_ready`
+- `missing_forward_return_count`
+- `missing_baseline_count`
+- `missing_forecast_actual_count`
+- `missing_execution_cost_count`
+- `missing_regime_or_setup_count`
+- `simulation_separation_check`
+- `claim_boundary`
+
+If any field is missing, Data Completeness stays review-only and must not support benchmark readiness, rewardability, walk-forward readiness, paper-to-live, or rating-upgrade language.
+
 ## What To Defer
 
 These are deferred, not rejected:
