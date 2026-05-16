@@ -556,6 +556,10 @@ Local backend startup hardening update:
 
 Follow-up action hardened local backend startup and the local app launcher after runtime verification exposed Windows socket/resource startup failures. This is runtime resilience only; it does not change trading behavior, broker routes, order submission, risk gates, kill-switch behavior, AI authority, ranking weights, forecast records, reward inputs, or live-trading readiness.
 
+Local readiness blocker fix:
+
+Follow-up action corrected the local app launcher so the ordinary async job worker is enabled for local readiness while the trade automation worker remains disabled. The launcher now records and requires `/api/readyz` in addition to `/api/healthz`, preventing a local startup from reporting success while readiness is blocked by a disabled background worker. This is local runtime readiness hygiene only; it does not enable live trading, change broker routes, change order submission, bypass risk gates, auto-clear kill switches, grant AI order authority, or allow analytics to change ranking weights.
+
 Verification evidence:
 
 - Backend compile check: PASS.

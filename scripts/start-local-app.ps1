@@ -4,7 +4,7 @@ param(
     [int]$ApiPort = 8000,
     [int]$FrontendPort = 5173,
     [string]$EnvFile = ".env",
-    [int]$BackendWaitSeconds = 15,
+    [int]$BackendWaitSeconds = 90,
     [switch]$ForceRestart,
     [switch]$RequireBackendVenv = $true
 )
@@ -113,12 +113,13 @@ function Set-DefaultEnv {
 }
 
 Set-DefaultEnv -Name "ENTERPRISE_RUNTIME_PROFILE" -Value "operator-local"
-Set-DefaultEnv -Name "JOB_WORKER_ENABLED" -Value "false"
+Set-DefaultEnv -Name "JOB_WORKER_ENABLED" -Value "true"
 Set-DefaultEnv -Name "TRADE_AUTOMATION_WORKER_ENABLED" -Value "false"
 Set-DefaultEnv -Name "EVIDENCE_ACCELERATOR_ENABLED" -Value "false"
 Set-DefaultEnv -Name "REALTIME_STREAM_ENABLED" -Value "false"
 
 $healthzUrl = "$ApiBaseUrl/api/healthz"
+$readyzUrl = "$ApiBaseUrl/api/readyz"
 $backendPython = Join-Path $RepoRoot "backend\\.venv\\Scripts\\python.exe"
 $backendSitePackages = Join-Path $RepoRoot "backend\\.venv\\Lib\\site-packages"
 if (-not (Test-Path $backendPython)) { throw "Backend python not found: $backendPython" }
@@ -132,10 +133,12 @@ Write-StartupPhase -Phase "initial_listener_check backend=$initialBackendListene
 $needRestart = $false
 $initial = [ordered]@{
     backend = $(if ($initialBackendListenerPid) { Probe-Json -Url $healthzUrl -TimeoutSec 2 } else { New-NoListenerProbe -Url $healthzUrl })
+    readiness = $(if ($initialBackendListenerPid) { Probe-Json -Url $readyzUrl -TimeoutSec 2 } else { New-NoListenerProbe -Url $readyzUrl })
     frontend = $(if ($initialFrontendListenerPid) { Probe-Http -Url $FrontendUrl -TimeoutSec 3 } else { New-NoListenerProbe -Url $FrontendUrl })
 }
-Write-StartupPhase -Phase "initial_probe_complete backend_ok=$($initial.backend.ok) frontend_ok=$($initial.frontend.ok)"
+Write-StartupPhase -Phase "initial_probe_complete backend_ok=$($initial.backend.ok) readiness_ok=$($initial.readiness.ok) frontend_ok=$($initial.frontend.ok)"
 if (-not ($initial.backend.ok -and (($initial.backend.payload.status -as [string]).ToLower() -eq "ok"))) { $needRestart = $true }
+if (-not $initial.readiness.ok) { $needRestart = $true }
 if (-not $initial.frontend.ok) { $needRestart = $true }
 
 function Get-ProcessPathSafe {
@@ -193,6 +196,7 @@ $result = [ordered]@{
     api_base_url = $ApiBaseUrl
     frontend_url = $FrontendUrl
     healthz_url = $healthzUrl
+    readyz_url = $readyzUrl
     initial_probe = $initial
     action = [ordered]@{
         restart = $needRestart
@@ -205,6 +209,7 @@ $result = [ordered]@{
         spawn_pid = $null
         listener_pid = $null
         healthz = $null
+        readyz = $null
         logs = [ordered]@{
             stdout = (Join-Path $BackendLogs "api-$ApiPort-$stamp.out.log")
             stderr = (Join-Path $BackendLogs "api-$ApiPort-$stamp.err.log")
@@ -225,6 +230,7 @@ if (-not $needRestart) {
     $result.backend.listener_pid = $initialBackendListenerPid
     $result.frontend.listener_pid = $initialFrontendListenerPid
     $result.backend.healthz = $initial.backend
+    $result.backend.readyz = $initial.readiness
     $result.frontend.http = $initial.frontend
     $result.finished_at = (Get-Date).ToUniversalTime().ToString("o")
     $result.ok = $true
@@ -309,6 +315,24 @@ if (-not ($result.backend.healthz.ok -and (($result.backend.healthz.payload.stat
     exit 1
 }
 
+$deadline = (Get-Date).AddSeconds([double]$BackendWaitSeconds)
+do {
+    Start-Sleep -Milliseconds 350
+    $probe = Probe-Json -Url $readyzUrl -TimeoutSec 2
+    if ($probe.ok) {
+        $result.backend.readyz = $probe
+        break
+    }
+} while ((Get-Date) -lt $deadline)
+Write-StartupPhase -Phase "backend_readiness_wait_complete"
+
+if (-not $result.backend.readyz) {
+    $result.backend.readyz = Probe-Json -Url $readyzUrl -TimeoutSec 2
+}
+if (-not $result.backend.readyz.ok) {
+    $result.blocker = "Backend failed readiness probe within ${BackendWaitSeconds}s."
+}
+
 # Frontend: start Vite only after backend is reachable (prevents ECONNREFUSED proxy spam)
 $viteArgs = @(".\\node_modules\\vite\\bin\\vite.js", "--host", "localhost", "--port", "$FrontendPort", "--clearScreen", "false")
 $frontendProc = Start-Process `
@@ -326,7 +350,12 @@ $result.frontend.listener_pid = Get-ListenerPid -Port $FrontendPort
 $result.frontend.http = Probe-Http -Url $FrontendUrl -TimeoutSec 5
 
 $result.finished_at = (Get-Date).ToUniversalTime().ToString("o")
-$result.ok = ($result.backend.healthz.ok -and (($result.backend.healthz.payload.status -as [string]).ToLower() -eq "ok") -and $result.frontend.http.ok)
+$result.ok = (
+    $result.backend.healthz.ok `
+    -and (($result.backend.healthz.payload.status -as [string]).ToLower() -eq "ok") `
+    -and $result.backend.readyz.ok `
+    -and $result.frontend.http.ok
+)
 
 $reportPath = Join-Path $LogsRoot "start-local-app.$stamp.json"
 $result | ConvertTo-Json -Depth 10 | Set-Content -Path $reportPath -Encoding UTF8
