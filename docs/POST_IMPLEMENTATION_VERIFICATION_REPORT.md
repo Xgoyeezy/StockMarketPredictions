@@ -908,25 +908,37 @@ Docs frame ratings as current estimated readiness and avoid claiming guaranteed 
 
 ## 10. Top Risks
 
-1. Forecast Validation test failures
-   - Severity: High
-   - Risk: Contract mismatch and target timing issues undermine forecast reward hardening.
-
-2. Active runtime route staleness
-   - Severity: High
-   - Risk: Code-level routes exist, but the running backend does not serve most new analytics route groups.
-
-3. Data quality and rewardability are too weak
+1. Data quality and rewardability are too weak
    - Severity: High
    - Risk: Benchmark, reward, score calibration, and promotion layers cannot prove edge with current candidate data.
+   - Current safe action: improve observed, forward-known candidate outcome coverage without fabricating market outcomes.
 
-4. Root pytest collection is polluted by runtime exports
-   - Severity: Medium
-   - Risk: Standard full-test commands fail before real tests run, making CI or developer validation unreliable.
+2. Benchmarkable outcomes remain incomplete
+   - Severity: High
+   - Risk: Professional Benchmark cannot support edge, repeatability, paper-to-live, live-readiness, or rating-upgrade language without rewardable rows, same-window baselines, score buckets, after-cost evidence, and frozen out-of-sample splits.
+   - Current safe action: keep benchmark verdicts conservative until complete benchmark inputs exist.
 
-5. Large uncommitted working tree
+3. Walk-forward proof is still missing
+   - Severity: High
+   - Risk: Repeatability claims are blocked until frozen chronological experiments, out-of-sample results, after-cost support, and pass/fail/insufficient-evidence verdicts exist.
+   - Current safe action: keep walk-forward status blocked by evidence until those records are present.
+
+4. After-cost execution evidence remains incomplete
    - Severity: Medium
-   - Risk: Review, deployment, and rollback are risky with hundreds of changed/untracked paths.
+   - Risk: Apparent paper edge may disappear once spread, slippage, fill delay, route evidence, and lifecycle linkage are attached.
+   - Current safe action: keep execution analytics read-only and do not let them change orders, routes, size, risk gates, or ranking weights.
+
+5. Manual-review proof cleanup can be mistaken for readiness
+   - Severity: Medium
+   - Risk: Cleanup plans for Score Calibration, Portfolio Risk, Human vs System, Research Promotion, Evidence Reward, and Forecast Validation may look like readiness even when they are still blocked by evidence.
+   - Current safe action: preserve explicit blocked-claim language and keep all recommendations manual-review-only.
+
+Resolved follow-up blockers:
+
+- Forecast Validation test failures were fixed in follow-up verification.
+- Active runtime route staleness was resolved by restarting and re-probing the current backend.
+- Root pytest discovery was hardened so ignored runtime/export copies are not collected by root pytest runs.
+- The large uncommitted worktree problem was resolved by syncing source/docs/test work to the PR branch and keeping ignored runtime/generated data out of commits.
 
 ## 11. Recommended Next Actions
 
