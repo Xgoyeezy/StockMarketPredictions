@@ -14,6 +14,14 @@ Reason for original audit status: core safety boundaries remained intact, but th
 
 Reason for current follow-up status: follow-up work resolved the focused Forecast Validation failures, stale live runtime route availability, local backend startup blocker, and root pytest discovery blocker. The remaining blocker is evidence quality: weak rewardability/data completeness, incomplete benchmarkable outcomes, missing walk-forward proof, incomplete after-cost evidence, and unresolved proof-plan items still block edge, repeatability, paper-to-live, live-readiness, small-fund, institutional, and HFT claims.
 
+Current local runtime verification note, 2026-05-16:
+
+- Backend liveness is available on the local API port.
+- Frontend HTTP returns 200 on the local Vite port.
+- Readiness is blocked because the background worker is disabled in local startup configuration.
+- This is a runtime-readiness boundary, not proof of alpha, repeatability, live readiness, broker readiness, paper-to-live readiness, or institutional readiness.
+- Follow-up must not auto-enable the worker if doing so would change runtime behavior outside an explicit startup/readiness project.
+
 ## Follow-Up Status: 2026-05-08
 
 Follow-up action resolved the focused Forecast Validation test failures and confirmed the current running API exposes the research route groups that were stale in the original active-runtime probe.
