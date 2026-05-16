@@ -18,9 +18,9 @@ Current local runtime verification note, 2026-05-16:
 
 - Backend liveness is available on the local API port.
 - Frontend HTTP returns 200 on the local Vite port.
-- Readiness is blocked because the background worker is disabled in local startup configuration.
+- Readiness now returns ready with zero blockers after the local startup fix that enables the ordinary async job worker while keeping trade automation background work disabled.
 - This is a runtime-readiness boundary, not proof of alpha, repeatability, live readiness, broker readiness, paper-to-live readiness, or institutional readiness.
-- Follow-up must not auto-enable the worker if doing so would change runtime behavior outside an explicit startup/readiness project.
+- Follow-up must keep the ordinary async job worker separate from trade automation background work and must not enable live trading, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, or change ranking weights.
 
 ## Follow-Up Status: 2026-05-08
 
