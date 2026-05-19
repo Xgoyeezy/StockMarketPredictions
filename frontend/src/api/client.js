@@ -1366,7 +1366,7 @@ const FALLBACK_FINISH_TRACKER = {
     status_counts: { done: 1, in_progress: 11, blocked_by_evidence: 6, not_started: 1, deferred: 7 },
     priority_counts: { critical: 6, high: 8, medium: 5, future: 7 },
     critical_open_items: 5,
-    safe_boundary: 'Tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading or expansion implementation.',
+    safe_boundary: 'Tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading, AI order authority, broker-route changes, risk-gate bypass, kill-switch bypass, ranking-weight mutation, or expansion implementation.',
     proof_first_rule: 'Ambition is allowed. Proof decides priority.',
   },
   items: FALLBACK_FINISH_TRACKER_ITEMS.map(withNextSafeAction),
