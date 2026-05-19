@@ -32,30 +32,17 @@ function Get-ListenerPid {
     param([int]$Port)
     try {
         $netstatPath = Join-Path $env:SystemRoot "System32\netstat.exe"
-        $netstatOut = Join-Path $env:TEMP "stock-signals-netstat-$PID-$Port.out"
-        $netstatErr = Join-Path $env:TEMP "stock-signals-netstat-$PID-$Port.err"
-        Remove-Item $netstatOut, $netstatErr -ErrorAction SilentlyContinue
-        $netstatProc = Start-Process `
-            -FilePath $netstatPath `
-            -ArgumentList @("-ano", "-p", "tcp") `
-            -RedirectStandardOutput $netstatOut `
-            -RedirectStandardError $netstatErr `
-            -WindowStyle Hidden `
-            -PassThru
-        if (-not $netstatProc.WaitForExit(5000)) {
-            Stop-Process -Id $netstatProc.Id -Force -ErrorAction SilentlyContinue
-            Write-StartupPhase -Phase "listener_check_timeout port=$Port"
-            return $null
-        }
-        $line = (Get-Content $netstatOut -ErrorAction SilentlyContinue | Select-String -Pattern (":$Port\s+.*LISTENING") | Select-Object -First 1)
+
+        # Run `netstat -ano` directly. This is both simpler and more reliable than
+        # spawning a subprocess with redirected temp files, and it preserves IPv6
+        # listeners (e.g. `[::1]:5173`) that `netstat -p tcp` would omit.
+        $line = (& $netstatPath -ano 2>$null | Select-String -Pattern (":$Port\s+.*LISTENING") | Select-Object -First 1)
         if ($line) {
             $pidText = ($line.ToString().Trim() -replace "\\s+"," " -split " ")[-1]
             try { return [int]$pidText } catch { }
         }
     } catch {
         Write-StartupPhase -Phase "listener_check_error port=$Port"
-    } finally {
-        Remove-Item $netstatOut, $netstatErr -ErrorAction SilentlyContinue
     }
 
     return $null
