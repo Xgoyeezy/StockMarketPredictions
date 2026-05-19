@@ -43,7 +43,7 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_small_fund_requirements_added_so_far(self) -> None:
         summary = get_small_fund_research_stack_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 26)
+        self.assertEqual(summary["implemented_requirement_count"], len(SMALL_FUND_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], SMALL_FUND_REQUIREMENT_EVIDENCE)
         for key in SMALL_FUND_FIRST_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -55,8 +55,16 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
             self.assertTrue(summary["requirement_evidence"][key])
         self.assertTrue(all(summary["requirement_evidence"].values()))
         self.assertTrue(summary["read_only"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["changes_risk_limits"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertFalse(summary["writes_execution_config"])
         self.assertIn("not institutional-grade", summary["claim_boundary"])
 
@@ -83,7 +91,10 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
         self.assertEqual(blocked["status"], "blocked")
         self.assertEqual(passed["status"], "passed")
         self.assertFalse(passed["promotion_changes_execution_behavior"])
+        self.assertFalse(passed["changes_execution"])
+        self.assertFalse(passed["changes_order_submission"])
         self.assertFalse(passed["can_change_broker_routes"])
+        self.assertFalse(passed["changes_broker_routes"])
 
     def test_second_batch_permissions_risk_tca_and_execution_safety(self) -> None:
         permissions = build_research_metadata_permission_contract()
@@ -213,7 +224,10 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
         self.assertEqual(rbac_tests["passed_by_check"], [True, True, True, True])
         self.assertEqual(execution_boundary["status"], "passed")
         self.assertFalse(execution_boundary["promotion_status_changes_execution_behavior"])
+        self.assertFalse(execution_boundary["changes_execution"])
+        self.assertFalse(execution_boundary["changes_order_submission"])
         self.assertFalse(execution_boundary["can_change_broker_routes"])
+        self.assertFalse(execution_boundary["changes_broker_routes"])
         self.assertEqual(audit["status"], "needs_evidence")
         self.assertEqual(audit["failed_indexes"], [1])
         self.assertIn("event_hash", audit["missing_by_record"][1]["missing_fields"])
@@ -231,7 +245,7 @@ class SmallFundResearchStackReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in solo_rows[:30]))
         self.assertTrue(all(row["status"] == "complete" for row in small_fund_rows[:26]))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(small_fund)

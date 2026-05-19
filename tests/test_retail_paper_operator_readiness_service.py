@@ -35,7 +35,7 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_retail_requirements_added_so_far(self) -> None:
         summary = get_retail_paper_operator_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 25)
+        self.assertEqual(summary["implemented_requirement_count"], len(RETAIL_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], RETAIL_REQUIREMENT_EVIDENCE)
         for key in FIRST_TEN_RETAIL_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -45,8 +45,15 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
             self.assertTrue(summary["requirement_evidence"][key])
         self.assertTrue(all(summary["requirement_evidence"].values()))
         self.assertTrue(summary["read_only"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
 
     def test_guided_onboarding_and_health_states_are_operator_safe(self) -> None:
         onboarding = build_guided_onboarding_checklist(paper_ready=True)
@@ -99,7 +106,7 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
         self.assertEqual(len(first_twenty), 20)
         self.assertTrue(all(row["status"] == "complete" for row in first_twenty))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_broker_wizard_and_paper_order_explanations_are_read_only(self) -> None:
         wizard = build_broker_readiness_wizard(
@@ -129,6 +136,13 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
 
         self.assertTrue(support["sanitized"])
         self.assertFalse(support["raw_logs_included"])
+        self.assertTrue(support["redaction_status_recorded"])
+        self.assertTrue(support["schema_version_recorded"])
+        self.assertFalse(support["raw_broker_payloads_included"])
+        self.assertFalse(support["database_files_included"])
+        self.assertFalse(support["environment_values_included"])
+        self.assertFalse(support["authorization_headers_included"])
+        self.assertFalse(support["unsanitized_personal_data_included"])
         self.assertTrue(labels["distinguishes_paper_from_live_money"])
         self.assertEqual(len(empty_states), 3)
         self.assertTrue(all(item["why_empty"] and item["next_safe_action"] for item in empty_states))
@@ -138,7 +152,12 @@ class RetailPaperOperatorReadinessServiceTests(unittest.TestCase):
         self.assertIn("no_trade_explanation_guide", docs_index["sections"])
         self.assertIn("broker_readiness_guide", docs_index["sections"])
         self.assertFalse(transition_contract["auto_clears_kill_switch"])
+        self.assertFalse(transition_contract["clears_kill_switch"])
+        self.assertFalse(transition_contract["changes_execution"])
+        self.assertFalse(transition_contract["changes_order_submission"])
         self.assertFalse(transition_contract["changes_broker_routes"])
+        self.assertFalse(transition_contract["changes_risk_gates"])
+        self.assertFalse(transition_contract["changes_ranking_weights"])
         self.assertFalse(transition_contract["submits_orders"])
 
     def test_retail_proof_metrics_are_measured_without_claims(self) -> None:

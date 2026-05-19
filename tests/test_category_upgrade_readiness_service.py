@@ -12,7 +12,9 @@ from backend.services.category_upgrade_readiness_service import (
     build_category_upgrade_proof_chain,
     build_category_upgrade_readiness_report,
     build_category_upgrade_support_export,
+    evaluate_governance_gate,
     evaluate_proof_gates,
+    evaluate_risk_visibility_gate,
     write_category_upgrade_readiness_export,
 )
 
@@ -162,10 +164,22 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertEqual(by_key["hft_or_elite_execution_platform"]["status"], "future_only")
         self.assertTrue(report["research_only"])
         self.assertTrue(report["read_only"])
+        self.assertFalse(report["changes_execution"])
+        self.assertFalse(report["changes_order_submission"])
+        self.assertFalse(report["changes_broker_routes"])
+        self.assertFalse(report["changes_risk_gates"])
+        self.assertFalse(report["clears_kill_switch"])
+        self.assertFalse(report["changes_ranking_weights"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertIn("category_progress", report)
         self.assertIn("backlog", report)
+        self.assertIn("proof decides priority", report["summary"]["proof_first_rule"].lower())
+        backlog = {item["key"]: item for item in report["backlog"]}
+        self.assertEqual(backlog["market_specialist_desk_registry"]["state"], "future_only")
+        self.assertEqual(backlog["off_exchange_liquidity_dashboard"]["state"], "future_only")
+        self.assertEqual(backlog["cpp_core_accelerators"]["state"], "future_only")
         progress = {row["category_key"]: row for row in report["category_progress"]}
         self.assertTrue(progress["solo_systematic_trader_platform"]["rating_update_allowed"])
         self.assertEqual(progress["solo_systematic_trader_platform"]["planning_progress_to_10_pct"], 100.0)
@@ -226,6 +240,12 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertEqual(chain["summary"]["stage_count"], 9)
         self.assertTrue(chain["research_only"])
         self.assertTrue(chain["read_only"])
+        self.assertFalse(chain["changes_execution"])
+        self.assertFalse(chain["changes_order_submission"])
+        self.assertFalse(chain["changes_broker_routes"])
+        self.assertFalse(chain["changes_risk_gates"])
+        self.assertFalse(chain["clears_kill_switch"])
+        self.assertFalse(chain["changes_ranking_weights"])
         self.assertFalse(chain["can_submit_orders"])
         self.assertFalse(chain["can_change_broker_routes"])
         self.assertFalse(chain["can_bypass_risk_gates"])
@@ -234,9 +254,16 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertEqual(by_gate["data_complete_enough"]["status"], "partial")
         self.assertIn("Fix missing forward returns", by_gate["data_complete_enough"]["safe_next_action"])
         self.assertFalse(by_gate["execution_costs_handled"]["execution_mutation"])
+        self.assertFalse(by_gate["execution_costs_handled"]["changes_execution"])
+        self.assertFalse(by_gate["execution_costs_handled"]["changes_order_submission"])
         self.assertFalse(by_gate["execution_costs_handled"]["broker_route_mutation"])
+        self.assertFalse(by_gate["execution_costs_handled"]["changes_broker_routes"])
         self.assertFalse(by_gate["risk_visibility_complete"]["risk_gate_mutation"])
+        self.assertFalse(by_gate["risk_visibility_complete"]["changes_risk_gates"])
+        self.assertFalse(by_gate["risk_visibility_complete"]["clears_kill_switch"])
         self.assertFalse(by_gate["baselines_beaten"]["ranking_mutation"])
+        self.assertFalse(by_gate["baselines_beaten"]["changes_ranking_weights"])
+        self.assertFalse(by_gate["safety_intact"]["can_grant_ai_order_authority"])
 
     def test_hft_requires_separate_future_thesis(self) -> None:
         report = build_category_upgrade_readiness_report(
@@ -254,6 +281,61 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         hft = next(row for row in report["categories"] if row["key"] == "hft_or_elite_execution_platform")
         self.assertEqual(hft["status"], "ready_for_rating_review")
         self.assertEqual(hft["missing_extra_proof"], [])
+
+    def test_risk_visibility_gate_uses_portfolio_proof_when_present(self) -> None:
+        gate = evaluate_risk_visibility_gate(
+            {
+                "status": "ready",
+                "summary": {
+                    "portfolio_risk_coverage": 0.35,
+                    "portfolio_risk_requirements_passed": 4,
+                    "portfolio_risk_requirements_total": 9,
+                },
+                "proof_summary": {
+                    "proof_ready": False,
+                    "summary": {
+                        "portfolio_risk_coverage": 0.35,
+                        "passed_requirement_count": 4,
+                        "requirement_count": 9,
+                    },
+                },
+                "writes_risk_limits": False,
+                "writes_risk_config": False,
+            }
+        )
+
+        self.assertEqual(gate["status"], "partial")
+        self.assertEqual(gate["evidence"]["proof_ready"], False)
+        self.assertFalse(gate["evidence"]["writes_risk_limits"])
+        self.assertEqual(gate["blockers"], [])
+
+    def test_governance_gate_uses_research_promotion_proof_when_present(self) -> None:
+        gate = evaluate_governance_gate(
+            {
+                "status": "ready",
+                "summary": {
+                    "promotion_requirements_passed": 9,
+                    "promotion_requirements_total": 10,
+                },
+                "proof_summary": {
+                    "proof_ready": False,
+                    "summary": {
+                        "promotion_traceability_coverage": 0.84,
+                        "passed_requirement_count": 9,
+                        "requirement_count": 10,
+                    },
+                },
+                "writes_execution_config": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+            },
+            _governance_ready(),
+        )
+
+        self.assertEqual(gate["status"], "partial")
+        self.assertFalse(gate["evidence"]["promotion_proof_ready"])
+        self.assertEqual(gate["evidence"]["promotion_requirements_passed"], 9.0)
+        self.assertIn("promotion_proof_ready", gate["warnings"][0])
 
     def test_priority_backlog_maps_missing_extra_proof_to_correct_stage(self) -> None:
         partial_proof = _category_proof_ready()
@@ -371,6 +453,9 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         report["diagnostics"] = {
             "account_id": "ACCT-123456",
             "api_token": "token-value",
+            "authorization_header": "Bearer live-auth-token",
+            "environment_value": "BROKER_SECRET=unsafe",
+            "database_file": "app.db",
             "raw_log": "raw broker response",
             "note": "review artifact at D:\\sensitive\\raw.log",
             "safe_relative_doc": "docs/TEN_OUT_OF_TEN_PROOF_GATES.md",
@@ -384,11 +469,17 @@ class CategoryUpgradeReadinessServiceTests(unittest.TestCase):
         self.assertFalse(export["support_export_safety"]["path_exposed_in_payload"])
         self.assertNotIn("ACCT-123456", serialized)
         self.assertNotIn("token-value", serialized)
+        self.assertNotIn("Bearer live-auth-token", serialized)
+        self.assertNotIn("BROKER_SECRET=unsafe", serialized)
+        self.assertNotIn("app.db", serialized)
         self.assertNotIn("raw broker response", serialized)
         self.assertNotIn("D:\\sensitive\\raw.log", serialized)
         self.assertIn("[redacted]", serialized)
         self.assertIn("[local_path_redacted]", serialized)
         self.assertIn("docs/TEN_OUT_OF_TEN_PROOF_GATES.md", serialized)
+        self.assertIn("database_files", export["support_export_safety"]["excludes"])
+        self.assertIn("environment_values", export["support_export_safety"]["excludes"])
+        self.assertIn("authorization_headers", export["support_export_safety"]["excludes"])
 
     def test_written_support_export_avoids_absolute_paths_in_result_and_payload(self) -> None:
         report = build_category_upgrade_readiness_report(

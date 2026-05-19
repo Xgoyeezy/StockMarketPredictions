@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -66,6 +67,7 @@ export default function EvidenceEdgePage() {
   const [recommendations, setRecommendations] = useState([])
   const [positiveFeatures, setPositiveFeatures] = useState([])
   const [negativeFeatures, setNegativeFeatures] = useState([])
+  const [finishTracker, setFinishTracker] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -82,6 +84,7 @@ export default function EvidenceEdgePage() {
       setRecommendations(summaryPayload.recommended_ranking_adjustments || [])
       setPositiveFeatures(summaryPayload.top_positive_features || [])
       setNegativeFeatures(summaryPayload.top_negative_features || [])
+      setFinishTracker(summaryPayload.finish_tracker || null)
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || 'Failed to load Evidence Edge analytics.')
     } finally {
@@ -222,6 +225,8 @@ export default function EvidenceEdgePage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={finishTracker} loading={loading} />
     </div>
   )
 }

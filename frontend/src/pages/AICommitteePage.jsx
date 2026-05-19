@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -507,6 +508,8 @@ export default function AICommitteePage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={summary?.finish_tracker} loading={loading} />
     </div>
   )
 }

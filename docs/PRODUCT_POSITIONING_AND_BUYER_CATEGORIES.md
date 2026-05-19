@@ -13,18 +13,27 @@ Secondary positioning:
 - Systematic trader evidence layer.
 - Research-to-risk workflow for serious traders.
 
+Future roadmap positioning, if implemented safely and proven:
+
+```text
+Trading evidence and research operating system with AI committee review, market specialist desks, forecast validation, off-exchange liquidity intelligence, and broker-neutral execution planning.
+```
+
 Avoid positioning as:
 
 - Guaranteed profit system.
 - AI trading bot.
 - HFT platform.
 - Live autonomous money manager.
+- Autonomous live-money manager.
 - Replacement for broker controls.
 - Investment adviser.
 - Black-box alpha machine.
 - Institutional-grade platform unless proof exists.
 - Compliance-approved system.
 - Proven alpha system.
+- Dark Pool Predictor.
+- Dark Pool Trading Signal.
 
 The canonical readiness matrix is `docs/CATEGORY_READINESS_RATINGS.md`. Ratings are current estimated readiness scores, not official industry ratings, proof of alpha, or investor performance claims.
 
@@ -41,6 +50,8 @@ Current strategy desks:
 - Options Volatility Desk.
 
 Current positioning should treat the system as a paper-first evidence and research workflow, not a guaranteed profit system, AI trading bot, HFT platform, live autonomous money manager, broker replacement, investment adviser, black-box alpha machine, compliance-approved product, or proven alpha system.
+
+Future roadmap language should keep the same separation. Market Specialist Desks are context engines, not order bots. Strategy Desks produce trade logic. Candidate Fusion may combine market context and strategy logic in a future project, while risk gates stay above both. The Visual Strategy Evidence Builder is a no-code evidence contract builder, not a no-code trading bot. The Off-Exchange Liquidity Dashboard is passive research context, not a trade trigger. Broker-neutral execution planning means Alpaca becomes one adapter, not that Quant Evidence OS becomes a broker. C++ Core Accelerators are performance helpers only and must not own trading authority.
 
 ## Category Ratings Reference
 
@@ -303,6 +314,30 @@ Rule:
 
 Build anything that determines truth, edge, safety, or trust. Buy commodity infrastructure only.
 
+## Free-First And Provider ROI Positioning
+
+There is no truly free way to trade every market. Position the provider strategy as free-first and proof-gated:
+
+1. Free simulator.
+2. Alpaca paper.
+3. ETF proxies.
+4. Free or delayed data.
+5. Provider abstraction.
+6. Paid services only when evidence proves the need.
+
+Do not recommend paid providers because the product feels advanced. Pay only when Data Completeness, benchmark, execution quality, or walk-forward evidence proves a specific bottleneck and the expected monthly value is at least 3x monthly cost. Prefer 5x before depending on a paid service.
+
+Acceptable free-first examples:
+
+- Alpaca paper for U.S. stocks, ETFs, options, and supported paper workflows.
+- BrokerSimulatorAdapter for future markets.
+- ETF proxies for gold, silver, oil, rates, FX, indexes, sectors, and volatility context.
+- Crypto data-only first.
+- Futures research-only through ETFs first.
+- Off-exchange analytics through free delayed research data where available.
+
+ETF proxy examples include GLD, IAU, GDX, SLV, USO, XLE, OIH, TLT, IEF, SHY, BIL, UUP, FXE, FXY, FXB, SPY, QQQ, IWM, DIA, XLK, XLF, XLE, XLV, XLY, XLP, XLI, XLU, XLB, XLRE, and BTC or ETH ETFs where available.
+
 ## Demo Should Emphasize
 
 - Why a trade happened.
@@ -379,6 +414,12 @@ Enterprise / Firm Readiness:
 - "Broker replacement."
 - "Proven alpha system."
 - "Proven professional alpha."
+- "Dark pool prints predict direction."
+- "Sees hidden orders."
+- "Knows institutional intent."
+- "Accumulation or distribution detector" without evidence.
+- "Broker-neutral means broker replacement."
+- "C++ trading authority."
 
 ## Claims That Fit Current State
 
@@ -403,3 +444,8 @@ Every buyer-facing material should clearly state:
 - Risk gates remain authoritative.
 - Broker routes remain unchanged unless separately configured and approved.
 - Live trading remains disabled unless separately and explicitly implemented outside this roadmap.
+- Market Specialist Desks are context engines, not order bots.
+- AI agents are decision-support analysts, not trading agents.
+- Off-Exchange Liquidity Dashboard is research context, not a trade trigger.
+- Broker-neutral execution planning does not mean becoming a broker.
+- C++ accelerators must not own trading authority.

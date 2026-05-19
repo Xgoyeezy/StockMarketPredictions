@@ -246,3 +246,42 @@ Those would add complexity before the system can prove that candidate scores, bl
 ## Bottom Line
 
 The Professional Benchmark Suite v1 is working as intended, but it is blocked by data quality. The next bottleneck is candidate-level outcome attribution, not benchmark code. Build the candidate outcome and baseline stamping layer next, then rerun the benchmark after enough rewardable rows accumulate.
+
+## Project Finish Tracker
+
+This tracker is project-wide and must stay at the end of report outputs. It is not limited to the Professional Benchmark layer.
+
+Summary: 26 tracked items; 5 critical open items; 1 done; 11 in progress; 6 blocked by evidence; 1 not started; 7 deferred.
+
+Proof-first rule: Ambition is allowed. Proof decides priority.
+
+| Priority | Area | Item | Status | Done when |
+| --- | --- | --- | --- | --- |
+| Critical | Verification | Post-Implementation Verification | Done | The verification report is current, cites focused test/build/browser evidence, and lists remaining proof blockers without overclaiming readiness. |
+| Critical | Evidence Quality | Data completeness hardening | In Progress | Data Completeness reports benchmark_ready and proof_field_ready with traceable source coverage. |
+| Critical | Evidence Capture | Candidate outcome and baseline stamping | In Progress | Rewardable candidate outcomes exist with actual_forward_return, baseline_forward_return, cost fields, and append-only lineage. |
+| Critical | Benchmarking | Professional Benchmark proof gate | Blocked By Evidence | Professional Benchmark reaches ready_for_human_review without claiming proven alpha. |
+| High | Repeatability | Walk-forward validation | Blocked By Evidence | Walk-Forward shows frozen, no-lookahead, evaluated records with acceptable pass rate. |
+| High | Ranking Quality | Score calibration and feature attribution | Blocked By Evidence | Calibration proof is ready with sufficient feature coverage and after-cost lift. |
+| High | Execution Quality | Execution Quality and TCA | In Progress | Execution proof is ready with candidate-route linkage and positive after-cost evidence. |
+| Critical | Risk And Audit | Risk Gate and Audit Trail hardening | In Progress | Risk and audit evidence is traceable, sanitized, and confirms no proof layer can bypass controls. |
+| High | Risk Visibility | Portfolio Risk Intelligence | In Progress | Portfolio risk proof is ready with enough exposure and context coverage for review. |
+| Medium | Decision Review | Human vs System Shadow Mode | Blocked By Evidence | Shadow Mode has same-opportunity comparisons with pre-outcome human and system contracts. |
+| High | Promotion Governance | Research promotion rules | Blocked By Evidence | Promotion proof is ready with traceability coverage and no authority crossing. |
+| High | Reward Quality | Evidence Reward and blocker value | Blocked By Evidence | Evidence Reward can explain rewardability, blocker value, and after-cost outcomes without fabricated data or ranking mutation. |
+| Medium | Forecast Quality | Forecast validation hardening | In Progress | Forecast Validation stays ready with broad actual-path coverage and stable reward calculations. |
+| Medium | Proof Visibility | Proof metrics dashboard planning | In Progress | A shared proof-metrics view shows the current proof gaps and which gate each gap blocks. |
+| High | Roadmap Discipline | Proof-first backlog scoring and expansion gates | In Progress | Every future feature has a proof-first decision of near-term, foundation-first, future backlog, or reject for now. |
+| High | Setup Research | Technical Analysis evidence setup admission | In Progress | Technical-analysis methods are classified into evidence-only, research-only, and avoid groups with method-specific fields, controls, and proof gates documented before implementation. |
+| Medium | Ai Research | AI Committee research layer | In Progress | Committee reports add research context without approving trades or mutating live behavior. |
+| Medium | Product Readiness | Operator experience, docs, and report UX | In Progress | Every major report ends with the shared finish tracker and clear next safe actions. |
+| Critical | Live Trading Boundary | Paper-to-live proof gate | Not Started | Live enablement remains explicitly gated by verified paper evidence and human approval. |
+| Future | Future Backlog | Market Specialist Desk registry | Deferred | Deferred until foundation proof is stronger and the smallest safe context-only version is justified. |
+| Future | Future Backlog | Candidate Fusion and Market x Strategy Benchmark | Deferred | Deferred until current benchmark, walk-forward, and candidate evidence can support market x strategy comparisons. |
+| Future | Future Backlog | Off-Exchange Liquidity Dashboard | Deferred | Deferred until it solves a measured proof problem without changing ranking, routing, or order behavior. |
+| Future | Future Backlog | Broker-neutral architecture and provider ROI gates | Deferred | Deferred until data, benchmark, execution, or walk-forward evidence proves a broker/provider bottleneck and ROI case. |
+| Future | Future Backlog | Visual Strategy Evidence Builder | Deferred | Deferred until current evidence contracts are mature enough to make a visual builder proof-focused instead of feature-count-focused. |
+| Future | Future Backlog | Governance, RBAC, model registry, and institutional controls | Deferred | Deferred until the proof chain supports firm-facing control work and the required reviews are scoped. |
+| Future | Future Backlog | C++ Core Accelerators and HFT feasibility study | Deferred | Deferred until profiling proves a research-only acceleration bottleneck or a separate HFT thesis is approved. |
+
+Safety boundary: tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading, AI order authority, broker-route changes, risk-gate bypass, kill-switch bypass, ranking-weight mutation, or expansion implementation. They do not authorize order submission or deferred expansion work without separate proof-first approval.

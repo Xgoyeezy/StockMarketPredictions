@@ -16,11 +16,315 @@ Compliance readiness means the repository has sanitized evidence, documented bou
 - Keep broker routes unchanged unless a separate explicit broker-routing project approves a change.
 - Keep support and firm-grade reports sanitized of secrets, account identifiers, raw broker records, raw logs, and raw local paths.
 
+## Support Export Sanitization Evidence Checklist
+
+Support and firm-review exports are proof artifacts only. They do not prove alpha, approve live trading, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or mutate ranking weights.
+
+Every support export review should record:
+
+- Export type and schema version.
+- Generated timestamp.
+- Source report name.
+- Sanitized flag.
+- Redaction policy version.
+- Whether secret-like keys were redacted.
+- Whether account identifiers were redacted.
+- Whether raw broker payloads were excluded.
+- Whether raw logs were excluded.
+- Whether raw local paths were excluded.
+- Whether credentials and environment values were excluded.
+- Whether exported fields are metadata, summaries, or sanitized evidence only.
+- Reviewer or automation check that confirmed the boundary.
+
+Stop the export or mark it unsafe if any artifact includes:
+
+- `.env` values.
+- API keys, tokens, passwords, or authorization headers.
+- Broker account identifiers.
+- Raw broker records or raw broker payloads.
+- Raw runtime logs.
+- Raw local paths.
+- Database files or local storage files.
+- Unsanitized personal data.
+
+Allowed export contents:
+
+- Sanitized summary metrics.
+- Read-only proof status.
+- Blocked claims.
+- Safe next actions.
+- Source document names.
+- Test/build/probe status summaries.
+- Redaction status and warnings.
+
+## Firm-Grade Report Specification
+
+Firm-grade reports are sanitized review artifacts. They are not proof of alpha, compliance approval, institutional-grade readiness, broker-dealer status, investment-adviser status, HFT capability, or live-trading readiness.
+
+Every firm-grade report specification should include:
+
+- Report identifier.
+- Schema version.
+- Generated timestamp.
+- Source evidence snapshot identifiers.
+- Data lineage summary.
+- Model lineage summary.
+- Feature lineage summary.
+- Risk-control status.
+- Approval and promotion metadata.
+- Forecast and reward summary.
+- Incident and release summary.
+- Audit evidence summary.
+- Verification summary.
+- Sanitization summary.
+- Claim-boundary section.
+- External-review status.
+
+Firm-grade reports must exclude:
+
+- Secrets, API keys, tokens, passwords, and authorization headers.
+- Broker account identifiers.
+- Raw broker records or raw broker payloads.
+- Raw runtime logs.
+- Raw local paths.
+- Database files or local storage files.
+- Credentials and environment values.
+- Unsanitized personal data.
+
+If a report cannot prove sanitization, reproducibility, source evidence references, and claim boundaries, it should remain a draft review artifact and must not support institutional-grade or compliance-approved claims.
+
+## Environment Separation Verification
+
+Environment separation is proof and audit evidence. It does not enable live trading, loosen broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, or mutate ranking weights.
+
+Every environment-separation review should record:
+
+- Environment name.
+- Execution lane.
+- Data store.
+- Runtime storage scope.
+- Configuration namespace.
+- Secrets scope.
+- Broker route scope.
+- Audit scope.
+- Whether live autonomy is enabled.
+- Whether broker-route mutation is allowed.
+- Whether risk-gate bypass is allowed.
+- Whether ranking mutation is allowed.
+- Whether simulation evidence can mix with market-observed evidence.
+
+Block institutional-readiness claims if any reviewed environment allows live autonomy, broker-route mutation, risk-gate bypass, ranking mutation, or simulation and observed evidence mixing without a separate approved future project.
+
+## Permission Enforcement Coverage
+
+Permission enforcement coverage is proof and audit evidence for research and governance metadata. It does not enable live trading, submit orders, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or change risk limits.
+
+Every permission-enforcement review should record:
+
+- Role.
+- Action.
+- Resource.
+- Whether the action was allowed.
+- Whether the decision was enforced.
+- Audited timestamp.
+- Evidence snapshot identifier.
+- Audit event identifier.
+- Permission source or policy version.
+- Decision boundary, such as research metadata only.
+- Whether the permission record carries any order, live-order, broker-route, risk-gate, kill-switch, AI-order-authority, ranking-weight, or risk-limit authority.
+
+Block small-fund or institutional-readiness claims if any reviewed permission record lacks evidence traceability, was not enforced, or carries authority to submit orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or change risk limits.
+
+## Approval Trace Completeness
+
+Approval traces are proof and audit evidence for research and governance decisions. They do not approve live trading, submit orders, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, change risk limits, mutate immutable forecast records, or edit reward inputs after outcomes.
+
+Every approval-trace review should record:
+
+- Approval identifier.
+- Actor.
+- Reviewer role.
+- Action.
+- Affected research or governance entity.
+- Strategy identifier.
+- Strategy version.
+- Promotion rule version.
+- Timestamp.
+- Evidence snapshot identifier.
+- Audit event identifier.
+- Previous status.
+- New status.
+- Approval scope.
+- Decision reason.
+- Claim boundary.
+- Whether the approval record carries any live-trading, order-submission, broker-route, risk-gate, kill-switch, AI-order-authority, ranking-weight, risk-limit, forecast-record-mutation, or reward-input-edit authority.
+
+Block small-fund or institutional-readiness claims if approval traces do not prove who changed what, when, with which evidence snapshot, under which approval scope, and without unsafe execution or control authority.
+
+## Audit Event Completeness
+
+Audit event completeness is proof and audit evidence for reviewability and tamper resistance. It does not submit orders, change execution behavior, loosen broker routes, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, change risk limits, or approve incomplete evidence.
+
+Every audit event review should record:
+
+- Event identifier.
+- Event type.
+- Actor.
+- Affected research or governance entity.
+- Timestamp.
+- Evidence snapshot identifier.
+- Source report.
+- Event hash.
+- Previous event hash.
+- Whether the event is append-only.
+- Whether the event is tamper-evident.
+- Sanitization status.
+- Safety boundary.
+- Whether the audit event contains any secret, account identifier, raw log, raw local path, or authority to change execution, broker routes, risk gates, kill switches, AI order authority, ranking weights, or risk limits.
+
+Block small-fund or institutional-readiness claims if audit events are incomplete, editable without trace, not tamper-evident, not sanitized, or carry unsafe execution or control authority.
+
+## Model Version Traceability
+
+Model version traceability is proof evidence for research review. It does not change ranking weights, change execution behavior, approve live trading, submit orders, loosen broker routes, or bypass risk gates.
+
+Every model lineage review should record:
+
+- Model identifier.
+- Model version.
+- Training data version.
+- Feature version.
+- Created timestamp.
+- Approval identifier.
+- Model artifact digest.
+- Training window start.
+- Training window end.
+- Validation report identifier.
+- Approval scope.
+
+Block small-fund or institutional-readiness claims if model records cannot prove the exact version, training data, feature version, validation evidence, approval scope, and immutable artifact reference used by a forecast or benchmark result.
+
+## Feature Lineage Completeness
+
+Feature lineage completeness is proof evidence for reproducible research. It does not change ranking weights, change execution behavior, approve live trading, submit orders, loosen broker routes, or bypass risk gates.
+
+Every feature lineage review should record:
+
+- Feature identifier.
+- Feature version.
+- Source data version.
+- Generated timestamp.
+- Transformation version.
+- Owner.
+- Input snapshot identifier.
+- Output schema version.
+- No-lookahead flag.
+
+Block small-fund or institutional-readiness claims if feature records cannot prove source version, transformation version, input snapshot, output schema, ownership, generation time, and no-lookahead behavior.
+
+## Benchmark And Walk-Forward Traceability
+
+Benchmark and walk-forward traceability is proof evidence for reproducible out-of-sample review. It does not change ranking weights, change reward formulas, change execution behavior, approve live trading, submit orders, or alter broker routes.
+
+Every benchmark and walk-forward link review should record:
+
+- Benchmark run identifier.
+- Walk-forward experiment identifier.
+- Data version.
+- Model version.
+- Feature version.
+- Ranking formula version.
+- Reward formula version.
+- Baseline definition version.
+- Frozen snapshot identifier.
+- Whether the snapshot was frozen before outcomes.
+
+Block solo-systematic, small-fund, or institutional-readiness claims if benchmark and walk-forward records cannot prove same-version data, model, feature, ranking, reward, baseline, and frozen out-of-sample snapshot links.
+
+## Risk Control Auditability
+
+Risk control auditability is proof evidence that controls remained authoritative during research review. It does not change risk limits, bypass risk gates, clear kill switches, submit orders, change broker routes, or grant analytics or AI override authority.
+
+Every risk-control audit review should record:
+
+- Risk control identifier.
+- Current state.
+- Audited timestamp.
+- Evidence snapshot identifier.
+- Whether the control is authoritative.
+- Risk policy version.
+- Last tested timestamp.
+- Whether bypass is allowed.
+- Whether analytics override is allowed.
+- Whether AI override is allowed.
+
+Block small-fund or institutional-readiness claims if any risk control lacks policy/test evidence, is not authoritative, allows bypass, or allows analytics or AI override.
+
+## Execution Report Lineage
+
+Execution report lineage is proof evidence for paper execution review and TCA. It does not submit orders, change order behavior, change broker routes, approve live trading, or loosen risk controls.
+
+Every execution lineage review should record:
+
+- Candidate identifier.
+- Quote identifier.
+- Route.
+- Execution lane.
+- Order identifier.
+- Receipt identifier.
+- Fill identifier.
+- Reconciliation identifier.
+- Reconciliation status.
+- Spread.
+- Slippage.
+- Fill delay.
+- Latency.
+
+Block execution-quality, small-fund, or institutional-readiness claims if execution reports cannot link candidate, quote, route, order, receipt, fill, reconciliation, spread, slippage, fill delay, and latency evidence.
+
 ## Release Validation And Rollback Controls
 
 Release validation and rollback controls are governance evidence only. They should record the release candidate, validation checks, reviewer, timestamp, result, rollback note, and affected research surfaces.
 
 Rollback metadata must not auto-clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live-money autonomy, or alter ranking weights.
+
+Every release validation record should include:
+
+- Release identifier.
+- Branch, commit, pull request, or tagged build reference.
+- Reason for the release.
+- Scope of changed source, docs, tests, and operational surfaces.
+- Affected proof surfaces, such as Data Completeness, Professional Benchmark, Walk-Forward, Execution Quality, Score Calibration, Risk Gate and Audit Trail, Portfolio Risk, Human vs System, Research Promotion, Evidence Reward, or Forecast Validation.
+- Pre-release safety invariant result.
+- Test, build, and route-probe summary where applicable.
+- Current known blocker summary.
+- Reviewer or automation check.
+- Release decision: approve, hold, reject, or rollback required.
+- Rollback target, rollback owner, and rollback verification plan.
+- Sanitization check confirming no secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values are present in the release evidence.
+
+Stop release approval or mark the release unsafe if validation finds:
+
+- Live trading was enabled without a separate approved future project.
+- Broker routes, order submission logic, risk gates, kill-switch behavior, AI authority, or ranking weights changed unexpectedly.
+- Simulation evidence was merged into real-time market-observed evidence.
+- Local verification failed or required checks are missing.
+- The rollback target is unknown.
+- Release evidence exposes secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values.
+
+Every rollback record should include:
+
+- Rollback trigger.
+- Release identifier being rolled back.
+- Rollback target.
+- Whether runtime data changed during the failed release.
+- Backup or restore requirement.
+- Safety invariant result after rollback.
+- Test, build, and route-probe summary after rollback where applicable.
+- Incident record reference if the rollback responds to an incident.
+- Follow-up owner and blocked redeploy condition.
+
+Rollback records are review metadata only. They must not approve live trading, loosen broker routes, clear kill switches, bypass risk gates, change order behavior, mutate ranking weights, or treat failed proof evidence as passing evidence.
 
 ## Incident Management Runbook
 
@@ -31,15 +335,56 @@ Every incident record should include:
 - Incident identifier.
 - Opened timestamp.
 - Severity.
+- Detection source.
+- First visible symptom.
 - Owner.
 - Affected research or control-plane entity.
+- Affected proof surfaces, such as Data Completeness, Professional Benchmark, Walk-Forward, Execution Quality, Score Calibration, Risk Gate and Audit Trail, Portfolio Risk, Human vs System, Research Promotion, Evidence Reward, or Forecast Validation.
+- Current safety state.
+- Whether execution, broker routes, order logic, risk gates, kill switches, AI authority, ranking weights, or simulation separation were affected.
 - Current status.
 - Containment note.
 - Corrective action.
+- Verification performed before closure.
 - Closed timestamp when resolved.
 - Post-incident review note when applicable.
 
 Incident reports must stay sanitized. They should exclude secrets, broker records, raw logs, account identifiers, and raw local paths.
+
+Treat any of the following as a release-blocking or safety-boundary incident until reviewed:
+
+- Unexpected live-trading enablement.
+- Broker-route, order-submission, risk-gate, kill-switch, AI-authority, or ranking-weight changes.
+- Simulation evidence merged into real-time market-observed evidence.
+- Secrets, broker records, account identifiers, raw logs, raw local paths, database files, credentials, or environment values in an export, report, or support artifact.
+- Failed local verification that affects proof surfaces or safety claims.
+
+Incident records are review metadata only. They must not clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live-money autonomy, mutate ranking weights, approve a release, or convert incomplete proof into passing proof.
+
+## Incident Report Completeness
+
+Incident report completeness is proof evidence for operational review. It does not clear kill switches, bypass risk gates, change broker routes, change order behavior, enable live autonomy, mutate ranking weights, approve releases, or convert incomplete proof into passing proof.
+
+Every incident report review should record:
+
+- Incident identifier.
+- Opened timestamp.
+- Severity.
+- Detection source.
+- First visible symptom.
+- Owner.
+- Affected entity.
+- Affected proof surfaces.
+- Safety-state impact.
+- Current status.
+- Containment note.
+- Corrective action.
+- Verification performed.
+- Sanitization status.
+- Closed timestamp.
+- Post-incident review note.
+
+Block small-fund or institutional-readiness claims if incident reports cannot prove detection, affected proof surfaces, safety impact, containment, corrective action, closure verification, sanitization, and post-incident review.
 
 ## External Security Legal And Compliance Review Plan
 
@@ -50,11 +395,44 @@ Before any institutional-grade claim, obtain and retain evidence of:
 - External security review scope and result.
 - Qualified legal review of product claims and operating model.
 - Qualified compliance review of applicable market, advice, custody, recordkeeping, privacy, and supervision obligations.
+- Vendor and infrastructure assumptions that the reviewers were asked to inspect.
+- Sanitized firm-grade report sample or report specification.
+- Environment-separation and permission-enforcement evidence.
+- Approval-trace evidence.
+- Audit-event evidence.
+- Model-version evidence.
+- Feature-lineage evidence.
+- Benchmark and walk-forward traceability evidence.
+- Risk-control evidence.
+- Execution-lineage evidence.
+- Incident-report evidence.
+- Release-validation evidence.
+- Claim review note that lists exactly which claims remain blocked.
 - Evidence that paper-first unattended execution remains the active boundary unless a separately approved future framework changes it.
 - Evidence that reward and forecast analytics are research-only.
 - Evidence that AI has no order authority.
 - Evidence that risk gates remain authoritative.
 - Evidence that broker routes remain unchanged.
+
+Every external review evidence packet should include:
+
+- Review packet identifier.
+- Security review scope.
+- Legal review scope.
+- Compliance review scope.
+- Vendor or infrastructure dependency scope.
+- Sanitized firm-grade report reference.
+- Environment-separation evidence reference.
+- Permission-enforcement evidence reference.
+- Safety-boundary evidence reference.
+- Claim boundaries to review.
+- Reviewer type or qualification note.
+- Review status: planned, in review, passed, failed, or blocked.
+- Sanitization check confirming no secrets, broker records, account identifiers, raw logs, raw local paths, credentials, database files, or environment values are present.
+
+Stop any institutional-grade, compliance-approved, investment-adviser, broker-dealer, direct-market-access, or HFT claim if the packet is missing any required scope, reviewer qualification, sanitized report evidence, safety-boundary evidence, or sanitization check.
+
+External review packets are review evidence only. They do not certify compliance, approve live trading, change broker routes, change order behavior, bypass risk gates, clear kill switches, grant AI order authority, mutate ranking weights, or prove alpha.
 
 If any external review is missing, the allowed positioning remains paper-first trading research platform, trading evidence operating system, forecast validation platform, decision audit system, research-to-risk workflow, paper execution quality analysis, structured strategy improvement system, and benchmark or walk-forward research layer.
 

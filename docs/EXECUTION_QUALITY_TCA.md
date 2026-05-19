@@ -6,13 +6,14 @@ Execution Quality and Transaction Cost Analysis v1 measures whether correct fore
 
 ## Paper-Only Boundary
 
-The service only reports paper-route evidence. Rows that clearly look like live-route evidence are excluded. Every response includes:
+The service only reports paper-route evidence. Rows that clearly look like live-route evidence or simulation evidence are excluded. Every response includes:
 
 - `research_only: true`
 - `paper_only: true`
 - `can_submit_orders: false`
 - `can_submit_live_orders: false`
 - `mutation: "none"`
+- `execution_quality_hardening_plan`
 
 The layer cannot enable live trading, submit orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, change routing automatically, or change ranking weights automatically.
 
@@ -111,6 +112,50 @@ The report computes:
 - partial-fill rate
 - execution-quality score
 
+## Execution Proof Gate
+
+The service emits a read-only `proof_summary` in the summary response and under `aggregations.execution_proof`. This proof gate is for human research review only. It is not proof of alpha, guaranteed returns, investor performance, live-trading readiness, institutional readiness, HFT capability, or permission to change routes.
+
+Proof requirements:
+
+- Paper execution sample: enough paper-route execution rows exist.
+- Cost evidence coverage: rows include slippage, spread, and fill-delay evidence.
+- Execution-adjusted reward: reward remains positive after spread and slippage drag.
+- Cost-adjusted edge: same-window baseline-relative edge survives execution costs.
+- Fill quality: missed, rejected, canceled, expired, and no-fill rows remain under the configured threshold.
+- Candidate and route linkage: rows link paper order evidence to candidates, explicit paper route evidence, and fills.
+- Paper-only safety boundary: TCA stays read-only paper-route analytics and cannot alter routes or submit orders.
+
+The proof response includes:
+
+- `status`
+- `proof_ready`
+- `requirements`
+- `summary`
+- `record_readiness`
+- `safe_next_actions`
+- safety notes and mutation flags
+
+Every requirement row includes flags showing it does not change execution, order submission, broker routes, risk gates, or ranking weights.
+
+## Execution Quality Hardening Plan
+
+The service also emits `execution_quality_hardening_plan`, a proof-first work queue for the paper execution layer. It turns missing TCA proof into explicit claim boundaries instead of treating row count or high-level execution score as tradability proof.
+
+The hardening plan tracks:
+
+- paper execution sample
+- cost evidence capture
+- candidate and route linkage
+- execution-adjusted reward
+- cost-adjusted edge
+- fill quality
+- paper-only governance
+
+Each item reports priority, status, linked proof keys, missing fields, blocked claims, a safe next action, and a `done_when` condition. The plan also returns `claim_permissions` so the UI can show that public execution-quality claims, tradability claims, route changes, broker-route changes, automatic execution mutation, paper-to-live readiness, and live-trading readiness remain blocked.
+
+Hardening plan items are internal paper-route research gates only. They do not fabricate fills, infer broker evidence, submit orders, change routes, change broker settings, bypass risk gates, or approve live trading.
+
 ## API Endpoints
 
 All paths are under the configured API prefix, usually `/api`.
@@ -127,6 +172,8 @@ All paths are under the configured API prefix, usually `/api`.
 - `/execution-quality`
 
 The page shows paper-only TCA metrics, average slippage, fill delay, alpha decay, execution-adjusted reward, best/worst execution setups, spread cost, partial-fill rate, missed-fill rate, warnings, and missing fields.
+
+The page also shows the Execution Proof Gate, Execution Quality Hardening Plan, and Execution Record Readiness table so operators can see why tradability-after-costs evidence is or is not ready for human review and which claims remain blocked.
 
 ## How This Supports The Benchmark Suite
 
@@ -174,3 +221,11 @@ cd frontend
 Candidate Outcome and Baseline Stamping attaches paper-route execution cost evidence to candidate outcomes when available: spread at signal, quote freshness, expected cost estimates, fill prices, slippage, fill delay, partial fill state, and paper fill status.
 
 Execution Quality and TCA remains read-only analytics. It does not change routing, place orders, clear blockers, alter broker routes, or automatically change ranking weights.
+
+## Future Off-Exchange And Broker-Neutral Context
+
+Future Off-Exchange Liquidity Dashboard inputs may support Execution Quality and TCA by adding passive research context for FINRA OTC transparency data, ATS volume, non-ATS off-exchange volume, symbol-level off-exchange share, venue concentration where available, off-exchange activity spikes, spread and liquidity quality, slippage by off-exchange share, and candidate outcomes in high vs low off-exchange regimes.
+
+This future context must not act on trades, trigger trades, block trades automatically, change routes, or change ranking weights automatically. It must not claim the system sees hidden orders, knows institutional intent, or that dark pool prints predict direction.
+
+Future broker-neutral execution architecture may route execution evidence through broker adapters, but Execution Quality and TCA remains analytics. A broker adapter can provide receipts, fills, positions, clock, account, and buying-power data for review. The broker still owns custody, regulated account infrastructure, market access, routing, clearing, and broker compliance. Quant Evidence OS owns evidence, reconciliation, analytics, audit trail, and candidate diagnostics.

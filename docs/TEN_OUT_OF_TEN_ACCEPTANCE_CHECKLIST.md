@@ -45,6 +45,8 @@ Execution readiness:
 Governance readiness:
 
 - [ ] Support export excludes secrets, broker records, raw logs, account IDs, raw local paths, and credentials.
+- [ ] Support export records redaction status, schema version, generated timestamp, source report name, and safe sharing boundary.
+- [ ] Support export review confirms no raw broker payloads, database files, environment values, authorization headers, or unsanitized personal data are present.
 - [ ] User-facing proof labels distinguish paper evidence from live-money performance.
 
 UI readiness:
@@ -63,6 +65,7 @@ Test readiness:
 - [ ] Onboarding state transition tests exist.
 - [ ] Demo evidence separation tests exist.
 - [ ] Support bundle sanitization tests exist.
+- [ ] Support export unsafe-content regression tests cover secrets, account identifiers, broker payloads, raw logs, raw local paths, credentials, and environment values.
 
 Proof readiness:
 
@@ -165,6 +168,9 @@ Governance readiness:
 - [ ] Role-based access control gates metadata changes.
 - [ ] Approval workflows preserve who changed what and when.
 - [ ] Incident reports and release validation records exist.
+- [ ] Incident reports include identifier, timestamp, severity, detection source, first symptom, owner, affected proof surfaces, safety-state impact, containment, corrective action, closure verification, and post-incident review note when applicable.
+- [ ] Release validation records include release reference, changed proof surfaces, safety invariant result, verification summary, reviewer or automation check, decision, rollback target, and sanitization result.
+- [ ] Rollback records include trigger, failed release reference, rollback target, runtime-data impact, post-rollback verification, safety invariant result, incident reference when applicable, and blocked redeploy condition.
 
 UI readiness:
 
@@ -283,7 +289,9 @@ Governance readiness:
 - [ ] Permission enforcement coverage meets threshold.
 - [ ] Approval trace completeness meets threshold.
 - [ ] Incident response records are complete.
+- [ ] Incident evidence excludes secrets, broker records, account identifiers, raw logs, raw local paths, database files, credentials, environment values, and unsanitized personal data.
 - [ ] Release validation and rollback controls are documented.
+- [ ] Release and rollback evidence excludes secrets, broker records, account identifiers, raw logs, raw local paths, database files, credentials, environment values, and unsanitized personal data.
 
 UI readiness:
 

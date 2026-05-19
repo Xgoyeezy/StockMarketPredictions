@@ -4,6 +4,10 @@ These proof gates define what must be true before Quant Evidence OS readiness cl
 
 Ratings are current estimated readiness scores. They are not proof of alpha and are not investor performance claims. Benchmark proof is required before claiming edge. Walk-forward proof is required before claiming repeatability. Paper-first safety remains the active execution boundary. Reward and forecast analytics are research-only. AI has no order authority. Risk gates remain authoritative. Broker routes remain unchanged. Live-money autonomy is not enabled. Promotion status is research metadata unless separately approved by a future explicit governance framework.
 
+Expansion features must also pass the proof-first roadmap discipline in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. That document adds the Safety Gate, Data Gate, Benchmark Gate, Walk-Forward Gate, and Expansion Justification Gate before any future desks, agents, broker systems, HFT research, C++ accelerators, or enterprise features move into active work.
+
+Technical-analysis setup admission must also follow `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`. A chart method is not eligible for setup docs unless it has causal rules, executable pricing, matched baselines, walk-forward out-of-sample evidence, cost survival, parameter stability, and provenance. Synthetic chart prices may be stored as derived features but do not count as fill or outcome proof.
+
 ## Gate Summary
 
 | Gate | Name | Primary claim controlled |
@@ -48,6 +52,11 @@ Pass criteria:
 - Risk gates remain authoritative.
 - Kill switches are not auto-cleared.
 - Simulation evidence stays separate from real-time market-observed evidence.
+- Market Specialist Desks are context engines, not order bots.
+- AI agents are decision-support analysts, not trading agents.
+- Off-Exchange Liquidity Dashboard is research context, not a trade trigger.
+- Broker-neutral execution planning does not mean becoming a broker.
+- C++ accelerators must not own trading authority.
 
 Failure criteria:
 
@@ -397,6 +406,119 @@ Claims still disallowed:
 - Compliance-approved system unless formally approved.
 - Institutional-grade platform unless proof, controls, and reviews support the claim.
 - HFT platform unless a separate HFT thesis is built and proven.
+
+## Future Provider ROI Gates
+
+These gates apply before paying for market data, broker connectivity, infrastructure, or analytics providers beyond the free-first stack. They do not authorize implementation or provider spend by themselves.
+
+## Paper-To-Live Proof Gate
+
+This gate is a future review requirement, not current live enablement. The canonical flow notes live under `docs/live_trading_flow.md`.
+
+Paper-to-live review cannot start until Gates 1 through 7 are complete for the scope being reviewed:
+
+- Gate 1, Safety intact.
+- Gate 2, Data complete enough.
+- Gate 3, Benchmark available.
+- Gate 4, Baselines beaten where edge language is requested.
+- Gate 5, Walk-forward passed where repeatability language is requested.
+- Gate 6, Execution costs handled.
+- Gate 7, Risk visibility complete.
+
+The review packet must include:
+
+- Current safety-state evidence.
+- Kill-switch and loss-lock evidence.
+- Broker-route lock evidence.
+- Paper reconciliation evidence.
+- Execution Quality and TCA evidence.
+- Portfolio Risk evidence.
+- Walk-forward and benchmark evidence.
+- Manual approval record.
+- Rollback plan.
+- Hard caps on size, daily loss, open positions, asset class, order type, and session.
+- Explicit acknowledgement that the first test, if approved, is a tiny manual live ticket, not autonomous live trading.
+
+Claims still disallowed until a separate future project proves otherwise:
+
+- Live-trading readiness.
+- Paper-to-live readiness.
+- Autonomous live-money orders.
+- AI order authority.
+- Broker-route loosening.
+- Risk-gate bypass.
+- Kill-switch bypass.
+- Automatic ranking-weight mutation.
+
+This gate does not alter current execution behavior. Alpaca paper remains the only unattended execution lane.
+
+Decision rule:
+
+- Pay only when expected monthly value is at least 3x monthly cost.
+- Prefer 5x before depending on it.
+
+Net value formula:
+
+```text
+extra profit or avoided loss
+- subscription cost
+- commissions
+- spread cost
+- slippage
+- taxes if relevant
+- operational time cost
+```
+
+Provider payment gates:
+
+1. Free proof: use free tools, paper trading, ETF proxies, delayed data, and simulator mode.
+2. Missing data proof: pay only if Data Completeness proves a specific bottleneck.
+3. Paid trial test: run provider A versus provider B and tag all evidence by provider.
+4. ROI threshold: keep paying only if the paid provider improves measured net results enough.
+5. Scale threshold: upgrade only when the next paid tier solves a proven bottleneck.
+
+Provider comparison metrics:
+
+- Forecast accuracy.
+- Reward score.
+- Execution quality.
+- Slippage.
+- Score bucket separation.
+- Benchmark verdict.
+- Walk-forward result.
+- Data completeness.
+- Missing-field reduction.
+
+## Future Small Capital Growth Proof Ladder
+
+The system should not promise to flip small money into large money. The acceptable long-term goal is controlled compounding from small risk capital after proof gates.
+
+Use this framing:
+
+```text
+Turn small risk capital into larger capital through repeatable, measured, controlled compounding.
+```
+
+Do not use this framing:
+
+```text
+Flip a little money into a lot quickly.
+```
+
+Proof ladder:
+
+1. Survival: no live risk. Verify safety systems.
+2. Evidence: Professional Benchmark, Evidence Reward, Forecast Validation, Data Completeness, and Score Calibration.
+3. Repeatability: Walk-Forward validation, frozen rules, cost-adjusted performance, and drawdown limits.
+4. Tiny live manual test: only with money that can be lost, manual approval, hard caps, and no leverage.
+5. Controlled compounding: size increases only after evidence, not emotion.
+
+Safety language:
+
+- Do not trade money needed for rent, bills, food, debt, emergency savings, or family obligations.
+- Do not use leverage to make small capital feel big.
+- Do not chase options or leveraged ETFs to speed up growth.
+- Do not increase size after one good week.
 
 ## Rating Upgrade Policy
 

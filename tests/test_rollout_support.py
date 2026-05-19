@@ -188,11 +188,12 @@ class RolloutSupportTests(unittest.TestCase):
 
     def test_option_chain_scorer_prefers_liquid_contract_over_closer_illiquid_contract(self) -> None:
         now = pd.Timestamp.now(tz="UTC")
+        expiration = (now.normalize() + pd.Timedelta(days=30)).strftime("%Y-%m-%d")
         provider = SimpleNamespace(
-            get_option_expirations=MagicMock(return_value=["2026-05-15"]),
+            get_option_expirations=MagicMock(return_value=[expiration]),
             get_option_chain=MagicMock(
                 return_value=OptionChainSnapshot(
-                    expiration="2026-05-15",
+                    expiration=expiration,
                     calls=[
                         OptionContractQuote(
                             contract_symbol="SPY260515C00500000",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import LoadingBlock from '../components/LoadingBlock'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -25,6 +26,12 @@ function formatPercent(value, digits = 1) {
 
 function formatPrice(value) {
   return `$${formatNumber(value, 2)}`
+}
+
+function humanize(value, fallback = 'Unknown') {
+  const text = String(value || '').trim()
+  if (!text) return fallback
+  return text.replace(/[_-]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
 function resolvePredictionRows(prediction) {
@@ -195,6 +202,10 @@ export default function ForecastValidationPage() {
 
   const safetyNotes = summary?.safety_notes || []
   const warnings = summary?.warnings || []
+  const hardeningPlan = summary?.forecast_validation_hardening_plan || summary?.aggregations?.forecast_validation_hardening_plan || {}
+  const hardeningSummary = hardeningPlan.summary || {}
+  const hardeningItems = hardeningPlan.items || []
+  const claimPermissions = hardeningSummary.claim_permissions || summary?.summary?.claim_permissions || summary?.claim_permissions || {}
 
   const worstPrediction = useMemo(() => {
     const worstId = summary?.worst_prediction?.prediction_id
@@ -232,6 +243,41 @@ export default function ForecastValidationPage() {
         <MetricCard label="Avg forecast reward" value={formatNumber(summary?.avg_forecast_reward ?? summary?.avg_reward, 3)} helper="Transparent component score" />
         <MetricCard label="Avg path RMSE" value={formatNumber(summary?.avg_path_rmse ?? summary?.avg_rmse, 3)} helper="Forecast path error" />
       </div>
+
+      <SectionCard title="Forecast Validation Hardening Plan" subtitle="Proof-first hardening for forecast contracts, actual paths, target/invalidation metrics, calibration, regime context, and read-only safety. It does not alter execution, broker routes, risk gates, or ranking weights.">
+        <div className="metrics-grid">
+          <MetricCard label="Hardening status" value={humanize(hardeningPlan.status || summary?.summary?.forecast_hardening_status || 'blocked_by_evidence')} helper={`${summary?.summary?.forecast_hardening_open_items ?? hardeningSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary?.summary?.forecast_hardening_critical_open_items ?? hardeningSummary.critical_open_items ?? 0} helper={summary?.summary?.top_hardening_item || hardeningSummary.top_hardening_item || 'No top blocker returned'} />
+          <MetricCard label="Forecast review" value={claimPermissions.cautious_internal_forecast_review ? 'Allowed' : 'Blocked'} helper="Requires evaluated forward paths" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Forecast Validation never grants trading authority" />
+        </div>
+        <table className="signal-table">
+          <thead>
+            <tr>
+              <th>Hardening item</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Missing evidence</th>
+              <th>Blocked claims</th>
+              <th>Safe next action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {hardeningItems.length ? hardeningItems.map((row) => (
+              <tr key={row.key}>
+                <td>{row.title}</td>
+                <td>{humanize(row.priority)}</td>
+                <td>{humanize(row.status)}</td>
+                <td>{(row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None'}</td>
+                <td>{(row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None'}</td>
+                <td>{row.safe_next_action}</td>
+              </tr>
+            )) : (
+              <tr><td colSpan="6">No forecast validation hardening plan returned.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </SectionCard>
 
       <SectionCard title="Safety And Missing Data" subtitle="Forecast validation is analytics only and incomplete forecasts are visible but not rewarded.">
         <div className="forecast-validation-grid">
@@ -338,6 +384,8 @@ export default function ForecastValidationPage() {
           </tbody>
         </table>
       </SectionCard>
+
+      <FinishTrackerSection tracker={summary?.finish_tracker} loading={loading} />
     </div>
   )
 }

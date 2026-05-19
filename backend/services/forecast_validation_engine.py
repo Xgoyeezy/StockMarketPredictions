@@ -8,6 +8,7 @@ from statistics import mean, pstdev
 from types import MappingProxyType
 from typing import Any
 
+from backend.services.project_finish_tracker import build_project_finish_tracker
 
 SAFETY_NOTES: tuple[str, ...] = (
     "Research only. Does not affect trading.",
@@ -21,6 +22,11 @@ SAFETY_FLAGS: dict[str, Any] = {
     "paper_route_only": True,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
+    "can_change_broker_routes": False,
+    "can_bypass_risk_gates": False,
+    "can_clear_kill_switch": False,
+    "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "none",
 }
 REQUIRED_FORECAST_FIELDS: tuple[str, ...] = (
@@ -34,6 +40,72 @@ REQUIRED_FORECAST_FIELDS: tuple[str, ...] = (
     "invalidation_level",
     "confidence",
     "source",
+)
+
+FORECAST_VALIDATION_HARDENING_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "forecast_contract_sample",
+        "title": "Forecast contract sample",
+        "priority": "critical",
+        "missing_fields": ("prediction_id", "symbol", "prediction_created_at", "forecast_series"),
+        "blocked_claims": ("forecast_review_claim", "benchmark_forecast_support"),
+        "safe_next_action": "Keep timestamped forecast contracts visible before treating validation as reviewable.",
+        "done_when": "At least one immutable forecast contract exists with symbol, timestamp, horizon, and forecast series.",
+    },
+    {
+        "key": "complete_forecast_contracts",
+        "title": "Complete forecast contracts",
+        "priority": "critical",
+        "missing_fields": REQUIRED_FORECAST_FIELDS,
+        "blocked_claims": ("forecast_accuracy_claim", "forecast_reward_claim"),
+        "safe_next_action": "Attach direction, target, invalidation, confidence, horizon, source, and forecast series to each forecast contract.",
+        "done_when": "Most forecast records have complete pre-outcome forecast contract fields.",
+    },
+    {
+        "key": "actual_path_coverage",
+        "title": "Actual path coverage",
+        "priority": "critical",
+        "missing_fields": ("actual_series", "actual_price", "timestamp_offset"),
+        "blocked_claims": ("forecast_accuracy_claim", "path_quality_claim"),
+        "safe_next_action": "Attach actual post-prediction price paths broadly, not only fixture examples.",
+        "done_when": "Most forecast contracts have aligned post-prediction actual paths for reward calculation.",
+    },
+    {
+        "key": "target_invalidation_metrics",
+        "title": "Target and invalidation metrics",
+        "priority": "high",
+        "missing_fields": ("target_hit", "invalidation_hit", "time_to_target", "max_adverse_excursion"),
+        "blocked_claims": ("target_quality_claim", "risk_adjusted_forecast_claim"),
+        "safe_next_action": "Keep target hit, invalidation hit, time-to-target, and max-adverse metrics attached to validated forecasts.",
+        "done_when": "Validated forecasts include target, invalidation, timing, and adverse-excursion metrics.",
+    },
+    {
+        "key": "calibration_and_regime_context",
+        "title": "Calibration and regime context",
+        "priority": "high",
+        "missing_fields": ("confidence", "confidence_calibration_summary", "regime", "performance_by_regime"),
+        "blocked_claims": ("calibrated_forecast_claim", "regime_stability_claim"),
+        "safe_next_action": "Report confidence calibration and regime attribution before claiming forecast stability.",
+        "done_when": "Forecast validation exposes confidence calibration and regime performance context.",
+    },
+    {
+        "key": "immutable_validation_boundary",
+        "title": "Immutable validation boundary",
+        "priority": "critical",
+        "missing_fields": (),
+        "blocked_claims": ("mutable_forecast_record", "hindsight_edited_forecast_claim"),
+        "safe_next_action": "Keep original forecast contracts immutable and store validation outcomes separately.",
+        "done_when": "Forecast contracts remain immutable and validation output cannot mutate the original forecast record.",
+    },
+    {
+        "key": "research_only_safety_boundary",
+        "title": "Research-only safety boundary",
+        "priority": "critical",
+        "missing_fields": (),
+        "blocked_claims": ("automatic_ranking_mutation", "live_trading_readiness", "ai_order_authority"),
+        "safe_next_action": "Keep forecast validation read-only; do not alter execution, broker routes, risk gates, or ranking weights.",
+        "done_when": "Forecast validation remains analytics-only with no execution, broker, risk, AI order, or ranking authority.",
+    },
 )
 
 
@@ -702,6 +774,156 @@ def _missing_field_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(counter)
 
 
+def _ratio(numerator: int | float, denominator: int | float) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(float(numerator) / float(denominator), 6)
+
+
+def build_forecast_validation_hardening_plan(
+    *,
+    summary: dict[str, Any],
+    records: list[dict[str, Any]],
+    aggregations: dict[str, Any],
+) -> dict[str, Any]:
+    total_forecasts = int(summary.get("total_forecasts") or summary.get("count") or len(records))
+    evaluated_count = int(summary.get("evaluated_count") or summary.get("validated_forecasts") or 0)
+    missing_data_count = int(summary.get("missing_data_count") or 0)
+    missing_counts = dict(summary.get("missing_field_counts") or {})
+    actual_path_coverage = _ratio(evaluated_count, total_forecasts) or 0.0
+    complete_contract_count = max(0, total_forecasts - sum(int(value or 0) for value in missing_counts.values()))
+    complete_contract_coverage = _ratio(complete_contract_count, total_forecasts) or 0.0
+    target_metric_count = sum(
+        1
+        for row in (record.get("evaluation") or record for record in records)
+        if row.get("target_hit") is not None
+        and row.get("invalidation_hit") is not None
+        and row.get("time_to_target") is not None
+    )
+    target_metric_coverage = _ratio(target_metric_count, total_forecasts) or 0.0
+    calibration_rows = list(summary.get("confidence_calibration_summary") or [])
+    regime_rows = list(aggregations.get("performance_by_regime") or [])
+    metric_values = {
+        "forecast_contract_sample": total_forecasts,
+        "complete_forecast_contracts": complete_contract_coverage,
+        "actual_path_coverage": actual_path_coverage,
+        "target_invalidation_metrics": target_metric_coverage,
+        "calibration_and_regime_context": 1 if calibration_rows and regime_rows else 0,
+        "immutable_validation_boundary": 1,
+        "research_only_safety_boundary": int(
+            SAFETY_FLAGS["can_submit_orders"] is False
+            and SAFETY_FLAGS["can_submit_live_orders"] is False
+            and SAFETY_FLAGS["mutation"] == "none"
+        ),
+    }
+    thresholds = {
+        "forecast_contract_sample": 1,
+        "complete_forecast_contracts": 0.80,
+        "actual_path_coverage": 0.80,
+        "target_invalidation_metrics": 0.80,
+        "calibration_and_regime_context": 1,
+        "immutable_validation_boundary": 1,
+        "research_only_safety_boundary": 1,
+    }
+    items: list[dict[str, Any]] = []
+    for definition in FORECAST_VALIDATION_HARDENING_DEFINITIONS:
+        key = str(definition["key"])
+        value = metric_values[key]
+        threshold = thresholds[key]
+        passed = bool(value >= threshold)
+        status = "no_records" if total_forecasts == 0 and key not in {"immutable_validation_boundary", "research_only_safety_boundary"} else "ready" if passed else "needs_evidence"
+        missing_fields = list(definition.get("missing_fields") or ())
+        if key in {"complete_forecast_contracts", "actual_path_coverage"} and missing_counts:
+            missing_fields = [
+                field
+                for field, _count in sorted(missing_counts.items(), key=lambda item: (-int(item[1]), item[0]))
+            ][:8] or missing_fields
+        items.append(
+            {
+                "key": key,
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "value": value,
+                "threshold": threshold,
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": definition["safe_next_action"],
+                "done_when": definition["done_when"],
+                "claim_boundary": "Forecast Validation hardening is internal research review only; it is not proof of alpha, forecast edge, repeatability, paper-to-live readiness, or live-trading readiness.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    return {
+        "status": "ready_for_human_review" if evaluated_count > 0 and not open_items else "blocked_by_evidence",
+        "summary": {
+            "item_count": len(items),
+            "open_item_count": len(open_items),
+            "critical_open_items": len(critical_open_items),
+            "ready_item_count": len(items) - len(open_items),
+            "top_hardening_item": open_items[0]["title"] if open_items else None,
+            "actual_path_coverage": actual_path_coverage,
+            "complete_contract_coverage": complete_contract_coverage,
+            "target_metric_coverage": target_metric_coverage,
+            "missing_data_count": missing_data_count,
+            "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+            "claim_permissions": {
+                "cautious_internal_forecast_review": evaluated_count > 0,
+                "forecast_accuracy_claim": False,
+                "benchmark_forecast_support": False,
+                "automatic_ranking_mutation": False,
+                "paper_to_live_readiness": False,
+                "live_trading_readiness": False,
+            },
+            "blocked_claims": [
+                "forecast_accuracy_claim",
+                "forecast_edge_claim",
+                "repeatability_claim",
+                "automatic_ranking_mutation",
+                "paper_to_live_readiness",
+                "live_trading_readiness",
+            ],
+            "safe_boundary": "Forecast Validation hardening records missing actual-path, contract, calibration, and claim-boundary evidence only. It does not mutate forecast contracts, submit orders, change broker routes, bypass risk gates, or change ranking weights.",
+        },
+        "items": items,
+        "safe_next_actions": [
+            {
+                "field": row["key"],
+                "action": row["safe_next_action"],
+                "manual_review_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
+            }
+            for row in open_items
+        ],
+        "research_only": True,
+        **SAFETY_FLAGS,
+    }
+
+
 def _forecast_unified_response(
     *,
     summary: dict[str, Any],
@@ -709,6 +931,20 @@ def _forecast_unified_response(
     aggregations: dict[str, Any],
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
+    hardening_plan = build_forecast_validation_hardening_plan(
+        summary=summary,
+        records=records,
+        aggregations=aggregations,
+    )
+    summary = {
+        **summary,
+        "forecast_hardening_status": hardening_plan["status"],
+        "forecast_hardening_open_items": hardening_plan["summary"]["open_item_count"],
+        "forecast_hardening_critical_open_items": hardening_plan["summary"]["critical_open_items"],
+        "top_hardening_item": hardening_plan["summary"]["top_hardening_item"],
+        "claim_permissions": hardening_plan["summary"]["claim_permissions"],
+    }
+    aggregations = {**aggregations, "forecast_validation_hardening_plan": hardening_plan}
     return {
         "status": summary.get("data_status", "ready"),
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -716,10 +952,12 @@ def _forecast_unified_response(
         "summary": summary,
         "records": records,
         "aggregations": aggregations,
+        "forecast_validation_hardening_plan": hardening_plan,
         "missing_fields": _missing_field_counts([row.get("evaluation", row) for row in records]),
         "warnings": warnings or [],
         "safety_notes": list(SAFETY_NOTES),
         **SAFETY_FLAGS,
+        "finish_tracker": build_project_finish_tracker(report_name="forecast_validation"),
     }
 
 

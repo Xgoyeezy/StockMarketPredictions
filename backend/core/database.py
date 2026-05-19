@@ -84,6 +84,13 @@ def _ensure_runtime_schema() -> None:
             ("last_seen_at", timestamp_type),
         ],
     }
+    schema_indexes: tuple[tuple[str, str, str], ...] = (
+        ("ix_audit_events_tenant_created_at", "audit_events", "tenant_id, created_at"),
+        ("ix_risk_events_tenant_created_at", "risk_events", "tenant_id, created_at"),
+        ("ix_audit_exports_tenant_created_at", "audit_exports", "tenant_id, created_at"),
+        ("ix_trade_decisions_tenant_created_at", "trade_decisions", "tenant_id, created_at"),
+        ("ix_decision_replay_events_tenant_decision", "decision_replay_events", "tenant_id, trade_decision_id"),
+    )
 
     with engine.begin() as connection:
         inspector = inspect(connection)
@@ -96,6 +103,10 @@ def _ensure_runtime_schema() -> None:
                 if column_name in existing_columns:
                     continue
                 connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+        for index_name, table_name, columns in schema_indexes:
+            if table_name not in existing_tables:
+                continue
+            connection.exec_driver_sql(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns})")
 
 
 def get_db() -> Generator[Session, None, None]:

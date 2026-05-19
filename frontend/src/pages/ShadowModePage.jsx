@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -40,8 +41,15 @@ function formatPercent(value) {
   return `${(numeric * 100).toFixed(1)}%`
 }
 
+function formatRequirementValue(value, metric) {
+  if (value === null || value === undefined) return '--'
+  if (String(metric || '').includes('coverage')) return formatPercent(value)
+  if (String(metric || '').includes('count')) return formatNumber(value, 0)
+  return formatNumber(value)
+}
+
 function statusTone(status) {
-  if (status === 'ready') return 'positive'
+  if (status === 'ready' || status === 'ready_for_human_review' || status === 'passed') return 'positive'
   if (status === 'empty') return 'neutral'
   return 'warning'
 }
@@ -64,7 +72,7 @@ function DataTable({ columns, rows, empty }) {
         </thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
-            <tr key={row.human_thesis_id || row.bias || row.field || row.note || index}>
+            <tr key={`${row.human_thesis_id || row.linked_candidate_id || row.symbol || row.bias || row.field || row.note || 'row'}-${index}`}>
               {columns.map((column) => (
                 <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
               ))}
@@ -136,6 +144,13 @@ export default function ShadowModePage() {
   const summary = report?.summary || {}
   const aggregations = report?.aggregations || {}
   const rows = report?.records || []
+  const proofSummary = report?.proof_summary || aggregations.shadow_proof || {}
+  const proofRequirements = proofSummary.requirements || []
+  const recordReadiness = proofSummary.record_readiness || []
+  const validationPlan = report?.shadow_validation_plan || aggregations.shadow_validation_plan || {}
+  const validationItems = validationPlan.items || []
+  const validationSummary = validationPlan.summary || {}
+  const claimPermissions = validationSummary.claim_permissions || summary.claim_permissions || {}
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
   const biasItems = aggregations.bias_diagnostics?.items || []
@@ -176,6 +191,51 @@ export default function ShadowModePage() {
           <MetricCard label="Human vs system edge" value={formatNumber(summary.human_vs_system_edge)} helper="Human reward minus system reward" />
           <MetricCard label="Override quality" value={formatPercent(aggregations.override_quality?.human_override_win_rate)} helper={`${aggregations.override_quality?.override_count ?? 0} direction overrides`} />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Shadow Mode Proof Gate" subtitle="Human-review checklist for same-opportunity linkage, forecast contracts, outcomes, cost/risk context, and after-cost decision quality.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Proof status" value={humanize(proofSummary.status || summary.shadow_proof_status || 'needs_evidence')} helper={`${summary.shadow_requirements_passed ?? 0}/${summary.shadow_requirements_total ?? 10} requirements passed`} />
+          <MetricCard label="Same-opportunity coverage" value={formatPercent(summary.same_opportunity_coverage ?? proofSummary.summary?.same_opportunity_coverage)} helper="Candidate, system prediction, and horizon linkage" />
+          <MetricCard label="Human contract coverage" value={formatPercent(summary.human_contract_coverage ?? proofSummary.summary?.human_contract_coverage)} helper="Direction, confidence, target, invalidation, horizon, thesis" />
+          <MetricCard label="System contract coverage" value={formatPercent(summary.system_contract_coverage ?? proofSummary.summary?.system_contract_coverage)} helper="System direction, confidence, target, invalidation, horizon" />
+          <MetricCard label="Outcome coverage" value={formatPercent(summary.outcome_coverage ?? proofSummary.summary?.outcome_coverage)} helper="Forward return, baseline, target, invalidation" />
+          <MetricCard label="Cost/risk coverage" value={formatPercent(summary.cost_risk_context_coverage ?? proofSummary.summary?.cost_risk_context_coverage)} helper="Spread, slippage, fill, gate, kill switch, exposure" />
+          <MetricCard label="Pre-outcome capture" value={formatPercent(summary.pre_outcome_capture_coverage ?? proofSummary.summary?.pre_outcome_capture_coverage)} helper="Human thesis timestamp before outcome close" />
+          <MetricCard label="System quality delta" value={formatNumber(summary.system_decision_quality_delta ?? proofSummary.summary?.system_decision_quality_delta)} helper="System minus human after costs and risk" />
+        </div>
+        <DataTable
+          rows={proofRequirements}
+          empty={loading ? 'Loading shadow proof requirements...' : 'No shadow proof requirements returned.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
+            { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Human vs System Validation Plan" subtitle="Proof-first backlog items for fair same-opportunity comparison. These items are manual-review only and cannot trade, route, approve, or reweight anything.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Validation status" value={humanize(validationPlan.status || summary.shadow_validation_status || 'blocked_by_evidence')} helper={`${summary.shadow_validation_open_items ?? validationSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary.shadow_validation_critical_open_items ?? validationSummary.critical_open_items ?? 0} helper={summary.top_validation_item || validationSummary.top_validation_item || 'No top blocker returned'} />
+          <MetricCard label="Internal review" value={claimPermissions.cautious_internal_shadow_review ? 'Allowed' : 'Blocked'} helper="Requires complete same-opportunity evidence" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Shadow Mode never grants trading authority" />
+        </div>
+        <DataTable
+          rows={validationItems}
+          empty={loading ? 'Loading shadow validation plan...' : 'No shadow validation plan returned.'}
+          columns={[
+            { key: 'title', label: 'Validation item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing_fields', label: 'Missing evidence', render: (row) => (row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => (row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None' },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Capture Human Thesis" subtitle="A vague label is not rewardable. Direction, confidence, target, invalidation, and horizon are required before outcome scoring.">
@@ -256,6 +316,22 @@ export default function ShadowModePage() {
         />
       </SectionCard>
 
+      <SectionCard title="Shadow Record Readiness" subtitle="Per-record readiness for same-opportunity proof only. Readiness does not place, route, approve, or configure trades.">
+        <DataTable
+          rows={recordReadiness}
+          empty={loading ? 'Loading shadow record readiness...' : 'No shadow record readiness returned.'}
+          columns={[
+            { key: 'symbol', label: 'Symbol' },
+            { key: 'same_opportunity_complete', label: 'Same opportunity', render: (row) => <StatusBadge tone={row.same_opportunity_complete ? 'positive' : 'warning'}>{row.same_opportunity_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'human_contract_complete', label: 'Human', render: (row) => <StatusBadge tone={row.human_contract_complete ? 'positive' : 'warning'}>{row.human_contract_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'system_contract_complete', label: 'System', render: (row) => <StatusBadge tone={row.system_contract_complete ? 'positive' : 'warning'}>{row.system_contract_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'outcome_contract_complete', label: 'Outcome', render: (row) => <StatusBadge tone={row.outcome_contract_complete ? 'positive' : 'warning'}>{row.outcome_contract_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'cost_risk_context_complete', label: 'Cost/risk', render: (row) => <StatusBadge tone={row.cost_risk_context_complete ? 'positive' : 'warning'}>{row.cost_risk_context_complete ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'pre_outcome_capture_proven', label: 'Timing', render: (row) => <StatusBadge tone={row.pre_outcome_capture_proven ? 'positive' : 'warning'}>{row.pre_outcome_capture_proven ? 'Pre-outcome' : 'Missing'}</StatusBadge> },
+          ]}
+        />
+      </SectionCard>
+
       <SectionCard title="Accuracy, Reward, And Missed Winner Review" subtitle="These metrics measure decision quality only. They cannot trigger execution or ranking changes.">
         <div className="ui-dashboard-grid">
           <MetricCard label="Human target hit" value={formatPercent(aggregations.human_target_hit_rate)} helper="Rewardable human records" />
@@ -313,6 +389,8 @@ export default function ShadowModePage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

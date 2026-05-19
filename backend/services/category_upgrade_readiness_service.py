@@ -7,18 +7,26 @@ from pathlib import Path
 from typing import Any, Callable
 
 from backend.services.serialization import serialize_value
+from backend.services.project_finish_tracker import build_project_finish_tracker
 
 
 SAFETY_FLAGS: dict[str, Any] = {
     "research_only": True,
     "read_only": True,
     "paper_route_only": True,
+    "changes_execution": False,
+    "changes_order_submission": False,
+    "changes_broker_routes": False,
+    "changes_risk_gates": False,
+    "clears_kill_switch": False,
+    "changes_ranking_weights": False,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
     "can_change_broker_routes": False,
     "can_bypass_risk_gates": False,
     "can_clear_kill_switch": False,
     "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "none",
 }
 
@@ -225,6 +233,15 @@ BUILD_STAGE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "what_not_to_build_yet": "Do not add smart order routing or let execution analytics alter orders.",
     },
     {
+        "key": "risk_gate_audit_trail_hardening",
+        "label": "Risk Gate and Audit Trail hardening",
+        "priority": "P1",
+        "gate_keys": ("safety_intact",),
+        "category_keys": tuple(CATEGORY_DEFINITIONS),
+        "purpose": "Keep risk gates, kill switches, broker-route boundaries, audit history, and support exports reviewable before any expansion work.",
+        "what_not_to_build_yet": "Do not let proof layers bypass risk controls, clear kill switches, expose secrets, or treat audit visibility as live-trading approval.",
+    },
+    {
         "key": "portfolio_risk_maturity",
         "label": "Portfolio Risk Intelligence maturity",
         "priority": "P1",
@@ -257,6 +274,137 @@ BUILD_STAGE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ),
         "purpose": "Organize evidence into manual promotion states without changing trading behavior.",
         "what_not_to_build_yet": "Do not let promotion status enable live trading or alter execution.",
+    },
+    {
+        "key": "ai_committee_research_memos",
+        "label": "AI Committee agents as research-only memos",
+        "priority": "P2",
+        "gate_keys": ("safety_intact", "data_complete_enough"),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+            "top_discretionary_trader_comparison",
+        ),
+        "purpose": "Keep AI analysis tied to evidence quality, dissent, and sanitized append-only research memos.",
+        "what_not_to_build_yet": "Do not grant AI order authority, broker-route authority, risk-gate authority, live-trading approval, or automatic ranking-weight changes.",
+    },
+    {
+        "key": "market_specialist_desk_registry",
+        "label": "Market Specialist Desk registry",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+        ),
+        "purpose": "Add market-context desks only after proof-first scoring shows they improve evidence quality rather than feature count.",
+        "what_not_to_build_yet": "Do not build market desks before proving current desks; market desks are context engines, not order bots.",
+    },
+    {
+        "key": "candidate_fusion_engine",
+        "label": "Candidate Fusion Engine",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+        ),
+        "purpose": "Combine market context and strategy logic into one evidence-backed candidate only after the current evidence chain is reliable.",
+        "what_not_to_build_yet": "Do not fuse market context into candidates until risk gates remain authoritative and benchmark/walk-forward evidence is strong enough.",
+    },
+    {
+        "key": "market_strategy_benchmark",
+        "label": "Market x Strategy Benchmark",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+            "institutional_quant_desk_or_enterprise_control_plane",
+        ),
+        "purpose": "Measure edge by market context and strategy only after Professional Benchmark and Walk-Forward are mature.",
+        "what_not_to_build_yet": "Do not claim market x strategy edge before current benchmark and walk-forward proof gates pass.",
+    },
+    {
+        "key": "off_exchange_liquidity_dashboard",
+        "label": "Off-Exchange Liquidity Dashboard",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+        ),
+        "purpose": "Add passive off-exchange liquidity context only if it improves candidate, execution, benchmark, or reward evidence.",
+        "what_not_to_build_yet": "Do not claim hidden-order detection, institutional intent, dark-pool prediction, trade triggers, route changes, or automatic ranking-weight changes.",
+    },
+    {
+        "key": "broker_market_data_adapters",
+        "label": "BrokerAdapter and MarketDataAdapter architecture",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "retail_trading_bot",
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+            "institutional_quant_desk_or_enterprise_control_plane",
+        ),
+        "purpose": "Move toward broker-neutral architecture only after proof shows a specific broker or data-provider bottleneck.",
+        "what_not_to_build_yet": "Do not add broker routes, live execution, provider dependencies, or broker-replacement claims in the current proof-first lane.",
+    },
+    {
+        "key": "capability_registry_route_eligibility",
+        "label": "Capability Registry and Route Eligibility Engine",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "small_prop_or_small_fund_research_stack",
+            "institutional_quant_desk_or_enterprise_control_plane",
+        ),
+        "purpose": "Describe broker, market, and route capabilities only after adapter work is justified and safety gates stay intact.",
+        "what_not_to_build_yet": "Do not let eligibility metadata loosen broker routes, risk gates, or order submission behavior.",
+    },
+    {
+        "key": "broker_simulator_adapter",
+        "label": "Broker Simulator Adapter",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": ("retail_trading_bot", "solo_systematic_trader_platform"),
+        "purpose": "Use simulator mode for future markets before paid or live provider dependencies.",
+        "what_not_to_build_yet": "Do not present simulated fills as real-time market-observed evidence or live-trading proof.",
+    },
+    {
+        "key": "etf_proxy_registry",
+        "label": "ETF Proxy Registry",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+        ),
+        "purpose": "Use ETF proxies as free-first market context before paying for futures, FX, crypto, or alternative data.",
+        "what_not_to_build_yet": "Do not treat ETF proxies as direct market access or complete coverage for unsupported markets.",
+    },
+    {
+        "key": "visual_strategy_evidence_builder",
+        "label": "Visual Strategy Evidence Builder",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": ("retail_trading_bot", "solo_systematic_trader_platform"),
+        "purpose": "Create visual evidence contracts only after current evidence contracts are mature enough to keep the builder proof-focused.",
+        "what_not_to_build_yet": "Do not build a no-code trading bot or auto-trade visual signals.",
+    },
+    {
+        "key": "pay_threshold_provider_roi_gates",
+        "label": "Pay Threshold and Provider ROI Gates",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "retail_trading_bot",
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+        ),
+        "purpose": "Pay for providers only when data, benchmark, execution, or walk-forward evidence proves a specific bottleneck and expected value clears the ROI threshold.",
+        "what_not_to_build_yet": "Do not recommend paid providers because the product feels advanced; keep free-first until proof shows the need.",
     },
     {
         "key": "retail_onboarding_demo_mode",
@@ -302,6 +450,19 @@ BUILD_STAGE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "category_keys": ("institutional_quant_desk_or_enterprise_control_plane",),
         "purpose": "Make lineage, permissions, environment separation, incidents, and firm-grade reporting reviewable.",
         "what_not_to_build_yet": "Do not claim institutional-grade or compliance-approved readiness before proof and external review.",
+    },
+    {
+        "key": "cpp_core_accelerators",
+        "label": "C++ Core Accelerators",
+        "priority": "future_only",
+        "gate_keys": (),
+        "category_keys": (
+            "solo_systematic_trader_platform",
+            "small_prop_or_small_fund_research_stack",
+            "institutional_quant_desk_or_enterprise_control_plane",
+        ),
+        "purpose": "Add C++ only after profiling proves a research-only bottleneck in batch metrics, replay, backtesting, or risk calculations.",
+        "what_not_to_build_yet": "Do not rewrite the control plane, routes, broker orchestration, AI agents, docs, frontend, or risk authority in C++.",
     },
     {
         "key": "hft_feasibility_only",
@@ -423,12 +584,18 @@ SENSITIVE_EXPORT_KEY_MARKERS: tuple[str, ...] = (
     "apikey",
     "access_key",
     "private_key",
+    "authorization",
+    "auth_header",
     "account_id",
     "account_number",
     "broker_record",
     "raw_log",
     "raw_broker",
     "local_path",
+    "environment_value",
+    "env_value",
+    "database_file",
+    "db_file",
 )
 
 LOCAL_PATH_RE = re.compile(r"(?i)(?:\b[a-z]:[\\/]|\\\\|file://|[\\/](?:users|home)[\\/])")
@@ -968,14 +1135,37 @@ def evaluate_risk_visibility_gate(portfolio_risk: dict[str, Any] | None = None) 
     if not report:
         return _gate("risk_visibility_complete", status="missing", warnings=["Portfolio Risk report is missing."])
     summary = _summary(report)
+    aggregations = _as_dict(report.get("aggregations"))
+    proof = _as_dict(report.get("proof_summary") or aggregations.get("portfolio_risk_proof"))
+    proof_summary = _summary(proof)
     coverage = _safe_float(summary.get("portfolio_risk_coverage"), None)
     if coverage is None:
+        coverage = _safe_float(proof_summary.get("portfolio_risk_coverage"), None)
+    if coverage is None:
         coverage = _safe_float(summary.get("coverage"), None)
+    proof_ready = _safe_bool(proof.get("proof_ready"), False) if proof else None
+    requirements_passed = _safe_float(summary.get("portfolio_risk_requirements_passed"), None)
+    requirements_total = _safe_float(summary.get("portfolio_risk_requirements_total"), None)
+    if requirements_passed is None:
+        requirements_passed = _safe_float(proof_summary.get("passed_requirement_count"), None)
+    if requirements_total is None:
+        requirements_total = _safe_float(proof_summary.get("requirement_count"), None)
     status = str(report.get("status") or summary.get("status") or "").strip().lower()
     writes_risk = _safe_bool(report.get("writes_risk_limits"), False) or _safe_bool(report.get("writes_risk_config"), False)
-    evidence = {"status": status, "coverage": coverage, "writes_risk_limits": _safe_bool(report.get("writes_risk_limits"), False)}
+    evidence = {
+        "status": status,
+        "coverage": coverage,
+        "proof_ready": proof_ready,
+        "requirements_passed": requirements_passed,
+        "requirements_total": requirements_total,
+        "writes_risk_limits": _safe_bool(report.get("writes_risk_limits"), False),
+    }
     if writes_risk:
         return _gate("risk_visibility_complete", status="blocked", blockers=["Portfolio risk surface reports risk-limit mutation authority."], evidence=evidence)
+    if proof:
+        if proof_ready:
+            return _gate("risk_visibility_complete", status="passed", evidence=evidence, claims_allowed=["portfolio_risk_visibility"])
+        return _gate("risk_visibility_complete", status="partial", warnings=["Portfolio risk proof requirements are incomplete."], evidence=evidence)
     if status in {"ready", "passed"} or (coverage is not None and coverage >= 0.80):
         return _gate("risk_visibility_complete", status="passed", evidence=evidence, claims_allowed=["portfolio_risk_visibility"])
     return _gate("risk_visibility_complete", status="partial", warnings=["Portfolio risk visibility is incomplete."], evidence=evidence)
@@ -987,6 +1177,10 @@ def evaluate_governance_gate(research_promotion: dict[str, Any] | None = None, g
     if not promotion and not governance:
         return _gate("governance_complete", status="missing", warnings=["Governance and Research Promotion evidence is missing."])
     status = str(_summary(promotion).get("status") or promotion.get("status") or "").strip().lower()
+    aggregations = _as_dict(promotion.get("aggregations"))
+    proof = _as_dict(promotion.get("proof_summary") or aggregations.get("research_promotion_proof"))
+    proof_summary = _summary(proof)
+    proof_ready = _safe_bool(proof.get("proof_ready"), False) if proof else None
     checks = {
         "rbac_enforced": _safe_bool(governance.get("rbac_enforced"), False),
         "approval_workflows_enforced": _safe_bool(governance.get("approval_workflows_enforced"), False),
@@ -996,7 +1190,16 @@ def evaluate_governance_gate(research_promotion: dict[str, Any] | None = None, g
         and not _safe_bool(promotion.get("can_submit_orders"), False)
         and not _safe_bool(promotion.get("can_submit_live_orders"), False),
     }
-    evidence = {"promotion_status": status, **checks}
+    if proof:
+        checks["promotion_proof_ready"] = proof_ready
+    evidence = {
+        "promotion_status": status,
+        "promotion_proof_ready": proof_ready,
+        "promotion_requirements_passed": _safe_float(proof_summary.get("passed_requirement_count"), None),
+        "promotion_requirements_total": _safe_float(proof_summary.get("requirement_count"), None),
+        "promotion_traceability_coverage": _safe_float(proof_summary.get("promotion_traceability_coverage"), None),
+        **checks,
+    }
     missing = [key for key, passed in checks.items() if not passed]
     if missing:
         return _gate("governance_complete", status="partial", warnings=[f"Governance evidence incomplete: {', '.join(missing)}."], evidence=evidence)
@@ -1166,12 +1369,12 @@ def build_upgrade_backlog(gates: dict[str, dict[str, Any]], categories: list[dic
             missing_extra.extend(extra_key for extra_key in extra_keys if not _safe_bool(extra_proof.get(extra_key), False))
         missing_extra = sorted(set(missing_extra))
         is_needed = bool(missing_gates or missing_extra)
-        if not is_needed:
+        if stage.get("priority") == "future_only":
+            state = "future_only"
+        elif not is_needed:
             state = "complete_or_not_currently_blocking"
         elif blocking_gates:
             state = "blocked"
-        elif stage.get("priority") == "future_only":
-            state = "future_only"
         else:
             state = "next"
         impacted = [
@@ -1420,6 +1623,7 @@ def build_category_upgrade_readiness_report(
     status = "blocked" if blocked_gate_count else "ready_for_review" if ready_category_count == len(categories) else "in_progress"
     blockers = [blocker for gate in gates.values() for blocker in gate.get("blockers", [])]
     warnings = [warning for gate in gates.values() for warning in gate.get("warnings", [])]
+    deferred_expansion_count = sum(1 for item in backlog if item.get("state") == "future_only")
     return serialize_value(
         {
             "status": status,
@@ -1433,7 +1637,9 @@ def build_category_upgrade_readiness_report(
                 "documented_requirement_count": documented_scope_coverage["requirement_count"],
                 "documented_requirement_complete_count": documented_scope_coverage["complete_count"],
                 "all_documented_scope_added": documented_scope_coverage["all_documented_scope_added"],
-                "highest_priority_build": "Safety verification, Data Completeness, Professional Benchmark, Walk-Forward, Score Calibration and Feature Attribution, then Execution Quality and TCA.",
+                "highest_priority_build": "Post-Implementation Verification, Data Completeness cleanup, Professional Benchmark hardening, Walk-Forward validation, Score Calibration and Feature Attribution, Execution Quality and TCA, Risk Gate and Audit Trail hardening, Portfolio Risk cleanup, Human vs System validation, Research Promotion cleanup, then expansion review.",
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "deferred_expansion_count": deferred_expansion_count,
                 "top_blockers": blockers[:5] or warnings[:5],
                 "priority_backlog": priority_backlog,
             },
@@ -1454,8 +1660,13 @@ def build_category_upgrade_readiness_report(
                 "investment_adviser",
                 "black_box_alpha_machine",
                 "live_trading_ready_system",
+                "dark_pool_predictor",
+                "dark_pool_trading_signal",
+                "broker_replacement",
+                "cpp_trading_authority",
             ],
             "safety_notes": list(SAFETY_NOTES),
+            "finish_tracker": build_project_finish_tracker(report_name="category_upgrade_readiness"),
             **SAFETY_FLAGS,
         }
     )
@@ -1508,10 +1719,17 @@ def build_category_upgrade_proof_chain(report: dict[str, Any] | None = None, *, 
                 "what_not_to_build_yet": backlog_item.get("what_not_to_build_yet") or definition["claim_boundary"],
                 "research_only": True,
                 "read_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "clears_kill_switch": False,
+                "changes_ranking_weights": False,
                 "execution_mutation": False,
                 "broker_route_mutation": False,
                 "risk_gate_mutation": False,
                 "ranking_mutation": False,
+                "can_grant_ai_order_authority": False,
             }
         )
     blocked = [row for row in rows if row["status"] == "blocked"]
@@ -1532,6 +1750,7 @@ def build_category_upgrade_proof_chain(report: dict[str, Any] | None = None, *, 
             "records": rows,
             "claims_to_avoid": list(source.get("claims_to_avoid") or []),
             "safety_notes": list(source.get("safety_notes") or SAFETY_NOTES),
+            "finish_tracker": source.get("finish_tracker") or build_project_finish_tracker(report_name="category_upgrade_proof_chain"),
             **SAFETY_FLAGS,
         }
     )
@@ -1561,6 +1780,10 @@ def build_category_upgrade_support_export(
                     "raw_logs",
                     "account_ids",
                     "raw_local_paths",
+                    "database_files",
+                    "environment_values",
+                    "authorization_headers",
+                    "unsanitized_personal_data",
                 ],
                 "redacts_sensitive_key_markers": list(SENSITIVE_EXPORT_KEY_MARKERS),
                 "redacts_local_paths": True,
@@ -1569,6 +1792,7 @@ def build_category_upgrade_support_export(
             },
             "report": sanitized_report,
             "safety_notes": list(SAFETY_NOTES),
+            "finish_tracker": _as_dict(source).get("finish_tracker") or build_project_finish_tracker(report_name="category_upgrade_support_export"),
             **SAFETY_FLAGS,
         }
     )

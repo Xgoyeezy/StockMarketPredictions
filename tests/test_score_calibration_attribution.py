@@ -10,6 +10,7 @@ from backend.api import create_app
 from backend.services import score_calibration_attribution as calibration
 from backend.services.score_calibration_attribution import (
     assign_score_bucket,
+    build_calibration_proof_summary,
     build_score_calibration_report,
     compute_feature_attribution,
     compute_score_bucket_analysis,
@@ -124,15 +125,134 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
         self.assertIn("total_reward", report["missing_fields"])
         self.assertEqual(report["summary"]["rewardable_count"], 1)
 
+    def test_simulation_evidence_is_not_rewardable_for_calibration(self) -> None:
+        row = _row(record_id="sim-row", score=90, reward=0.50, actual=0.60)
+        row["evidence_pool"] = " Simulation_Evidence "
+
+        report = build_score_calibration_report(records=[row], generated_at="2026-05-06T00:00:00Z")
+
+        self.assertEqual(report["summary"]["rewardable_count"], 0)
+        self.assertFalse(report["records"][0]["rewardable"])
+        self.assertIn("Simulation evidence remains separate", report["records"][0]["warnings"][0])
+
     def test_safe_recommendation_generation(self) -> None:
         report = build_score_calibration_report(records=_calibration_rows()[:5], generated_at="2026-05-06T00:00:00Z")
         recommendations = report["aggregations"]["recommendations"]
 
         self.assertTrue(recommendations)
         self.assertTrue(all(row["manual_review_only"] for row in recommendations))
+        self.assertFalse(any(row["changes_execution"] for row in recommendations))
+        self.assertFalse(any(row["changes_broker_routes"] for row in recommendations))
+        self.assertFalse(any(row["changes_risk_gates"] for row in recommendations))
+        self.assertFalse(any(row["changes_ranking_weights"] for row in recommendations))
+        self.assertFalse(any(row["can_change_broker_routes"] for row in recommendations))
+        self.assertFalse(any(row["can_bypass_risk_gates"] for row in recommendations))
+        self.assertFalse(any(row["can_change_ranking_weights"] for row in recommendations))
+        self.assertFalse(any(row["can_grant_ai_order_authority"] for row in recommendations))
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
         self.assertEqual(report["mutation"], "none")
+
+    def test_calibration_proof_ready_with_bucket_feature_and_after_cost_lift(self) -> None:
+        report = build_score_calibration_report(records=_calibration_rows()[:5], generated_at="2026-05-06T00:00:00Z")
+        proof = build_calibration_proof_summary(
+            records=report["records"],
+            bucket_report=report["aggregations"]["score_bucket_separation"],
+            feature_report=report["aggregations"]["feature_attribution"],
+            recommendations=report["aggregations"]["recommendations"],
+        )
+
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(proof["status"], "ready_for_human_review")
+        self.assertEqual(proof["summary"]["passed_requirement_count"], 7)
+        self.assertGreater(proof["summary"]["after_cost_bucket_lift"], 0)
+        self.assertGreaterEqual(proof["summary"]["sufficient_feature_count"], 1)
+        for requirement in proof["requirements"]:
+            self.assertFalse(requirement["changes_execution"])
+            self.assertFalse(requirement["changes_broker_routes"])
+            self.assertFalse(requirement["changes_risk_gates"])
+            self.assertFalse(requirement["changes_ranking_weights"])
+            self.assertFalse(requirement["can_change_broker_routes"])
+            self.assertFalse(requirement["can_bypass_risk_gates"])
+            self.assertFalse(requirement["can_change_ranking_weights"])
+            self.assertFalse(requirement["can_grant_ai_order_authority"])
+        for row in proof["feature_readiness"]:
+            self.assertFalse(row["changes_execution"])
+            self.assertFalse(row["changes_broker_routes"])
+            self.assertFalse(row["changes_risk_gates"])
+            self.assertFalse(row["changes_ranking_weights"])
+            self.assertFalse(row["can_change_broker_routes"])
+            self.assertFalse(row["can_bypass_risk_gates"])
+            self.assertFalse(row["can_change_ranking_weights"])
+            self.assertFalse(row["can_grant_ai_order_authority"])
+        self.assertEqual(report["score_calibration_hardening_plan"]["status"], "blocked_by_evidence")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_calibration_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["public_score_quality_claim"])
+        self.assertFalse(report["summary"]["claim_permissions"]["repeatability_claim"])
+
+    def test_score_calibration_hardening_plan_blocks_claims_when_evidence_is_missing(self) -> None:
+        report = build_score_calibration_report(
+            records=[
+                _row(record_id="missing-score", score=None, reward=0.2, actual=0.25),
+                _row(record_id="missing-reward", score=80, reward=None, actual=0.20),
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        hardening_plan = report["score_calibration_hardening_plan"]
+        by_key = {row["key"]: row for row in hardening_plan["items"]}
+
+        self.assertEqual(hardening_plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["score_calibration_hardening_status"], "blocked_by_evidence")
+        self.assertGreaterEqual(report["summary"]["score_calibration_hardening_open_items"], 6)
+        self.assertGreaterEqual(report["summary"]["score_calibration_hardening_critical_open_items"], 2)
+        self.assertEqual(by_key["rewardable_score_sample"]["status"], "needs_evidence")
+        self.assertIn("actual_forward_return", by_key["rewardable_score_sample"]["missing_fields"])
+        self.assertIn("ranking_quality_review", by_key["rewardable_score_sample"]["blocked_claims"])
+        self.assertEqual(by_key["walk_forward_confirmation"]["status"], "needs_evidence")
+        self.assertIn("sample_split", by_key["walk_forward_confirmation"]["missing_fields"])
+        self.assertIn("public_score_quality_claim", by_key["walk_forward_confirmation"]["blocked_claims"])
+        self.assertIn("proven_score_quality", hardening_plan["summary"]["blocked_claims"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["automatic_ranking_mutation"])
+        self.assertFalse(hardening_plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["changes_risk_gates"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["can_change_broker_routes"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["can_bypass_risk_gates"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["can_change_ranking_weights"] for item in hardening_plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in hardening_plan["items"]))
+        for action in hardening_plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
+
+    def test_calibration_proof_blocks_sparse_and_pre_cost_only_records(self) -> None:
+        sparse_rows = [
+            _row(record_id="s1", score=90, reward=0.30, actual=0.40, slippage_bps=0.0, spread_bps=0.0),
+            _row(record_id="s2", score=20, reward=0.10, actual=0.20, slippage_bps=0.0, spread_bps=0.0),
+        ]
+        for row in sparse_rows:
+            row.pop("slippage_bps", None)
+            row.pop("spread_bps", None)
+        report = build_score_calibration_report(records=sparse_rows, generated_at="2026-05-06T00:00:00Z")
+        failed_keys = {row["key"] for row in report["proof_summary"]["requirements"] if not row["passed"]}
+
+        self.assertFalse(report["proof_summary"]["proof_ready"])
+        self.assertIn("rewardable_sample_size", failed_keys)
+        self.assertIn("score_bucket_coverage", failed_keys)
+        self.assertIn("after_cost_bucket_lift", failed_keys)
 
     def test_api_response_shape(self) -> None:
         client = TestClient(create_app())
@@ -151,7 +271,19 @@ class ScoreCalibrationAttributionTests(unittest.TestCase):
                 self.assertTrue(payload["ok"])
                 data = payload["data"]
                 self.assertTrue(data["research_only"])
+                self.assertFalse(data["can_submit_orders"])
+                self.assertFalse(data["can_submit_live_orders"])
+                self.assertFalse(data["can_change_broker_routes"])
+                self.assertFalse(data["can_bypass_risk_gates"])
+                self.assertFalse(data["can_clear_kill_switch"])
+                self.assertFalse(data["can_change_ranking_weights"])
+                self.assertFalse(data["can_grant_ai_order_authority"])
                 self.assertIn("summary", data)
+                self.assertIn("proof_summary", data)
+                self.assertIn("score_calibration_hardening_plan", data)
+                self.assertIn("calibration_proof_status", data["summary"])
+                self.assertIn("score_calibration_hardening_status", data["summary"])
+                self.assertIn("claim_permissions", data["summary"])
                 self.assertIn("records", data)
                 self.assertIn("aggregations", data)
                 self.assertIn("warnings", data)

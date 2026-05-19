@@ -12,6 +12,7 @@ from uuid import uuid4
 from backend.core.config import settings
 from backend.services.exceptions import ConflictError, NotFoundError, ValidationServiceError
 from backend.services.professional_benchmark_suite import get_professional_benchmark_summary
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 from backend.services.storage_utils import read_json_file, write_json_file
 
@@ -20,6 +21,11 @@ SAFETY_FLAGS: dict[str, Any] = {
     "paper_route_only": True,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
+    "can_change_broker_routes": False,
+    "can_bypass_risk_gates": False,
+    "can_clear_kill_switch": False,
+    "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "research_metadata_only",
     "writes_execution_config": False,
     "writes_broker_config": False,
@@ -84,6 +90,130 @@ DEFAULT_VERSION_SNAPSHOT: dict[str, Any] = {
     "data_source": "local_evidence_artifacts",
 }
 
+MIN_WALK_FORWARD_PASS_RATE = 0.6
+WALK_FORWARD_PROOF_REQUIREMENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "frozen_snapshot",
+        "label": "Frozen snapshot exists",
+        "metric": "frozen_record_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Freeze at least one experiment before treating any forward evidence as repeatability proof.",
+    },
+    {
+        "key": "no_lookahead_windows",
+        "label": "No-lookahead windows",
+        "metric": "no_lookahead_record_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Define train, validation, test, and paper-forward windows in chronological order before evaluation.",
+    },
+    {
+        "key": "version_snapshot",
+        "label": "Version snapshot complete",
+        "metric": "version_complete_record_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Attach ranking, reward, forecast, baseline, feature, universe, data-source, and code-version snapshots.",
+    },
+    {
+        "key": "out_of_sample_results",
+        "label": "Out-of-sample result captured",
+        "metric": "evaluated_record_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Link at least one frozen experiment to out-of-sample benchmark results before repeatability review.",
+    },
+    {
+        "key": "walk_forward_pass_rate",
+        "label": "Walk-forward pass rate",
+        "metric": "pass_rate",
+        "threshold": MIN_WALK_FORWARD_PASS_RATE,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Improve data quality, scoring, or setup selection until frozen experiments pass the configured rate.",
+    },
+    {
+        "key": "after_cost_support",
+        "label": "After-cost support",
+        "metric": "after_cost_supported_record_count",
+        "threshold": 1,
+        "comparison": "greater_or_equal",
+        "safe_next_action": "Add slippage or spread-adjusted reward evidence to frozen experiment results.",
+    },
+)
+
+WALK_FORWARD_VALIDATION_PLAN_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "create_frozen_experiment",
+        "title": "Create and freeze an experiment snapshot",
+        "priority": "critical",
+        "proof_keys": ("frozen_snapshot",),
+        "missing_fields": ("experiment_id", "frozen_at", "parameter_digest"),
+        "blocked_claims": ("repeatability_review", "walk_forward_claim"),
+        "safe_next_action": "Create a draft experiment with train, validation, test, and paper-forward windows, then freeze it before observing forward results.",
+        "done_when": "At least one experiment is frozen or locked before the out-of-sample window is evaluated.",
+    },
+    {
+        "key": "chronological_no_lookahead_windows",
+        "title": "Chronological no-lookahead windows",
+        "priority": "critical",
+        "proof_keys": ("no_lookahead_windows",),
+        "missing_fields": ("train_window", "validation_window", "test_window", "paper_forward_window"),
+        "blocked_claims": ("repeatability_review", "no_lookahead_claim"),
+        "safe_next_action": "Define train, validation, test, and paper-forward windows in chronological order before any evaluation.",
+        "done_when": "A frozen experiment has complete chronological windows with no overlap or post-outcome parameter changes.",
+    },
+    {
+        "key": "complete_version_snapshot",
+        "title": "Complete version snapshot",
+        "priority": "high",
+        "proof_keys": ("version_snapshot",),
+        "missing_fields": (
+            "ranking_formula_version",
+            "reward_formula_version",
+            "forecast_model_version",
+            "baseline_definition_version",
+            "feature_version",
+            "market_universe",
+            "data_source",
+            "code_version",
+        ),
+        "blocked_claims": ("auditability_claim", "repeatability_review"),
+        "safe_next_action": "Attach ranking, reward, forecast, baseline, feature, universe, data-source, and code-version snapshots.",
+        "done_when": "Version snapshot fields are complete for a frozen experiment and tied to a parameter digest.",
+    },
+    {
+        "key": "out_of_sample_result",
+        "title": "Out-of-sample result captured",
+        "priority": "critical",
+        "proof_keys": ("out_of_sample_results",),
+        "missing_fields": ("verdict", "baseline_relative_edge", "score_bucket_lift", "rewardable_count"),
+        "blocked_claims": ("repeatability_review", "walk_forward_claim"),
+        "safe_next_action": "Link at least one frozen experiment to a completed out-of-sample benchmark result after the test window closes.",
+        "done_when": "A frozen experiment has a pass, weak-pass, or fail verdict from forward-only evidence.",
+    },
+    {
+        "key": "after_cost_support",
+        "title": "After-cost support",
+        "priority": "high",
+        "proof_keys": ("after_cost_support",),
+        "missing_fields": ("execution_adjusted_reward", "slippage_bps", "spread_bps"),
+        "blocked_claims": ("tradability_review", "cost_adjusted_repeatability"),
+        "safe_next_action": "Attach slippage, spread, fill, or execution-adjusted reward evidence to evaluated frozen experiments.",
+        "done_when": "At least one evaluated frozen experiment includes after-cost reward evidence.",
+    },
+    {
+        "key": "pass_rate_threshold",
+        "title": "Walk-forward pass-rate threshold",
+        "priority": "high",
+        "proof_keys": ("walk_forward_pass_rate",),
+        "missing_fields": ("passed_verdict_count", "evaluated_record_count"),
+        "blocked_claims": ("repeatability_review", "strategy_stability_claim"),
+        "safe_next_action": "Run enough frozen out-of-sample experiments to measure whether the pass rate meets the configured threshold.",
+        "done_when": "Evaluated frozen experiments meet or exceed the v1 minimum pass-rate threshold.",
+    },
+)
+
 SECRET_KEY_MARKERS = ("secret", "token", "password", "credential", "api_key", "apikey", "access_key", "private_key")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STORE_PATH = PROJECT_ROOT / "runtime-exports" / "walk-forward-experiments" / "experiments.json"
@@ -110,6 +240,23 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            return datetime.fromisoformat(f"{text}T00:00:00")
+        except ValueError:
+            return None
 
 
 def _listify(value: Any) -> list[Any]:
@@ -229,6 +376,286 @@ def _snapshot_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     snapshot["allowed_change_policy"] = sanitized.get("allowed_change_policy") or DEFAULT_ALLOWED_CHANGE_POLICY
     return snapshot
+
+
+def _passes_threshold(value: Any, threshold: Any, comparison: str) -> bool:
+    numeric = _safe_float(value)
+    required = _safe_float(threshold)
+    if numeric is None or required is None:
+        return False
+    if comparison == "greater_than":
+        return numeric > required
+    return numeric >= required
+
+
+def _window_bounds(window: Any) -> tuple[datetime | None, datetime | None]:
+    if not isinstance(window, dict):
+        return None, None
+    start = _safe_datetime(window.get("start") or window.get("from"))
+    end = _safe_datetime(window.get("end") or window.get("to"))
+    if start is not None and end is not None and start <= end:
+        return start, end
+    return None, None
+
+
+def _has_chronological_windows(record: dict[str, Any]) -> bool:
+    train_start, train_end = _window_bounds(record.get("train_window"))
+    validation_start, validation_end = _window_bounds(record.get("validation_window"))
+    test_start, test_end = _window_bounds(record.get("test_window"))
+    paper_start, paper_end = _window_bounds(record.get("paper_forward_window"))
+    if not all((train_start, train_end, validation_start, validation_end, test_start, test_end, paper_start, paper_end)):
+        return False
+    if not (train_end < validation_start and validation_end < test_start):
+        return False
+    if not (test_end < paper_start):
+        return False
+    return True
+
+
+def _missing_version_snapshot_fields(record: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for field in VERSION_FIELDS:
+        if not record.get(field):
+            missing.append(field)
+    for field in ("market_universe", "data_source", "code_version", "parameter_digest"):
+        value = record.get(field)
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(field)
+    return missing
+
+
+def _is_evaluated_verdict(verdict: str) -> bool:
+    return verdict in {"passed", "weak_pass", "failed"}
+
+
+def _record_readiness(record: dict[str, Any]) -> dict[str, Any]:
+    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    verdict = str(metrics.get("verdict") or "insufficient_evidence").strip().lower()
+    status = str(record.get("status") or "draft").strip().lower()
+    frozen_snapshot = status in IMMUTABLE_STATUSES
+    no_lookahead = _has_chronological_windows(record)
+    missing_versions = _missing_version_snapshot_fields(record)
+    baseline_edge = _safe_float(metrics.get("baseline_relative_edge"))
+    bucket_lift = _safe_float(metrics.get("score_bucket_lift"))
+    after_cost_reward = _safe_float(metrics.get("execution_adjusted_reward"))
+    benchmark_linked = baseline_edge is not None and bucket_lift is not None
+    after_cost_supported = after_cost_reward is not None
+    evaluated = _is_evaluated_verdict(verdict)
+    passed = verdict == "passed"
+    warnings: list[str] = []
+    if not frozen_snapshot:
+        warnings.append("Experiment is not frozen or locked.")
+    if not no_lookahead:
+        warnings.append("Train, validation, test, and paper-forward windows are incomplete or not chronological.")
+    if missing_versions:
+        warnings.append("Version snapshot is missing required fields.")
+    if not benchmark_linked:
+        warnings.append("Baseline-relative edge and score bucket lift are not both available.")
+    if not after_cost_supported:
+        warnings.append("Execution-adjusted reward is missing.")
+    if not evaluated:
+        warnings.append("Experiment does not yet have a pass, weak pass, or fail verdict.")
+    return serialize_value(
+        {
+            "experiment_id": record.get("experiment_id"),
+            "name": record.get("name"),
+            "status": status,
+            "verdict": verdict,
+            "frozen_snapshot": frozen_snapshot,
+            "no_lookahead_windows": no_lookahead,
+            "version_snapshot_complete": not missing_versions,
+            "missing_version_fields": missing_versions,
+            "benchmark_linked": benchmark_linked,
+            "after_cost_supported": after_cost_supported,
+            "evaluated": evaluated,
+            "passed": passed,
+            "warnings": warnings,
+            "research_only": True,
+            "changes_execution": False,
+            "changes_broker_routes": False,
+            "changes_risk_gates": False,
+            "changes_ranking_weights": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
+        }
+    )
+
+
+def build_walk_forward_proof_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    readiness = [_record_readiness(record) for record in records]
+    frozen_count = sum(1 for row in readiness if row["frozen_snapshot"])
+    no_lookahead_count = sum(1 for row in readiness if row["no_lookahead_windows"])
+    version_complete_count = sum(1 for row in readiness if row["version_snapshot_complete"])
+    evaluated_count = sum(1 for row in readiness if row["evaluated"])
+    passed_count = sum(1 for row in readiness if row["passed"])
+    after_cost_count = sum(1 for row in readiness if row["after_cost_supported"])
+    pass_rate = round(passed_count / evaluated_count, 6) if evaluated_count else 0.0
+    values = {
+        "frozen_record_count": frozen_count,
+        "no_lookahead_record_count": no_lookahead_count,
+        "version_complete_record_count": version_complete_count,
+        "evaluated_record_count": evaluated_count,
+        "pass_rate": pass_rate,
+        "after_cost_supported_record_count": after_cost_count,
+    }
+    rows: list[dict[str, Any]] = []
+    for requirement in WALK_FORWARD_PROOF_REQUIREMENTS:
+        value = values.get(str(requirement["metric"]))
+        passed = _passes_threshold(value, requirement["threshold"], str(requirement["comparison"]))
+        rows.append(
+            {
+                "key": requirement["key"],
+                "label": requirement["label"],
+                "metric": requirement["metric"],
+                "status": "passed" if passed else "needs_evidence",
+                "passed": passed,
+                "value": value,
+                "threshold": requirement["threshold"],
+                "comparison": requirement["comparison"],
+                "safe_next_action": requirement["safe_next_action"],
+                "claim_boundary": "Walk-forward proof is for human research review only; it is not proof of alpha, investor performance, guaranteed returns, institutional readiness, or live-trading readiness.",
+                "research_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
+            }
+        )
+    proof_ready = bool(rows) and all(row["passed"] for row in rows)
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready else "needs_evidence",
+            "proof_ready": proof_ready,
+            "requirements": rows,
+            "record_readiness": readiness,
+            "summary": {
+                "record_count": len(records),
+                "frozen_record_count": frozen_count,
+                "no_lookahead_record_count": no_lookahead_count,
+                "version_complete_record_count": version_complete_count,
+                "evaluated_record_count": evaluated_count,
+                "passed_record_count": passed_count,
+                "after_cost_supported_record_count": after_cost_count,
+                "pass_rate": pass_rate,
+                "minimum_pass_rate": MIN_WALK_FORWARD_PASS_RATE,
+                "requirement_count": len(rows),
+                "passed_requirement_count": sum(1 for row in rows if row["passed"]),
+                "missing_requirement_count": sum(1 for row in rows if not row["passed"]),
+            },
+            "safe_next_actions": [row["safe_next_action"] for row in rows if not row["passed"]],
+            "safety_notes": list(SAFETY_NOTES),
+            **SAFETY_FLAGS,
+        }
+    )
+
+
+def build_walk_forward_validation_plan(records: list[dict[str, Any]], proof_summary: dict[str, Any]) -> dict[str, Any]:
+    proof_rows = {
+        str(row.get("key")): row
+        for row in proof_summary.get("requirements") or []
+        if isinstance(row, dict)
+    }
+    items: list[dict[str, Any]] = []
+    for definition in WALK_FORWARD_VALIDATION_PLAN_DEFINITIONS:
+        proof_keys = tuple(definition.get("proof_keys") or ())
+        related_rows = [
+            proof_rows[key]
+            for key in proof_keys
+            if isinstance(proof_rows.get(key), dict)
+        ]
+        passed = bool(related_rows) and all(bool(row.get("passed")) for row in related_rows)
+        if not records:
+            status = "no_records"
+        else:
+            status = "ready" if passed else "needs_evidence"
+        safe_next_actions = [
+            str(row.get("safe_next_action"))
+            for row in related_rows
+            if row.get("safe_next_action")
+        ] or [str(definition["safe_next_action"])]
+        items.append(
+            {
+                "key": definition["key"],
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "proof_keys": list(proof_keys),
+                "values": {str(row.get("metric")): row.get("value") for row in related_rows},
+                "missing_fields": list(definition.get("missing_fields") or ()),
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": safe_next_actions[0],
+                "safe_next_actions": safe_next_actions,
+                "done_when": definition["done_when"],
+                "claim_boundary": "Walk-forward validation plan items are internal research gates only; they do not prove alpha, guaranteed returns, investor performance, institutional readiness, or live-trading readiness.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
+            }
+        )
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    proof_ready = bool(proof_summary.get("proof_ready"))
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if proof_ready and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_validation_item": open_items[0]["title"] if open_items else None,
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_repeatability_review": proof_ready,
+                    "public_repeatability_claim": False,
+                    "public_alpha_claim": False,
+                    "live_trading_readiness": False,
+                    "institutional_readiness": False,
+                },
+                "blocked_claims": [
+                    "proven_alpha",
+                    "guaranteed_returns",
+                    "public_repeatability",
+                    "institutional_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Walk-forward validation only records proof gaps and claim boundaries. It does not authorize orders, route changes, risk-gate changes, or ranking-weight mutation.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
 
 
 def _benchmark_report_from_inputs(
@@ -391,6 +818,8 @@ def _summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         verdict = str((record.get("metrics") or {}).get("verdict") or "insufficient_evidence")
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
     latest = records[-1] if records else None
+    proof_summary = build_walk_forward_proof_summary(records)
+    validation_plan = build_walk_forward_validation_plan(records, proof_summary)
     return {
         "experiment_count": len(records),
         "draft_count": status_counts.get("draft", 0),
@@ -398,6 +827,16 @@ def _summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "status_counts": status_counts,
         "verdict_counts": verdict_counts,
         "latest_experiment_id": latest.get("experiment_id") if latest else None,
+        "walk_forward_proof_ready": proof_summary["proof_ready"],
+        "walk_forward_proof_status": proof_summary["status"],
+        "walk_forward_pass_rate": proof_summary["summary"]["pass_rate"],
+        "walk_forward_requirements_passed": proof_summary["summary"]["passed_requirement_count"],
+        "walk_forward_requirements_total": proof_summary["summary"]["requirement_count"],
+        "walk_forward_validation_status": validation_plan["status"],
+        "walk_forward_validation_open_items": validation_plan["summary"]["open_item_count"],
+        "walk_forward_validation_critical_open_items": validation_plan["summary"]["critical_open_items"],
+        "top_validation_item": validation_plan["summary"]["top_validation_item"],
+        "claim_permissions": validation_plan["summary"]["claim_permissions"],
         "research_only": True,
         "storage": "sanitized_runtime_metadata",
         **SAFETY_FLAGS,
@@ -413,18 +852,24 @@ def _response(
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     record_list = list(records or ([] if record is None else [record]))
-    summary = _summary(record_list if records is not None else _read_records())
+    summary_records = record_list if records is not None else _read_records()
+    summary = _summary(summary_records)
+    proof_summary = build_walk_forward_proof_summary(summary_records)
+    validation_plan = build_walk_forward_validation_plan(summary_records, proof_summary)
     return serialize_value(
         {
             "status": status,
             "generated_at": generated_at or _utc_now(),
             "research_only": True,
             "summary": summary,
+            "proof_summary": proof_summary,
+            "walk_forward_validation_plan": validation_plan,
             "record": record,
             "records": record_list,
             "warnings": [str(item) for item in warnings or [] if item],
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="walk_forward"),
         }
     )
 
@@ -435,16 +880,21 @@ def list_experiment_records(*, store_path: Path | str | None = None) -> list[dic
 
 def get_walk_forward_summary(*, store_path: Path | str | None = None) -> dict[str, Any]:
     records = list_experiment_records(store_path=store_path)
+    proof_summary = build_walk_forward_proof_summary(records)
+    validation_plan = build_walk_forward_validation_plan(records, proof_summary)
     return serialize_value(
         {
             "status": "ready" if records else "empty",
             "generated_at": _utc_now(),
             "research_only": True,
             "summary": _summary(records),
+            "proof_summary": proof_summary,
+            "walk_forward_validation_plan": validation_plan,
             "records": records[:100],
             "warnings": [] if records else ["No walk-forward experiments have been created yet."],
             "safety_notes": list(SAFETY_NOTES),
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="walk_forward_summary"),
         }
     )
 

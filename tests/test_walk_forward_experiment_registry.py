@@ -12,6 +12,7 @@ from backend.api import create_app
 from backend.services import walk_forward_experiment_registry as registry
 from backend.services.exceptions import ConflictError, ValidationServiceError
 from backend.services.walk_forward_experiment_registry import (
+    build_walk_forward_proof_summary,
     clone_walk_forward_experiment,
     create_walk_forward_experiment,
     evaluate_experiment_from_benchmark,
@@ -85,6 +86,12 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
             self.assertEqual(record["status"], "draft")
             self.assertTrue(record["research_only"])
             self.assertFalse(record["can_submit_orders"])
+            self.assertFalse(record["can_submit_live_orders"])
+            self.assertFalse(record["can_change_broker_routes"])
+            self.assertFalse(record["can_bypass_risk_gates"])
+            self.assertFalse(record["can_clear_kill_switch"])
+            self.assertFalse(record["can_change_ranking_weights"])
+            self.assertFalse(record["can_grant_ai_order_authority"])
             self.assertEqual(record["mutation"], "research_metadata_only")
             self.assertIn("parameter_digest", record)
             self.assertEqual(record["metrics"]["verdict"], "insufficient_evidence")
@@ -153,6 +160,111 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
             self.assertEqual(record["data_source"], "[local_path_redacted]")
             self.assertNotIn("not-stored", str(record))
             self.assertEqual(summary["summary"]["experiment_count"], 1)
+            self.assertIn("proof_summary", summary)
+            self.assertIn("walk_forward_validation_plan", summary)
+            self.assertFalse(summary["proof_summary"]["proof_ready"])
+            self.assertEqual(summary["summary"]["walk_forward_validation_status"], "blocked_by_evidence")
+
+    def test_walk_forward_proof_ready_with_frozen_out_of_sample_pass_after_costs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "experiments.json"
+            created = create_walk_forward_experiment(
+                _payload(status="completed"),
+                benchmark_report=_benchmark("edge_detected"),
+                store_path=store,
+            )
+
+            proof = build_walk_forward_proof_summary([created["record"]])
+
+            self.assertTrue(proof["proof_ready"])
+            self.assertEqual(proof["status"], "ready_for_human_review")
+            self.assertEqual(proof["summary"]["passed_requirement_count"], 6)
+            self.assertEqual(proof["summary"]["pass_rate"], 1.0)
+            for requirement in proof["requirements"]:
+                self.assertFalse(requirement["changes_execution"])
+                self.assertFalse(requirement["changes_broker_routes"])
+                self.assertFalse(requirement["changes_risk_gates"])
+                self.assertFalse(requirement["changes_ranking_weights"])
+                self.assertFalse(requirement["can_change_broker_routes"])
+                self.assertFalse(requirement["can_bypass_risk_gates"])
+                self.assertFalse(requirement["can_change_ranking_weights"])
+                self.assertFalse(requirement["can_grant_ai_order_authority"])
+
+    def test_walk_forward_validation_plan_blocks_claims_when_no_experiments_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "experiments.json"
+            summary = get_walk_forward_summary(store_path=store)
+
+            validation_plan = summary["walk_forward_validation_plan"]
+            by_key = {row["key"]: row for row in validation_plan["items"]}
+            self.assertEqual(summary["status"], "empty")
+            self.assertEqual(validation_plan["status"], "blocked_by_evidence")
+            self.assertEqual(summary["summary"]["walk_forward_validation_open_items"], 6)
+            self.assertEqual(summary["summary"]["walk_forward_validation_critical_open_items"], 3)
+            self.assertEqual(by_key["create_frozen_experiment"]["status"], "no_records")
+            self.assertEqual(by_key["chronological_no_lookahead_windows"]["status"], "no_records")
+            self.assertEqual(by_key["out_of_sample_result"]["status"], "no_records")
+            self.assertIn("repeatability_review", by_key["create_frozen_experiment"]["blocked_claims"])
+            self.assertIn("experiment_id", by_key["create_frozen_experiment"]["missing_fields"])
+            self.assertFalse(validation_plan["summary"]["claim_permissions"]["public_repeatability_claim"])
+            self.assertFalse(validation_plan["summary"]["claim_permissions"]["live_trading_readiness"])
+            self.assertTrue(all(item["manual_review_only"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_execution"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_broker_routes"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_risk_gates"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["changes_ranking_weights"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_change_broker_routes"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_bypass_risk_gates"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_change_ranking_weights"] for item in validation_plan["items"]))
+            self.assertFalse(any(item["can_grant_ai_order_authority"] for item in validation_plan["items"]))
+            for action in validation_plan["safe_next_actions"]:
+                self.assertFalse(action["changes_execution"])
+                self.assertFalse(action["changes_broker_routes"])
+                self.assertFalse(action["changes_risk_gates"])
+                self.assertFalse(action["changes_ranking_weights"])
+                self.assertFalse(action["can_change_broker_routes"])
+                self.assertFalse(action["can_bypass_risk_gates"])
+                self.assertFalse(action["can_change_ranking_weights"])
+                self.assertFalse(action["can_grant_ai_order_authority"])
+
+    def test_walk_forward_proof_blocks_lookahead_and_missing_after_costs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "experiments.json"
+            bad_windows = _payload(
+                status="completed",
+                train_window={"start": "2026-05-01", "end": "2026-05-05"},
+                validation_window={"start": "2026-05-04", "end": "2026-05-06"},
+            )
+            benchmark = _benchmark("edge_detected")
+            benchmark["sections"]["execution_quality"] = {}
+            created = create_walk_forward_experiment(bad_windows, benchmark_report=benchmark, store_path=store)
+
+            proof = build_walk_forward_proof_summary([created["record"]])
+            failed_keys = {row["key"] for row in proof["requirements"] if not row["passed"]}
+
+            self.assertFalse(proof["proof_ready"])
+            self.assertIn("no_lookahead_windows", failed_keys)
+            self.assertIn("after_cost_support", failed_keys)
+            self.assertTrue(proof["record_readiness"][0]["warnings"])
+
+    def test_walk_forward_proof_requires_paper_forward_window(self) -> None:
+        payload = _payload(status="completed")
+        payload.pop("paper_forward_window")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "experiments.json"
+            created = create_walk_forward_experiment(
+                payload,
+                benchmark_report=_benchmark("edge_detected"),
+                store_path=store,
+            )
+
+            proof = build_walk_forward_proof_summary([created["record"]])
+            no_lookahead = next(row for row in proof["requirements"] if row["key"] == "no_lookahead_windows")
+
+            self.assertFalse(proof["proof_ready"])
+            self.assertFalse(no_lookahead["passed"])
+            self.assertIn("Train, validation, test, and paper-forward windows are incomplete", proof["record_readiness"][0]["warnings"][0])
 
     def test_api_response_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,7 +291,19 @@ class WalkForwardExperimentRegistryTests(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     data = payload["data"]
                     self.assertTrue(data["research_only"])
+                    self.assertFalse(data["can_submit_orders"])
+                    self.assertFalse(data["can_submit_live_orders"])
+                    self.assertFalse(data["can_change_broker_routes"])
+                    self.assertFalse(data["can_bypass_risk_gates"])
+                    self.assertFalse(data["can_clear_kill_switch"])
+                    self.assertFalse(data["can_change_ranking_weights"])
+                    self.assertFalse(data["can_grant_ai_order_authority"])
                     self.assertIn("summary", data)
+                    self.assertIn("proof_summary", data)
+                    self.assertIn("walk_forward_validation_plan", data)
+                    self.assertIn("walk_forward_proof_status", data["summary"])
+                    self.assertIn("walk_forward_validation_status", data["summary"])
+                    self.assertIn("claim_permissions", data["summary"])
                     self.assertIn("warnings", data)
                     self.assertIn("safety_notes", data)
                     self.assertIn("Does not place orders.", data["safety_notes"])

@@ -18284,7 +18284,7 @@ export default function DashboardPage({ bootstrap }) {
           </div>
 
         <div className="chart-fullscreen__ticker-rail">
-          {tickerStrip.map((ticker) => {
+          {tickerStrip.map((ticker, index) => {
             const symbol = String(ticker || '').toUpperCase()
             const accent = tickerAccent(symbol)
             const row = liveTickerLookup[symbol]
@@ -18292,7 +18292,7 @@ export default function DashboardPage({ bootstrap }) {
 
             return (
               <Chip
-                key={symbol}
+                key={`${symbol || 'ticker'}-${index}`}
                 as="button"
                 type="button"
                 tone="neutral"

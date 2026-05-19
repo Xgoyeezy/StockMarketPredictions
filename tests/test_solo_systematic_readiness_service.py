@@ -46,7 +46,7 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_solo_requirements_added_so_far(self) -> None:
         summary = get_solo_systematic_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 30)
+        self.assertEqual(summary["implemented_requirement_count"], len(SOLO_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], SOLO_REQUIREMENT_EVIDENCE)
         for key in SOLO_FIRST_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -58,8 +58,15 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
             self.assertTrue(summary["requirement_evidence"][key])
         self.assertTrue(all(summary["requirement_evidence"].values()))
         self.assertTrue(summary["read_only"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("not proof of edge", summary["claim_boundary"])
 
     def test_combined_review_bundle_and_view_separation_are_read_only(self) -> None:
@@ -145,6 +152,9 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
         edge = report_edge_before_after_costs([{"edge_before_costs": 0.12, "edge_after_costs": 0.04}])
 
         self.assertFalse(risk_contract["research_recommendations_can_bypass_risk_gates"])
+        self.assertFalse(risk_contract["changes_risk_gates"])
+        self.assertFalse(risk_contract["clears_kill_switch"])
+        self.assertFalse(risk_contract["changes_broker_routes"])
         self.assertTrue(risk_contract["risk_gates_authoritative"])
         self.assertEqual(risk_context["status"], "needs_evidence")
         self.assertEqual(risk_context["missing_risk_gate_context_indexes"], [1])
@@ -207,6 +217,9 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
 
         self.assertEqual(snapshot["status"], "passed")
         self.assertFalse(ranking["analytics_can_change_ranking_weights"])
+        self.assertFalse(ranking["changes_ranking_weights"])
+        self.assertFalse(ranking["changes_execution"])
+        self.assertFalse(ranking["changes_order_submission"])
         self.assertTrue(ranking["ranking_weight_changes_require_manual_config_workflow"])
         self.assertEqual(edge["status"], "passed")
         self.assertEqual(pass_rate["status"], "passed")
@@ -223,7 +236,7 @@ class SoloSystematicReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in retail_rows[:25]))
         self.assertTrue(all(row["status"] == "complete" for row in solo_rows[:30]))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(solo)

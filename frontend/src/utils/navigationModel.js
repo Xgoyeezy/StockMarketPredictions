@@ -43,6 +43,7 @@ export const CUSTOMER_NAV_ITEMS = [
   { to: '/shadow-mode', label: 'Human vs System', kicker: 'Shdw' },
   { to: '/ai-committee', label: 'AI Committee', kicker: 'AI' },
   { to: '/category-readiness', label: '10/10 Readiness', kicker: 'Gate' },
+  { to: '/proof-metrics', label: 'Proof Metrics', kicker: 'Proof' },
   { to: '/settings', label: 'Settings', kicker: 'Acct' },
 ]
 
@@ -96,6 +97,7 @@ export function getShellNavShortcuts(items = CUSTOMER_NAV_ITEMS) {
     '/shadow-mode': 'H',
     '/ai-committee': 'Z',
     '/category-readiness': 'J',
+    '/proof-metrics': '0',
     '/settings': 'S',
     '/admin': 'A',
   }

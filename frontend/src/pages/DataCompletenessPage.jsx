@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -40,7 +41,7 @@ function DataTable({ columns, rows, empty }) {
         </thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
-            <tr key={row.record_id || row.source_type || row.field || row.note || row.action || index}>
+            <tr key={row.record_id || row.source_type || row.key || row.field || row.note || row.action || index}>
               {columns.map((column) => (
                 <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
               ))}
@@ -113,6 +114,12 @@ export default function DataCompletenessPage() {
   const summary = report?.summary || {}
   const outcomeSummary = outcomeReport?.summary || {}
   const aggregations = report?.aggregations || {}
+  const proofCoverage = report?.proof_field_coverage || {}
+  const proofCoverageSummary = proofCoverage?.summary || {}
+  const proofCoverageRows = proofCoverage?.records || []
+  const cleanupPlan = report?.data_cleanup_plan || {}
+  const cleanupSummary = cleanupPlan?.summary || {}
+  const cleanupRows = cleanupPlan?.items || []
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
   const safeNextActions = report?.safe_next_actions || []
@@ -148,7 +155,7 @@ export default function DataCompletenessPage() {
           <MetricCard label="Completion rate" value={formatRatio(summary.completion_rate)} helper={`${summary.complete_records ?? 0} complete of ${summary.total_records ?? 0} records`} />
           <MetricCard label="Rewardability rate" value={formatRatio(summary.rewardability_rate)} helper={`${summary.rewardable_records ?? 0} rewardable records`} />
           <MetricCard label="Incomplete records" value={summary.incomplete_records ?? 0} helper="Visible with exact missing fields" />
-          <MetricCard label="Benchmark readiness" value={summary.benchmark_ready ? 'Ready' : 'Needs data'} helper="Requires rewardable candidates plus benchmark fields" />
+          <MetricCard label="Benchmark readiness" value={summary.benchmark_ready ? 'Ready' : 'Needs data'} helper="Requires rewardable candidates, benchmark fields, and proof-field coverage" />
         </div>
       </SectionCard>
 
@@ -159,6 +166,44 @@ export default function DataCompletenessPage() {
           <MetricCard label="Baseline coverage" value={formatRatio(outcomeSummary.baseline_coverage_rate)} helper="Primary baseline present" />
           <MetricCard label="Execution-cost coverage" value={formatRatio(outcomeSummary.execution_cost_coverage_rate)} helper="Spread, slippage, or paper fill evidence" />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Proof Field Coverage" subtitle="Tracks the specific roadmap fields that block benchmark and walk-forward proof. This does not infer or fabricate missing data.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Proof-field readiness" value={proofCoverageSummary.proof_ready ? 'Ready' : 'Needs data'} helper={`${proofCoverageSummary.ready_requirement_count ?? 0}/${proofCoverageSummary.requirement_count ?? 6} requirements ready`} />
+          <MetricCard label="Average coverage" value={formatRatio(proofCoverageSummary.average_coverage_rate)} helper="Forward returns, baselines, actuals, costs, regimes, and reward fields" />
+        </div>
+        <DataTable
+          rows={proofCoverageRows}
+          empty={loading ? 'Loading proof-field coverage...' : 'No proof-field coverage records are available.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'coverage_rate', label: 'Coverage', render: (row) => formatRatio(row.coverage_rate) },
+            { key: 'missing', label: 'Missing records', render: (row) => row.records_missing_required_fields ?? 0 },
+            { key: 'groups', label: 'Missing proof', render: (row) => Object.keys(row.missing_group_counts || {}).join(', ') || 'None' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Data Cleanup Plan" subtitle="Ordered manual evidence cleanup tasks. This keeps incomplete evidence visible and does not fabricate returns, baselines, costs, or regimes.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Cleanup status" value={humanize(cleanupPlan.status || summary.cleanup_plan_status || 'empty')} helper={`${cleanupSummary.open_item_count ?? summary.cleanup_plan_open_items ?? 0} open cleanup items`} />
+          <MetricCard label="Critical cleanup" value={cleanupSummary.critical_open_items ?? summary.cleanup_plan_critical_open_items ?? 0} helper={cleanupSummary.top_cleanup_item || summary.top_cleanup_item || 'No top cleanup item'} />
+        </div>
+        <DataTable
+          rows={cleanupRows}
+          empty={loading ? 'Loading cleanup plan...' : 'No data cleanup plan is available.'}
+          columns={[
+            { key: 'title', label: 'Cleanup item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'affected_record_count', label: 'Affected records', render: (row) => row.affected_record_count ?? row.proof_missing_record_count ?? 0 },
+            { key: 'missing', label: 'Missing evidence', render: (row) => Object.keys(row.missing_field_counts || {}).join(', ') || Object.keys(row.missing_by_source || {}).join(', ') || 'Source records needed' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Safety Boundary" subtitle="Completeness findings are diagnostics only and never change paper/live trading authority.">
@@ -249,6 +294,8 @@ export default function DataCompletenessPage() {
           ]}
         />
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

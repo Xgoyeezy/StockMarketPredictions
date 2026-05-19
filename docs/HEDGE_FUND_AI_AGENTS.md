@@ -53,6 +53,20 @@ Desk agents:
 
 Desk agents review desk-specific evidence when available and shared research evidence otherwise. They cannot trade, change desk config automatically, bypass central risk review, or mutate ranking weights.
 
+Future market desk agents, not implemented in v1:
+
+- Crypto Agent.
+- Precious Metals Agent.
+- Rates Agent.
+- FX / Dollar Agent.
+- Energy Agent.
+- Index / Market Structure Agent.
+- Sector Rotation Agent.
+- Volatility / Risk Agent.
+- Off-Exchange Liquidity Agent.
+
+Future market desk agents remain context reviewers. They do not create separate market-strategy order bots. Their eventual role is to review market context that can be combined with current strategy desks by a future Candidate Fusion Engine, while risk gates remain authoritative.
+
 ## Input Sources
 
 The input collector prefers existing structured internal summaries:
@@ -292,4 +306,10 @@ Phase 4: Governance-controlled research config changes.
 
 Phase 5: External review for legal, compliance, and security.
 
+Phase 6: Market Specialist Desk agent expansion. Future market agents may read evidence, analyze context, summarize market regimes, challenge assumptions, flag risks, flag missing data, write sanitized research memos, and prepare investment committee summaries.
+
+Phase 7: Market x strategy evidence review. A future AI Committee may review evidence by market context and strategy logic, such as Precious Metals Desk context plus Macro Trend Desk logic, but it must not approve orders, bypass gates, change rankings, or treat incomplete evidence as proof.
+
 These phases are documented only. v1 does not implement automatic config changes or autonomous execution.
+
+Future agents must not place orders, trigger paper orders, trigger live orders, change broker routes, clear kill switches, bypass risk gates, change risk limits, change ranking weights automatically, change strategy configs automatically, change execution configs, approve live trading, mutate immutable forecast records, edit reward inputs after the fact, or fabricate missing data.

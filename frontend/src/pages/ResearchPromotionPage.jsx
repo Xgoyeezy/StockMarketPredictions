@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -28,11 +29,20 @@ function formatRatio(value) {
   return `${(numeric * 100).toFixed(1)}%`
 }
 
+function formatRequirementValue(value, metric = '') {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  const metricName = String(metric || '').toLowerCase()
+  if (metricName.includes('coverage') || metricName.includes('rate')) return formatRatio(value)
+  const numeric = Number(value)
+  if (Number.isFinite(numeric)) return Number.isInteger(numeric) ? String(numeric) : formatNumber(numeric)
+  return humanize(value, '--')
+}
+
 function statusTone(status) {
-  if (status === 'paper_proven') return 'positive'
+  if (status === 'paper_proven' || status === 'passed' || status === 'ready_for_human_review') return 'positive'
   if (status === 'candidate' || status === 'walk_forward_testing') return 'warning'
-  if (status === 'rejected') return 'negative'
-  if (status === 'needs_more_evidence') return 'neutral'
+  if (status === 'rejected' || status === 'blocked') return 'negative'
+  if (status === 'needs_more_evidence' || status === 'needs_evidence') return 'warning'
   return 'neutral'
 }
 
@@ -54,7 +64,7 @@ function DataTable({ columns, rows, empty }) {
         </thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
-            <tr key={row.entity_id || row.criterion || row.note || row.warning || index}>
+            <tr key={row.entity_id || row.key || row.criterion || row.note || row.warning || index}>
               {columns.map((column) => (
                 <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
               ))}
@@ -119,6 +129,14 @@ export default function ResearchPromotionPage() {
   }, [load, manualStatus])
 
   const summary = report?.summary || {}
+  const aggregations = report?.aggregations || {}
+  const proofSummary = report?.proof_summary || aggregations.research_promotion_proof || {}
+  const proofRequirements = proofSummary.requirements || []
+  const recordReadiness = proofSummary.record_readiness || []
+  const cleanupPlan = report?.research_promotion_cleanup_plan || aggregations.research_promotion_cleanup_plan || {}
+  const cleanupItems = cleanupPlan.items || []
+  const cleanupSummary = cleanupPlan.summary || {}
+  const claimPermissions = cleanupSummary.claim_permissions || summary.claim_permissions || {}
   const records = report?.records || []
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
@@ -159,6 +177,73 @@ export default function ResearchPromotionPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title="Research Promotion Proof Gate" subtitle="Human-review gate for status traceability, criteria, benchmark, walk-forward, execution, manual review, and safety boundaries.">
+        <div className="ui-dashboard-grid">
+          <MetricCard
+            label="Proof status"
+            value={humanize(proofSummary.status || summary.promotion_proof_status || 'needs_evidence')}
+            helper={`${summary.promotion_requirements_passed ?? 0}/${summary.promotion_requirements_total ?? 10} requirements passed`}
+          />
+          <MetricCard
+            label="Promotion traceability"
+            value={formatRatio(summary.promotion_traceability_coverage ?? proofSummary.summary?.promotion_traceability_coverage)}
+            helper="Average status, criteria, benchmark, data, walk-forward, and execution coverage"
+          />
+          <MetricCard
+            label="Benchmark linkage"
+            value={formatRatio(summary.benchmark_traceability_coverage ?? proofSummary.summary?.benchmark_traceability_coverage)}
+            helper="Verdict, sample, rewardable count, and baseline-relative evidence"
+          />
+          <MetricCard
+            label="Walk-forward linkage"
+            value={formatRatio(summary.walk_forward_traceability_coverage ?? proofSummary.summary?.walk_forward_traceability_coverage)}
+            helper="Frozen or completed experiment linkage"
+          />
+          <MetricCard
+            label="Execution linkage"
+            value={formatRatio(summary.execution_traceability_coverage ?? proofSummary.summary?.execution_traceability_coverage)}
+            helper="Execution-adjusted reward evidence"
+          />
+          <MetricCard
+            label="Manual review records"
+            value={summary.manual_review_record_count ?? proofSummary.summary?.manual_review_record_count ?? 0}
+            helper="Sanitized review metadata events"
+          />
+        </div>
+        <DataTable
+          rows={proofRequirements}
+          empty={loading ? 'Loading research promotion proof requirements...' : 'No research promotion proof requirements returned.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row.value, row.metric) },
+            { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison || '>='} ${formatRequirementValue(row.threshold, row.metric)}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Research Promotion Cleanup Plan" subtitle="Proof-first governance cleanup for traceability, review metadata, blocked claims, and metadata-only safety. Cleanup items cannot approve live trading or mutate execution, broker, risk, strategy, or ranking configuration.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Cleanup status" value={humanize(cleanupPlan.status || summary.research_promotion_cleanup_status || 'blocked_by_evidence')} helper={`${summary.research_promotion_cleanup_open_items ?? cleanupSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary.research_promotion_cleanup_critical_open_items ?? cleanupSummary.critical_open_items ?? 0} helper={summary.top_cleanup_item || cleanupSummary.top_cleanup_item || 'No top blocker returned'} />
+          <MetricCard label="Internal review" value={claimPermissions.cautious_internal_promotion_review ? 'Allowed' : 'Blocked'} helper="Requires complete traceability and manual review metadata" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Research Promotion never grants trading authority" />
+        </div>
+        <DataTable
+          rows={cleanupItems}
+          empty={loading ? 'Loading research promotion cleanup plan...' : 'No research promotion cleanup plan returned.'}
+          columns={[
+            { key: 'title', label: 'Cleanup item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing_fields', label: 'Missing evidence', render: (row) => (row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => (row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None' },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
       <SectionCard title="Research Entity List" subtitle="Manual changes write sanitized research metadata only. They do not edit strategy, risk, broker, ranking, or execution configs.">
         <DataTable
           rows={records}
@@ -197,6 +282,24 @@ export default function ResearchPromotionPage() {
                 </div>
               ),
             },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Promotion Record Readiness" subtitle="Per-entity proof completeness for human review only; this does not place, route, approve, or configure trades.">
+        <DataTable
+          rows={recordReadiness}
+          empty={loading ? 'Loading promotion record readiness...' : 'No promotion record readiness returned.'}
+          columns={[
+            { key: 'name', label: 'Entity' },
+            { key: 'entity_type', label: 'Type', render: (row) => humanize(row.entity_type) },
+            { key: 'promotion_status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.promotion_status)}>{humanize(row.promotion_status)}</StatusBadge> },
+            { key: 'criteria_traceable', label: 'Criteria', render: (row) => <StatusBadge tone={row.criteria_traceable ? 'positive' : 'warning'}>{row.criteria_traceable ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'benchmark_traceable', label: 'Benchmark', render: (row) => <StatusBadge tone={row.benchmark_traceable ? 'positive' : 'warning'}>{row.benchmark_traceable ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'walk_forward_traceable', label: 'Walk-forward', render: (row) => <StatusBadge tone={row.walk_forward_traceable ? 'positive' : 'warning'}>{row.walk_forward_traceable ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'execution_traceable', label: 'Execution', render: (row) => <StatusBadge tone={row.execution_traceable ? 'positive' : 'warning'}>{row.execution_traceable ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'manual_review_traceable', label: 'Manual review', render: (row) => <StatusBadge tone={row.manual_review_traceable ? 'positive' : 'warning'}>{row.manual_review_traceable ? 'Ready' : 'Missing'}</StatusBadge> },
+            { key: 'safety_boundary_preserved', label: 'Safety', render: (row) => <StatusBadge tone={row.safety_boundary_preserved ? 'positive' : 'negative'}>{row.safety_boundary_preserved ? 'Preserved' : 'Broken'}</StatusBadge> },
           ]}
         />
       </SectionCard>
@@ -249,6 +352,8 @@ export default function ResearchPromotionPage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

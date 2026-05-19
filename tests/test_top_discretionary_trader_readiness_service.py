@@ -81,7 +81,7 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_first_top_discretionary_requirements(self) -> None:
         summary = get_top_discretionary_trader_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 24)
+        self.assertEqual(summary["implemented_requirement_count"], len(TOP_DISCRETIONARY_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], TOP_DISCRETIONARY_REQUIREMENT_EVIDENCE)
         for key in TOP_DISCRETIONARY_FIRST_TEN_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -90,10 +90,17 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
         for key in TOP_DISCRETIONARY_FINAL_FIVE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
         self.assertTrue(summary["read_only"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
         self.assertFalse(summary["can_change_broker_routes"])
         self.assertFalse(summary["can_bypass_risk_gates"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("not proof", summary["claim_boundary"])
 
     def test_same_opportunity_and_post_session_review_contracts(self) -> None:
@@ -153,13 +160,18 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
         self.assertFalse(bypass["shadow_mode_can_bypass_blockers"])
         self.assertFalse(bypass["shadow_mode_can_bypass_risk_gates"])
         self.assertFalse(bypass["shadow_mode_can_clear_kill_switches"])
+        self.assertFalse(bypass["changes_risk_gates"])
+        self.assertFalse(bypass["clears_kill_switch"])
         self.assertEqual(costs["status"], "needs_evidence")
         self.assertIn("fill_assumption", costs["missing_by_record"][1]["missing_fields"])
         self.assertFalse(costs["reward_comparison_changes_execution"])
+        self.assertFalse(costs["changes_execution"])
+        self.assertFalse(costs["changes_order_submission"])
         self.assertEqual(no_orders["status"], "passed")
         self.assertFalse(no_orders["shadow_mode_can_submit_orders"])
         self.assertFalse(no_orders["shadow_mode_can_route_orders"])
         self.assertFalse(no_orders["shadow_mode_can_change_broker_routes"])
+        self.assertFalse(no_orders["changes_broker_routes"])
 
     def test_shadow_governance_ui_and_docs_contracts(self) -> None:
         immutability = validate_closed_outcome_immutability([_record(), _record(record_digest="", immutable_after_outcome_close=False)])
@@ -217,7 +229,7 @@ class TopDiscretionaryTraderReadinessServiceTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "complete" for row in small_fund_rows))
         self.assertTrue(all(row["status"] == "complete" for row in discretionary_rows))
         self.assertTrue(report["documented_scope_coverage"]["all_documented_scope_added"])
-        self.assertEqual(report["documented_scope_coverage"]["complete_count"], 158)
+        self.assertEqual(report["documented_scope_coverage"]["complete_count"], report["documented_scope_coverage"]["requirement_count"])
 
     def test_service_contains_no_execution_broker_risk_ai_or_ranking_mutation_calls(self) -> None:
         source = inspect.getsource(discretionary)

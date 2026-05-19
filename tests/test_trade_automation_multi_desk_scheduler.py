@@ -851,6 +851,53 @@ class TradeAutomationMultiDeskSchedulerTests(unittest.TestCase):
         self.assertIn("daily_ledger", payload["links"])
         self.assertEqual(payload["artifacts"]["written"], True)
 
+    def test_market_watchdog_does_not_report_stale_desks_as_error_when_profile_unarmed(self) -> None:
+        state = trade_automation_service._read_trade_automation_state(self.tenant)
+        state["settings"]["enabled"] = True
+        state["settings"]["armed"] = False
+        state["settings"]["kill_switch"] = False
+        trade_automation_service._write_trade_automation_state(self.tenant, state)
+        self.db.commit()
+
+        active_phase = {
+            "phase": "active_session_monitor",
+            "description": "Active-session monitor",
+            "timezone": "America/New_York",
+            "now_utc": "2026-04-29T16:00:00+00:00",
+            "now_et": "2026-04-29T12:00:00-04:00",
+            "market_day": True,
+            "active_window": True,
+            "next_checkpoint": "15:55 ET stop-new-paper-orders check",
+        }
+        stale_desk_rows = [
+            {"desk_key": "fast_scalper", "stale": True, "due_state": "due_now", "scanned_count": 0},
+            {"desk_key": "stat_arb", "stale": True, "due_state": "due_now", "scanned_count": 0},
+            {"desk_key": "intraday_momentum", "stale": True, "due_state": "due_now", "scanned_count": 0},
+            {"desk_key": "swing_position", "stale": True, "due_state": "due_now", "scanned_count": 0},
+            {"desk_key": "macro", "stale": True, "due_state": "due_now", "scanned_count": 0},
+        ]
+
+        with (
+            patch.object(trade_automation_service, "_market_ops_session_phase", return_value=active_phase),
+            patch.object(trade_automation_service, "_market_ops_desk_sla_rows", return_value=stale_desk_rows),
+            patch.object(
+                trade_automation_service,
+                "_write_market_watchdog_observation",
+                return_value={"written": True, "events_path": "test-events.jsonl", "summary_path": "test-summary.json"},
+            ),
+        ):
+            payload = trade_automation_service.get_tenant_trade_automation_watchdog(
+                self.db,
+                current_user=self.current_user,
+            )
+
+        components = {item["key"]: item for item in payload["components"]}
+        self.assertEqual(components["desk_scans"]["status"], "watching")
+        self.assertIsNone(components["desk_scans"]["blocker"])
+        self.assertIn("not armed", components["desk_scans"]["detail"])
+        self.assertEqual(components["risk_gates"]["status"], "watching")
+        self.assertIsNone(components["risk_gates"]["blocker"])
+
     def test_market_watchdog_blocks_active_stale_worker(self) -> None:
         active_phase = {
             "phase": "active_session_monitor",
@@ -946,6 +993,35 @@ class TradeAutomationMultiDeskSchedulerTests(unittest.TestCase):
         self.assertEqual(components["production_trust"]["status"], "watching")
         self.assertIsNone(components["production_trust"]["blocker"])
         self.assertFalse(payload["can_submit_orders"])
+
+    def test_market_watchdog_warning_detail_is_not_reported_as_top_level_blocker(self) -> None:
+        def component_by_key(market_session, key):
+            if key == "evidence_accelerator":
+                return {
+                    "status": "degraded",
+                    "detail": "1500 useful live observations captured this heartbeat.",
+                    "next_action": "Keep collecting without inflating stale or duplicate evidence.",
+                    "metadata": {},
+                }
+            return {}
+
+        with (
+            patch.object(trade_automation_service, "_market_watchdog_component_by_key", side_effect=component_by_key),
+            patch.object(
+                trade_automation_service,
+                "_write_market_watchdog_observation",
+                return_value={"written": True, "events_path": "test-events.jsonl", "summary_path": "test-summary.json"},
+            ),
+        ):
+            payload = trade_automation_service.get_tenant_trade_automation_watchdog(
+                self.db,
+                current_user=self.current_user,
+            )
+
+        warning = next(item for item in payload["warnings"] if item["key"] == "evidence_accelerator")
+        self.assertEqual(warning["detail"], "1500 useful live observations captured this heartbeat.")
+        self.assertIsNone(warning["blocker"])
+        self.assertNotEqual(payload.get("blocker"), warning["detail"])
 
     def test_desk_scan_state_applies_desk_specific_sizing(self) -> None:
         base_state = trade_automation_service._normalize_trade_automation_profile_state({})

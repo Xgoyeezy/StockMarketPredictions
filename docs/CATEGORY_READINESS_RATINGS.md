@@ -34,11 +34,16 @@ The platform scans equities and ETFs, runs paper-first strategy desks, ranks pap
 - Live-control surfaces may exist, but live submission is not enabled autonomous money management.
 - Broker routes remain unchanged by analytics, forecasts, rewards, benchmarks, or AI review.
 - Risk gates remain authoritative.
+- Market Specialist Desks are context engines, not order bots.
+- AI agents are decision-support analysts, not trading agents.
+- Off-Exchange Liquidity Dashboard is research context, not a trade trigger.
+- Broker-neutral execution planning does not mean becoming a broker.
+- C++ accelerators must not own trading authority.
 - Support and positioning artifacts must not expose secrets, broker records, raw logs, account IDs, raw local paths, credentials, or unsanitized personal data.
 
 ## 10/10 Upgrade Planning References
 
-The full path from current estimated readiness to 10/10 is defined in `docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md`. The concrete checkboxes are in `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`, the near-term sequence is in `docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md`, and rating upgrades are gated by `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`.
+The full path from current estimated readiness to 10/10 is defined in `docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md`. The proof-first feature-freeze and expansion-gate discipline is in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. The concrete checkboxes are in `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md`, the near-term sequence is in `docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md`, and rating upgrades are gated by `docs/TEN_OUT_OF_TEN_PROOF_GATES.md`.
 
 These references preserve the same safety language as this ratings document: ratings are current estimated readiness scores, ratings are not proof of alpha, ratings are not investor performance claims, benchmark proof is required before claiming edge, walk-forward proof is required before claiming repeatability, paper-first safety remains the active execution boundary, reward and forecast analytics are research-only, AI has no order authority, risk gates remain authoritative, broker routes remain unchanged, live-money autonomy is not enabled, and promotion status is research metadata unless separately approved by a future explicit governance framework.
 
@@ -52,6 +57,31 @@ These references preserve the same safety language as this ratings document: rat
 | 4 | Top discretionary trader comparison | 5/10 | Stronger than humans at memory and evidence tracking, but not yet proven against skilled trader judgment on the same opportunity set. |
 | 5 | Institutional quant desk or enterprise control plane | 3/10 | Directionally correct architecture, but institutional data lineage, governance, permissions, and compliance evidence are still missing. |
 | 6 | HFT or elite execution platform | 2/10 | Not the right target; the system is Alpaca-paper-first and evidence-oriented, not direct-market-access execution infrastructure. |
+
+## Future Potential Ratings With Proposed Additions
+
+These estimates include the proposed future roadmap additions. They are future potential estimates, not current implementation ratings. They are not proof of alpha and are not investor performance claims.
+
+The proof-first roadmap discipline means future ratings improve only when proof improves. More desks, agents, dashboards, broker adapters, C++ modules, or HFT research do not raise ratings by themselves.
+
+| Rank | Category | Current estimated readiness | Future potential estimate |
+| ---: | --- | ---: | ---: |
+| 1 | Retail trading bot | 9/10 | 9.2/10 |
+| 2 | Solo systematic trader platform | 7.5/10 | 8.4/10 |
+| 3 | Small prop shop or small fund research stack | 6/10 | 7.2/10 |
+| 4 | Top discretionary trader comparison | 5/10 | 6.8/10 |
+| 5 | Institutional quant desk or enterprise control plane | 3/10 | 4.5/10 |
+| 6 | HFT or elite execution platform | 2/10 | 2.3/10 |
+
+Assumptions:
+
+- Market Specialist Desks are context engines and do not create order bots.
+- The Visual Strategy Evidence Builder creates evidence contracts and does not auto-trade visual signals.
+- AI agents and off-exchange liquidity remain research-only.
+- Broker-neutral execution remains gated and manual until separately approved.
+- Provider upgrades pass free-first and ROI gates.
+- C++ remains a research and analytics accelerator only.
+- No autonomous live-money trading is enabled.
 
 ## Retail Trading Bot: 9/10
 
@@ -226,6 +256,14 @@ Secondary positioning:
 - Forecast validation and decision audit platform.
 - Systematic trader evidence layer.
 - Research-to-risk workflow for serious traders.
+
+Future roadmap positioning, if the backlog is implemented safely and proven:
+
+```text
+Trading evidence and research operating system with AI committee review, market specialist desks, forecast validation, off-exchange liquidity intelligence, and broker-neutral execution planning.
+```
+
+This future positioning still avoids guaranteed returns, proven alpha, AI trading bot, HFT platform, autonomous live-money manager, investment adviser, black-box alpha machine, and institutional-grade platform without proof.
 
 ## Best First Serious Buyer
 

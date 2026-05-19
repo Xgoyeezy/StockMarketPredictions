@@ -9,6 +9,8 @@ from backend.core.responses import envelope
 from backend.schemas import ApiEnvelope, RiskCheckRequest, RiskKillSwitchRequest, RiskPolicyCreateRequest, RiskPolicyUpdateRequest
 from backend.services.productized_control_plane_service import (
     create_risk_policy,
+    get_risk_audit_hardening,
+    get_risk_kill_switch_status,
     get_risk_policy,
     list_risk_events,
     list_risk_policies,
@@ -48,6 +50,16 @@ def post_risk_check(request: RiskCheckRequest, current_user: CurrentUser = Depen
 @router.get("/events", response_model=ApiEnvelope)
 def get_events(limit: int = Query(default=100, ge=1, le=500), current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> ApiEnvelope:
     return envelope(list_risk_events(db, current_user=current_user, limit=limit))
+
+
+@router.get("/kill-switch", response_model=ApiEnvelope)
+def get_kill_switch(strategy_id: str | None = Query(default=None), current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> ApiEnvelope:
+    return envelope(get_risk_kill_switch_status(db, current_user=current_user, strategy_id=strategy_id))
+
+
+@router.get("/audit-hardening", response_model=ApiEnvelope)
+def get_audit_hardening(limit: int = Query(default=100, ge=1, le=500), current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> ApiEnvelope:
+    return envelope(get_risk_audit_hardening(db, current_user=current_user, limit=limit))
 
 
 @router.post("/kill-switch", response_model=ApiEnvelope)

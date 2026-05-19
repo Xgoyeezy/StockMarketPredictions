@@ -14,6 +14,8 @@ Human decisions must be recorded before the outcome window closes. Closed outcom
 
 Methodology outputs are readiness evidence only. They are not proof that the system beats skilled human traders, not investor performance claims, and not live-trading approval.
 
+Rows marked as simulation evidence are excluded from Shadow Mode comparisons so simulated evidence remains separate from real-time market-observed human and system evidence.
+
 ## Safety Boundary
 
 Shadow Mode does not:
@@ -144,6 +146,78 @@ The summary computes:
 - missed winner comparison
 - bias diagnostics
 
+## Shadow Mode Proof Gate
+
+The report includes `proof_summary` and `aggregations.shadow_proof` to separate "shadow mode has records" from "same-opportunity evidence is complete enough for a human-vs-system comparison claim."
+
+The proof gate checks:
+
+- same-opportunity sample size
+- same-opportunity candidate, system prediction, and horizon linkage
+- complete human thesis contract
+- complete system forecast contract
+- complete outcome contract
+- cost and risk context
+- decision quality metrics for both sides
+- system after-cost decision-quality delta
+- pre-outcome human thesis capture
+- shadow-mode safety boundary
+
+The summary exposes:
+
+- `shadow_proof_ready`
+- `shadow_proof_status`
+- `shadow_requirements_passed`
+- `shadow_requirements_total`
+- `same_opportunity_coverage`
+- `human_contract_coverage`
+- `system_contract_coverage`
+- `outcome_coverage`
+- `cost_risk_context_coverage`
+- `pre_outcome_capture_coverage`
+- `system_decision_quality_delta`
+
+`proof_ready: true` means the comparison is ready for human review. It does not prove alpha, guarantee returns, approve trading, authorize live execution, or certify that the system beats skilled discretionary traders outside the measured sample.
+
+## Human vs System Validation Plan
+
+The report also includes `shadow_validation_plan` and `aggregations.shadow_validation_plan`.
+
+This is the proof-first backlog layer for Shadow Mode. It turns the proof gate into explicit validation items so the system shows what must be fixed before any human-vs-system comparison claim is allowed.
+
+Validation items:
+
+- same-opportunity sample
+- decision linkage
+- human thesis contract
+- system forecast contract
+- outcome contract
+- cost and risk context
+- decision quality metrics
+- shadow safety governance
+
+The summary exposes:
+
+- `shadow_validation_status`
+- `shadow_validation_open_items`
+- `shadow_validation_critical_open_items`
+- `top_validation_item`
+- `claim_permissions`
+
+Claim permissions remain conservative:
+
+- `cautious_internal_shadow_review` may become true only when the proof gate is ready.
+- `system_beats_human_claim` remains false.
+- `human_override_quality_claim` remains false.
+- `public_alpha_claim` remains false.
+- `automatic_ranking_mutation` remains false.
+- `paper_to_live_readiness` remains false.
+- `live_trading_readiness` remains false.
+
+Blocked claims include system-beats-human claims, human override quality claims, public alpha claims, repeatability claims, paper-to-live readiness, and live-trading readiness.
+
+The validation plan is research metadata only. It does not place orders, trigger paper orders, trigger live orders, change broker routes, clear kill switches, bypass risk gates, change ranking weights, or approve live trading.
+
 ## Override Quality Definitions
 
 An override is a same-opportunity record where the human direction differs from the system direction. Override quality is evaluated after costs and risk context, using:
@@ -190,6 +264,7 @@ Open:
 - `/shadow-mode`
 
 The page shows the research-only boundary, a human thesis form, human-vs-system summary, comparison rows, direction accuracy, reward comparison, target/invalidation comparisons, missed-winner comparison, bias diagnostics, and missing data warnings.
+It also shows the Shadow Mode Proof Gate, Human vs System Validation Plan, and per-record readiness for same-opportunity comparison proof.
 
 ## Test Commands
 
@@ -207,6 +282,7 @@ Run the frontend build from `frontend/`.
 - It does not fabricate forward returns or baselines.
 - System matching is simple: linked candidate first, symbol fallback second.
 - Bias diagnostics are heuristic review labels, not formal psychology or execution advice.
+- Shadow proof readiness requires same-opportunity records with outcomes, costs, risk context, and pre-outcome timestamps.
 - Shadow results do not trigger trades or automatic ranking changes.
 
 ## Candidate Outcome Source

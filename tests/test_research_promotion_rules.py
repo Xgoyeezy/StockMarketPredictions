@@ -13,6 +13,7 @@ from backend.services import research_promotion_rules as rules
 from backend.services.exceptions import ValidationServiceError
 from backend.services.research_promotion_rules import (
     build_research_promotion_report,
+    build_research_promotion_cleanup_plan,
     get_research_promotion_entity,
     update_research_promotion_status,
 )
@@ -143,6 +144,11 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         self.assertTrue(report["research_only"])
         self.assertFalse(report["can_submit_orders"])
         self.assertFalse(report["can_submit_live_orders"])
+        self.assertFalse(report["can_change_broker_routes"])
+        self.assertFalse(report["can_bypass_risk_gates"])
+        self.assertFalse(report["can_clear_kill_switch"])
+        self.assertFalse(report["can_change_ranking_weights"])
+        self.assertFalse(report["can_grant_ai_order_authority"])
 
     def test_candidate_status(self) -> None:
         report = build_research_promotion_report(
@@ -178,6 +184,138 @@ class ResearchPromotionRulesTests(unittest.TestCase):
         strategy = _first_strategy(report)
         self.assertEqual(strategy["promotion_status"], "paper_proven")
         self.assertIn("not live approval", strategy["safe_explanation"].lower())
+
+    def test_proof_summary_blocks_when_manual_review_trace_is_missing(self) -> None:
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses={},
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        proof = report["proof_summary"]
+        summary = proof["summary"]
+
+        self.assertFalse(proof["proof_ready"])
+        self.assertEqual(proof["status"], "needs_evidence")
+        self.assertEqual(summary["manual_review_record_count"], 0)
+        self.assertIn("Research promotion proof requirements are incomplete.", report["warnings"])
+        self.assertFalse(report["can_submit_orders"])
+        self.assertFalse(report["writes_execution_config"])
+        failed = {row["key"] for row in proof["requirements"] if not row["passed"]}
+        self.assertIn("manual_review_traceability", failed)
+        self.assertFalse(any(row["changes_execution"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_broker_routes"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_gates"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_risk_limits"] for row in proof["requirements"]))
+        self.assertFalse(any(row["changes_ranking_weights"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_change_broker_routes"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_bypass_risk_gates"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_change_ranking_weights"] for row in proof["requirements"]))
+        self.assertFalse(any(row["can_grant_ai_order_authority"] for row in proof["requirements"]))
+        for action in proof["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_risk_limits"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
+
+    def test_proof_summary_ready_with_traceable_evidence_and_manual_review(self) -> None:
+        manual_statuses = {
+            "strategy:quant_evidence_os": {
+                "entity_id": "strategy:quant_evidence_os",
+                "promotion_status": "paper_proven",
+                "reason": "Fixture human review.",
+                "updated_at": "2026-05-06T00:00:00Z",
+                "updated_by": "tester",
+                "previous_promotion_status": "walk_forward_testing",
+                "computed_promotion_status": "paper_proven",
+                "evidence_snapshot": {"benchmark_verdict": "edge_detected", "walk_forward_verdict": "weak_pass"},
+                "research_only": True,
+            }
+        }
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses=manual_statuses,
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        proof = report["proof_summary"]
+        self.assertTrue(proof["proof_ready"])
+        self.assertEqual(report["summary"]["promotion_proof_status"], "ready_for_human_review")
+        self.assertEqual(report["summary"]["promotion_requirements_passed"], report["summary"]["promotion_requirements_total"])
+        self.assertGreaterEqual(report["summary"]["promotion_traceability_coverage"], 0.8)
+        self.assertEqual(report["aggregations"]["research_promotion_proof"]["proof_ready"], True)
+        self.assertEqual(report["research_promotion_cleanup_plan"]["status"], "ready_for_human_review")
+        self.assertTrue(report["summary"]["claim_permissions"]["cautious_internal_promotion_review"])
+        self.assertFalse(report["summary"]["claim_permissions"]["automatic_strategy_promotion"])
+        self.assertFalse(report["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(any(row["manual_review_traceable"] for row in proof["record_readiness"]))
+        for row in proof["record_readiness"]:
+            self.assertFalse(row["changes_execution"])
+            self.assertFalse(row["changes_order_submission"])
+            self.assertFalse(row["changes_broker_routes"])
+            self.assertFalse(row["changes_risk_gates"])
+            self.assertFalse(row["changes_risk_limits"])
+            self.assertFalse(row["changes_ranking_weights"])
+            self.assertFalse(row["can_change_broker_routes"])
+            self.assertFalse(row["can_bypass_risk_gates"])
+            self.assertFalse(row["can_change_ranking_weights"])
+            self.assertFalse(row["can_grant_ai_order_authority"])
+
+    def test_cleanup_plan_blocks_governance_and_mutation_claims_when_proof_is_missing(self) -> None:
+        report = build_research_promotion_report(
+            benchmark_report=_benchmark(edge=0.24, lift=0.11, slippage_adjusted_reward=0.14),
+            completeness_report=_completeness(),
+            walk_forward_report=_walk_forward(frozen=True, passed=True),
+            manual_statuses={},
+            generated_at="2026-05-06T00:00:00Z",
+        )
+        plan = build_research_promotion_cleanup_plan(entities=report["records"], proof_summary=report["proof_summary"])
+        by_key = {row["key"]: row for row in plan["items"]}
+
+        self.assertEqual(plan["status"], "blocked_by_evidence")
+        self.assertEqual(report["summary"]["research_promotion_cleanup_status"], "blocked_by_evidence")
+        self.assertIn("manual_review_metadata", by_key)
+        self.assertIn("small_fund_governance_claim", plan["summary"]["blocked_claims"])
+        self.assertIn("live_trading_readiness", plan["summary"]["blocked_claims"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["automatic_strategy_promotion"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["ranking_weight_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["risk_limit_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["broker_route_change"])
+        self.assertFalse(plan["summary"]["claim_permissions"]["live_trading_readiness"])
+        self.assertTrue(all(item["manual_review_only"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_order_submission"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_risk_limits"] for item in plan["items"]))
+        self.assertFalse(any(item["changes_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["clears_kill_switch"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_broker_routes"] for item in plan["items"]))
+        self.assertFalse(any(item["can_bypass_risk_gates"] for item in plan["items"]))
+        self.assertFalse(any(item["can_change_ranking_weights"] for item in plan["items"]))
+        self.assertFalse(any(item["can_grant_ai_order_authority"] for item in plan["items"]))
+        for action in plan["safe_next_actions"]:
+            self.assertFalse(action["changes_execution"])
+            self.assertFalse(action["changes_order_submission"])
+            self.assertFalse(action["changes_broker_routes"])
+            self.assertFalse(action["changes_risk_gates"])
+            self.assertFalse(action["changes_risk_limits"])
+            self.assertFalse(action["changes_ranking_weights"])
+            self.assertFalse(action["clears_kill_switch"])
+            self.assertFalse(action["can_change_broker_routes"])
+            self.assertFalse(action["can_bypass_risk_gates"])
+            self.assertFalse(action["can_change_ranking_weights"])
+            self.assertFalse(action["can_grant_ai_order_authority"])
 
     def test_rejected_status(self) -> None:
         report = build_research_promotion_report(
@@ -221,6 +359,10 @@ class ResearchPromotionRulesTests(unittest.TestCase):
             self.assertEqual(entity["manual_status"]["reason"], "Manual research hold.")
             self.assertTrue(entity["manual_status"]["research_only"])
             self.assertFalse(entity["manual_status"]["writes_execution_config"])
+            self.assertEqual(entity["manual_status"]["previous_promotion_status"], "candidate")
+            self.assertIn("approval_trace_id", entity["manual_status"])
+            self.assertIn("evidence_snapshot", entity["manual_status"])
+            self.assertEqual(entity["manual_status"]["evidence_snapshot"]["benchmark_verdict"], "edge_detected")
 
     def test_invalid_manual_status_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,7 +411,16 @@ class ResearchPromotionRulesTests(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     data = payload["data"]
                     self.assertTrue(data["research_only"])
+                    self.assertFalse(data["can_submit_orders"])
+                    self.assertFalse(data["can_submit_live_orders"])
+                    self.assertFalse(data["can_change_broker_routes"])
+                    self.assertFalse(data["can_bypass_risk_gates"])
+                    self.assertFalse(data["can_clear_kill_switch"])
+                    self.assertFalse(data["can_change_ranking_weights"])
+                    self.assertFalse(data["can_grant_ai_order_authority"])
                     self.assertIn("summary", data)
+                    self.assertIn("research_promotion_cleanup_plan", data)
+                    self.assertIn("claim_permissions", data["summary"])
                     self.assertIn("warnings", data)
                     self.assertIn("safety_notes", data)
                     self.assertIn("Does not place orders.", data["safety_notes"])

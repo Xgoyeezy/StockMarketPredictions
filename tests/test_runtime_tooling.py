@@ -27,6 +27,15 @@ from scripts.validate_staging_env import validate_env
 
 
 class RuntimeToolingTests(unittest.TestCase):
+    def test_local_startup_keeps_job_worker_ready_without_trade_worker(self) -> None:
+        script = Path("scripts/start-local-app.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('Set-DefaultEnv -Name "JOB_WORKER_ENABLED" -Value "true"', script)
+        self.assertIn('Set-DefaultEnv -Name "TRADE_AUTOMATION_WORKER_ENABLED" -Value "false"', script)
+        self.assertIn('$readyzUrl = "$ApiBaseUrl/api/readyz"', script)
+        self.assertIn("$result.backend.readyz.ok", script)
+        self.assertIn("[int]$BackendWaitSeconds = 90", script)
+
     def test_runtime_name_for_local_and_staging_env_files(self) -> None:
         self.assertEqual(runtime_name_for_env_file(Path(".env")), "local-api")
         self.assertEqual(runtime_name_for_env_file(Path(".env.staging")), "staging-api")

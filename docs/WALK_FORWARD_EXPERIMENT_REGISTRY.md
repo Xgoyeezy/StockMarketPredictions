@@ -125,6 +125,48 @@ Experiment metrics include:
 
 These metrics are copied from research reports and benchmark snapshots. They do not update live or paper execution policy.
 
+## Walk-Forward Proof Gate
+
+The registry now emits a read-only `proof_summary` on summary, list, get, create, freeze, and clone responses. This proof gate is for human research review only and is not proof of alpha, guaranteed returns, investor performance, institutional readiness, HFT capability, or live-trading readiness.
+
+Proof requirements:
+
+- Frozen snapshot exists: at least one experiment is frozen or locked before repeatability review.
+- No-lookahead windows: train, validation, test, and paper-forward windows are complete and chronological.
+- Version snapshot complete: ranking, reward, forecast, baseline, feature, universe, data-source, code-version, and parameter digest fields are present.
+- Out-of-sample result captured: at least one frozen experiment has a pass, weak-pass, or fail verdict.
+- Walk-forward pass rate: passed experiments meet the configured v1 pass-rate threshold.
+- After-cost support: at least one evaluated experiment includes execution-adjusted reward evidence.
+
+The `proof_summary` includes:
+
+- `status`
+- `proof_ready`
+- `requirements`
+- `record_readiness`
+- `summary`
+- `safe_next_actions`
+- safety notes and mutation flags
+
+Every requirement row includes flags showing it does not change execution, broker routes, risk gates, or ranking weights.
+
+## Walk-Forward Validation Plan
+
+The registry also emits `walk_forward_validation_plan`, a proof-first work queue for turning empty or weak experiment state into repeatability-ready evidence.
+
+The validation plan tracks:
+
+- create and freeze an experiment snapshot
+- chronological no-lookahead windows
+- complete version snapshots
+- out-of-sample result capture
+- after-cost support
+- walk-forward pass-rate threshold
+
+Each item reports priority, status, linked proof keys, missing evidence fields, blocked claims, a safe next action, and a `done_when` condition. The plan also returns `claim_permissions` so the UI can show that public repeatability, public alpha, institutional readiness, live-trading readiness, and guaranteed-return claims remain blocked.
+
+Validation plan items are internal research gates only. They do not create experiments automatically, fabricate outcomes, authorize orders, change broker routes, bypass risk gates, clear kill switches, alter ranking weights, or approve live trading.
+
 ## API Endpoints
 
 Endpoints:
@@ -154,6 +196,8 @@ The page shows:
 
 - experiment list
 - status
+- walk-forward proof gate
+- record readiness
 - frozen parameter summary
 - date windows
 - sample size

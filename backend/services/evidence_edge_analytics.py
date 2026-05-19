@@ -10,6 +10,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from backend import stock_direction_model as sdm
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -17,6 +18,11 @@ SAFETY_FLAGS: dict[str, Any] = {
     "paper_route_only": True,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
+    "can_change_broker_routes": False,
+    "can_bypass_risk_gates": False,
+    "can_clear_kill_switch": False,
+    "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "none",
 }
 
@@ -313,7 +319,11 @@ def _index_trade_rows(frames: Iterable[pd.DataFrame]) -> tuple[dict[str, dict[st
 
 
 def _normalize_candidate_row(payload: dict[str, Any], trade_by_candidate: dict[str, dict[str, Any]]) -> EvidenceRecord | None:
-    if _safe_bool(payload.get("simulation_evidence")) or str(payload.get("source") or "").lower() == "simulation_evidence":
+    if (
+        _safe_bool(payload.get("simulation_evidence"))
+        or str(payload.get("source") or "").lower() == "simulation_evidence"
+        or str(payload.get("evidence_pool") or "").lower() == "simulation_evidence"
+    ):
         return None
     symbol = _clean_text(payload.get("ticker") or payload.get("symbol"))
     if symbol:
@@ -773,6 +783,7 @@ def build_evidence_edge_report(
             "top_negative_features": negative_features,
             "recommended_ranking_adjustments": recommendations,
             "candidate_rows": _records_to_rows(records[:250]),
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_edge"),
             **SAFETY_FLAGS,
         }
     )
@@ -787,6 +798,7 @@ def get_evidence_edge_blockers(db: Any = None, *, current_user: Any) -> dict[str
     return {
         "summary": report["summary"],
         "items": report["blocker_effectiveness"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_blockers"),
         **SAFETY_FLAGS,
     }
 
@@ -797,6 +809,7 @@ def get_evidence_edge_setups(db: Any = None, *, current_user: Any) -> dict[str, 
         "summary": report["summary"],
         "items": report["setup_forward_return_stats"],
         "score_bucket_outcomes": report["score_bucket_outcomes"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_setups"),
         **SAFETY_FLAGS,
     }
 
@@ -807,6 +820,7 @@ def get_evidence_edge_engines(db: Any = None, *, current_user: Any) -> dict[str,
         "summary": report["summary"],
         "items": report["engine_forward_return_stats"],
         "regime_forward_return_stats": report["regime_forward_return_stats"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_engines"),
         **SAFETY_FLAGS,
     }
 
@@ -818,5 +832,6 @@ def get_evidence_edge_recommendations(db: Any = None, *, current_user: Any) -> d
         "items": report["recommended_ranking_adjustments"],
         "top_positive_features": report["top_positive_features"],
         "top_negative_features": report["top_negative_features"],
+        "finish_tracker": report.get("finish_tracker") or build_project_finish_tracker(report_name="evidence_edge_recommendations"),
         **SAFETY_FLAGS,
     }

@@ -89,6 +89,33 @@ forecast_total_reward =
 
 Visual similarity and vague labels are not rewarded. A label like `bullish chart` is incomplete evidence unless it is attached to a timestamped contract such as: `VWAP reclaim predicts +0.6% within 60 minutes, invalid below VWAP, confidence 0.72`.
 
+### Forecast Validation Hardening Plan
+
+Forecast Validation now exposes a proof-first hardening plan in `forecast_validation_hardening_plan` and `aggregations.forecast_validation_hardening_plan`. The plan is a read-only evidence checklist, not a trading feature.
+
+The hardening plan tracks:
+
+- Forecast contract sample coverage.
+- Complete forecast contracts.
+- Actual post-prediction path coverage.
+- Target and invalidation metrics.
+- Confidence calibration and regime context.
+- Immutable validation boundaries.
+- Research-only safety boundaries.
+
+The summary fields include `forecast_hardening_status`, `forecast_hardening_open_items`, `forecast_hardening_critical_open_items`, `top_hardening_item`, and `claim_permissions`.
+
+The default claim permissions are conservative:
+
+- Cautious internal forecast review can be allowed only when evaluated forward paths exist.
+- Forecast accuracy claims remain blocked.
+- Benchmark forecast-support claims remain blocked.
+- Automatic ranking mutation remains blocked.
+- Paper-to-live readiness remains blocked.
+- Live-trading readiness remains blocked.
+
+The hardening plan may report missing contracts, missing actual paths, missing target/invalidation metrics, missing calibration context, and blocked claims. It does not mutate immutable forecast records, submit orders, trigger paper or live orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, or change ranking weights.
+
 ## Evidence Sources
 
 Evidence Reward and related reports reuse current artifacts instead of adding a new database:

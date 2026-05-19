@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -24,6 +25,13 @@ function humanize(value, fallback = 'Unknown') {
   const text = String(value || '').trim()
   if (!text) return fallback
   return text.replace(/[_-]+/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function statusTone(status) {
+  if (status === 'ready' || status === 'ready_for_human_review' || status === 'passed') return 'positive'
+  if (status === 'blocked_by_evidence' || status === 'needs_evidence' || status === 'no_rewardable_predictions') return 'warning'
+  if (status === 'failed' || status === 'error') return 'negative'
+  return 'neutral'
 }
 
 function DataTable({ columns, rows, empty }) {
@@ -99,7 +107,12 @@ export default function EvidenceRewardPage() {
   }, [load])
 
   const summary = report?.summary || {}
+  const aggregations = report?.aggregations || {}
   const contractSummary = summary.prediction_contract_summary || {}
+  const cleanupPlan = report?.evidence_reward_cleanup_plan || aggregations.evidence_reward_cleanup_plan || {}
+  const cleanupSummary = cleanupPlan.summary || {}
+  const cleanupItems = cleanupPlan.items || []
+  const claimPermissions = cleanupSummary.claim_permissions || summary.claim_permissions || {}
   const safetyNotes = report?.safety_notes || []
   const warnings = report?.warnings || []
   const recommendations = report?.safe_recommendations || []
@@ -144,6 +157,27 @@ export default function EvidenceRewardPage() {
         <MetricCard label="Incomplete evidence" value={summary.non_rewardable_count ?? summary.incomplete_prediction_count ?? 0} helper="Visible but not rewarded" />
         <MetricCard label="Baseline missing" value={summary.baseline_missing_count ?? 0} helper={summary.next_action || 'Waiting for baseline outcome evidence'} />
       </div>
+
+      <SectionCard title="Evidence Reward Cleanup Plan" subtitle="Proof-first cleanup for rewardability, blocker value, after-cost context, simulation separation, and manual ranking-review boundaries. Cleanup items cannot trade or mutate ranking weights.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Cleanup status" value={humanize(cleanupPlan.status || summary.reward_cleanup_status || 'blocked_by_evidence')} helper={`${summary.reward_cleanup_open_items ?? cleanupSummary.open_item_count ?? 0} open items`} />
+          <MetricCard label="Critical blockers" value={summary.reward_cleanup_critical_open_items ?? cleanupSummary.critical_open_items ?? 0} helper={summary.top_cleanup_item || cleanupSummary.top_cleanup_item || 'No top blocker returned'} />
+          <MetricCard label="Reward review" value={claimPermissions.cautious_internal_reward_review ? 'Allowed' : 'Blocked'} helper="Requires rewardable prediction contracts" />
+          <MetricCard label="Live readiness" value={claimPermissions.live_trading_readiness ? 'Allowed' : 'Blocked'} helper="Evidence Reward never grants trading authority" />
+        </div>
+        <DataTable
+          empty={loading ? 'Loading Evidence Reward cleanup plan...' : 'No Evidence Reward cleanup plan returned.'}
+          rows={cleanupItems}
+          columns={[
+            { key: 'title', label: 'Cleanup item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing_fields', label: 'Missing evidence', render: (row) => (row.missing_fields || []).slice(0, 4).map((field) => humanize(field)).join(', ') || 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => (row.blocked_claims || []).slice(0, 3).map((claim) => humanize(claim)).join(', ') || 'None' },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
 
       <SectionCard title="Safety Boundary" subtitle="These analytics are manual research output only.">
         <div className="ui-dashboard-grid">
@@ -299,6 +333,8 @@ export default function EvidenceRewardPage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

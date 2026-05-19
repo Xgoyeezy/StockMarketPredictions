@@ -39,6 +39,7 @@ def _report() -> dict:
         "can_bypass_risk_gates": False,
         "can_clear_kill_switch": False,
         "can_change_ranking_weights": False,
+        "can_grant_ai_order_authority": False,
         "mutation": "none",
     }
 
@@ -61,6 +62,7 @@ class CategoryUpgradeReadinessApiTests(unittest.TestCase):
                 self.assertFalse(data["can_bypass_risk_gates"])
                 self.assertFalse(data["can_clear_kill_switch"])
                 self.assertFalse(data["can_change_ranking_weights"])
+                self.assertFalse(data["can_grant_ai_order_authority"])
 
     def test_category_upgrade_proof_chain_returns_read_only_records(self) -> None:
         with patch("backend.routers.readiness.get_category_upgrade_readiness_summary", return_value=_report()):
@@ -93,6 +95,7 @@ class CategoryUpgradeReadinessApiTests(unittest.TestCase):
             "can_bypass_risk_gates": False,
             "can_clear_kill_switch": False,
             "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
             "mutation": "none",
         }
         with (

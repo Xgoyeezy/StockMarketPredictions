@@ -31,6 +31,7 @@ def _report_safety_fields(report: dict) -> dict:
         "can_bypass_risk_gates": bool(report.get("can_bypass_risk_gates", False)),
         "can_clear_kill_switch": bool(report.get("can_clear_kill_switch", False)),
         "can_change_ranking_weights": bool(report.get("can_change_ranking_weights", False)),
+        "can_grant_ai_order_authority": bool(report.get("can_grant_ai_order_authority", False)),
         "mutation": report.get("mutation", "none"),
         "safety_notes": list(report.get("safety_notes") or []),
     }
@@ -65,6 +66,7 @@ def get_category_upgrade_proof_gates(
             },
             "records": gates,
             "claims_to_avoid": list(report.get("claims_to_avoid") or []),
+            "finish_tracker": report.get("finish_tracker"),
             **_report_safety_fields(report),
         }
     )
@@ -98,6 +100,7 @@ def get_category_upgrade_backlog(
                 "highest_priority_build": (report.get("summary") or {}).get("highest_priority_build"),
             },
             "records": backlog,
+            "finish_tracker": report.get("finish_tracker"),
             **_report_safety_fields(report),
         }
     )

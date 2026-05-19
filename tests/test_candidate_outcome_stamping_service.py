@@ -172,6 +172,65 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             self.assertEqual(len({row["idempotency_key"] for row in outcome_rows}), len(outcome_rows))
             self.assertEqual(lifecycle_path.read_text(encoding="utf-8"), before)
 
+    def test_unavailable_diagnostic_is_not_rewritten_until_evidence_improves(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lifecycle_path = root / "runtime-exports" / "candidate-lifecycle" / "2026-05-05" / "test-tenant.jsonl"
+            self._write_jsonl(lifecycle_path, [self._candidate()])
+
+            first = stamp_due_candidate_outcomes(
+                tenant_slug="test-tenant",
+                root=root,
+                now=datetime(2026, 5, 5, 15, 0, tzinfo=timezone.utc),
+            )
+            second = stamp_due_candidate_outcomes(
+                tenant_slug="test-tenant",
+                root=root,
+                now=datetime(2026, 5, 5, 15, 0, tzinfo=timezone.utc),
+            )
+            outcome_rows = load_outcome_rows(root, "test-tenant")
+
+            self.assertEqual(first["summary"]["available_count"], 0)
+            self.assertEqual(first["summary"]["written_count"], 3)
+            self.assertEqual(second["summary"]["written_count"], 0)
+            self.assertEqual(second["summary"]["skipped_unavailable_duplicate_count"], 3)
+            self.assertEqual(len(outcome_rows), 3)
+
+    def test_unavailable_diagnostic_does_not_block_later_available_stamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_jsonl(root / "runtime-exports" / "candidate-lifecycle" / "2026-05-05" / "test-tenant.jsonl", self._fixture_rows())
+            unavailable = {
+                "candidate_lifecycle_id": "cand-main",
+                "horizon_minutes": 15,
+                "available": False,
+                "actual_forward_return": None,
+                "baseline_forward_return": None,
+                "missing_fields": ["actual_forward_return", "baseline_forward_return"],
+                "idempotency_key": "cand-main|15|candidate_outcome_baseline_v1",
+                "generated_at": "2026-05-05T14:20:00+00:00",
+            }
+            self._write_jsonl(root / "runtime-exports" / "candidate-outcomes" / "2026-05-05" / "test-tenant.jsonl", [unavailable])
+
+            report = stamp_due_candidate_outcomes(
+                tenant_slug="test-tenant",
+                root=root,
+                now=datetime(2026, 5, 5, 15, 0, tzinfo=timezone.utc),
+            )
+            outcome_rows = load_outcome_rows(root, "test-tenant")
+            available_rows = [
+                row
+                for row in outcome_rows
+                if row.get("candidate_lifecycle_id") == "cand-main"
+                and row.get("horizon_minutes") == 15
+                and row.get("available")
+            ]
+
+            self.assertGreaterEqual(report["summary"]["superseded_unavailable_count"], 1)
+            self.assertTrue(available_rows)
+            self.assertEqual(available_rows[-1]["actual_forward_return"], 1.5)
+            self.assertIsNotNone(available_rows[-1]["baseline_forward_return"])
+
     def test_simulation_evidence_is_ignored_for_real_time_observed_rewardability(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -236,8 +295,25 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
 
             self.assertTrue(report["research_only"])
             self.assertTrue(report["paper_only"])
+            self.assertFalse(report["changes_execution"])
+            self.assertFalse(report["changes_order_submission"])
+            self.assertFalse(report["changes_broker_routes"])
+            self.assertFalse(report["changes_risk_gates"])
+            self.assertFalse(report["clears_kill_switch"])
+            self.assertFalse(report["changes_ranking_weights"])
             self.assertFalse(report["can_submit_orders"])
             self.assertFalse(report["can_submit_live_orders"])
+            self.assertFalse(report["can_change_broker_routes"])
+            self.assertFalse(report["can_bypass_risk_gates"])
+            self.assertFalse(report["can_clear_kill_switch"])
+            self.assertFalse(report["can_change_ranking_weights"])
+            self.assertFalse(report["can_grant_ai_order_authority"])
+            self.assertFalse(report["summary"]["changes_execution"])
+            self.assertFalse(report["summary"]["changes_order_submission"])
+            self.assertFalse(report["summary"]["changes_broker_routes"])
+            self.assertFalse(report["summary"]["changes_risk_gates"])
+            self.assertFalse(report["summary"]["clears_kill_switch"])
+            self.assertFalse(report["summary"]["changes_ranking_weights"])
             self.assertIn("summary", report)
             self.assertIn("records", report)
             self.assertIn("aggregations", report)
@@ -250,6 +326,12 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             "generated_at": "2026-05-05T15:00:00+00:00",
             "research_only": True,
             "paper_only": True,
+            "changes_execution": False,
+            "changes_order_submission": False,
+            "changes_broker_routes": False,
+            "changes_risk_gates": False,
+            "clears_kill_switch": False,
+            "changes_ranking_weights": False,
             "summary": {},
             "records": [],
             "aggregations": {},
@@ -258,6 +340,11 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
             "safety_notes": ["Research only. Does not affect trading."],
             "can_submit_orders": False,
             "can_submit_live_orders": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_clear_kill_switch": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
         }
         with (
             patch("backend.routers.evidence_outcomes.cached_research_report", side_effect=lambda **kwargs: kwargs["builder"]()),
@@ -277,8 +364,19 @@ class CandidateOutcomeStampingServiceTests(unittest.TestCase):
                 data = response.json()["data"]
                 self.assertTrue(data["research_only"])
                 self.assertTrue(data["paper_only"])
+                self.assertFalse(data["changes_execution"])
+                self.assertFalse(data["changes_order_submission"])
+                self.assertFalse(data["changes_broker_routes"])
+                self.assertFalse(data["changes_risk_gates"])
+                self.assertFalse(data["clears_kill_switch"])
+                self.assertFalse(data["changes_ranking_weights"])
                 self.assertFalse(data["can_submit_orders"])
                 self.assertFalse(data["can_submit_live_orders"])
+                self.assertFalse(data["can_change_broker_routes"])
+                self.assertFalse(data["can_bypass_risk_gates"])
+                self.assertFalse(data["can_clear_kill_switch"])
+                self.assertFalse(data["can_change_ranking_weights"])
+                self.assertFalse(data["can_grant_ai_order_authority"])
                 self.assertIn("summary", data)
                 self.assertIn("records", data)
                 self.assertIn("warnings", data)

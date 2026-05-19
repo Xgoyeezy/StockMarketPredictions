@@ -4,6 +4,8 @@ This plan sequences the work needed to move Quant Evidence OS categories toward 
 
 Ratings are current estimated readiness scores. They are not proof of alpha and are not investor performance claims. Benchmark proof is required before claiming edge. Walk-forward proof is required before claiming repeatability. Paper-first safety remains the active execution boundary. Reward and forecast analytics are research-only. AI has no order authority. Risk gates remain authoritative. Broker routes remain unchanged. Live-money autonomy is not enabled. Promotion status is research metadata unless separately approved by a future explicit governance framework.
 
+Proof-first roadmap discipline is defined in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. Ambition is allowed, but proof decides priority. This 30-60-90 plan must protect the current foundation before any expansion layer moves into active work.
+
 ## Current Category Baseline
 
 | Category | Current estimated readiness | Main 90-day target |
@@ -278,13 +280,24 @@ Replan the 30-60-90 sequence if any of these occur:
 
 ## Highest Priority Build
 
-The highest priority build is the proof chain for the solo systematic trader category:
+The highest priority build is the proof chain for the solo systematic trader category. Use this proof-first near-term order:
 
-1. Safety verification.
-2. Data Completeness.
-3. Professional Benchmark.
-4. Walk-Forward.
-5. Score Calibration and Feature Attribution.
-6. Execution Quality and TCA.
+1. Post-Implementation Verification
+2. Data Completeness cleanup
+3. Professional Benchmark hardening
+4. Walk-Forward validation
+5. Score Calibration and Feature Attribution
+6. Execution Quality and TCA
+7. Risk Gate and Audit Trail hardening
+8. Portfolio Risk cleanup
+9. Human vs System validation
+10. Research Promotion cleanup
+11. Only then revisit expansion features
 
 This should happen before governance scale-up, institutional positioning, or any HFT feasibility work.
+
+## Future Backlog Not In This 90-Day Plan
+
+The future expansion items in `docs/TEN_OUT_OF_TEN_ROADMAP.md#future-expansion-backlog` are not part of this 30-60-90 day execution plan. Market Specialist Desks, Market x Strategy Benchmark, Visual Strategy Evidence Builder, expanded Hedge Fund AI Role Agents, Off-Exchange Liquidity Dashboard, Broker-Neutral Execution Architecture, Free-First Provider Strategy, Pay Threshold and Provider ROI Gates, Small Capital Growth Framework, and C++ Core Accelerators remain long-term roadmap items only.
+
+Do not start those items before the proof chain above is stronger. They do not change the current safety model, do not enable live trading, do not add broker routes, do not alter order submission, do not bypass risk gates, do not grant AI order authority, and do not let analytics change ranking weights automatically.

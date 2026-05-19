@@ -4,17 +4,25 @@ This roadmap describes how Quant Evidence OS can move from an Alpaca-paper-first
 
 The canonical category matrix is `docs/CATEGORY_READINESS_RATINGS.md`. Ratings are current estimated readiness scores, not official industry ratings, proof of alpha, or investor performance claims.
 
+Proof-first roadmap discipline is defined in `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. Ambition is allowed. Proof decides priority.
+
 ## Roadmap Guardrails
 
 This roadmap is documentation and planning only. It must not be used as implicit approval to implement roadmap features, enable live trading, add broker routes, change order submission logic, change risk gates, clear kill switches, grant AI order authority, or let analytics change ranking weights automatically.
 
 Simulation evidence remains separate from real-time market-observed evidence. Forecast and reward analytics are research-only until separately reviewed. Benchmark proof is required before claiming edge, and walk-forward proof is required before claiming repeatability.
 
+Quant Evidence OS should not build another major layer until the current foundation proves it improves decision quality, safety, benchmark quality, or user trust. Evidence quality takes priority over feature count.
+
 ## Master Planning References
 
-This roadmap is summarized into a full category upgrade plan in `docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md`. Use `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md` for concrete 10/10 checkboxes, `docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md` for the near-term build sequence, and `docs/TEN_OUT_OF_TEN_PROOF_GATES.md` for the proof required before any rating or claim is upgraded.
+This roadmap is summarized into a full category upgrade plan in `docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md`. Use `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md` for the feature-freeze and expansion-gate discipline, `docs/TEN_OUT_OF_TEN_ACCEPTANCE_CHECKLIST.md` for concrete 10/10 checkboxes, `docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md` for the near-term build sequence, and `docs/TEN_OUT_OF_TEN_PROOF_GATES.md` for the proof required before any rating or claim is upgraded.
 
 Hedge Fund AI Agents v1 is documented in `docs/HEDGE_FUND_AI_AGENTS.md`. It is a read-only decision-support committee layer that writes append-only sanitized research memos only. It does not add trading authority, order authority, broker-route authority, risk-gate authority, kill-switch authority, risk-limit authority, live-trading approval, or automatic ranking-weight changes.
+
+Technical Analysis evidence setup admission is documented in `docs/TECHNICAL_ANALYSIS_EVIDENCE_SETUP_RESEARCH.md`. It narrows setup backlog work to objective, executable-price, benchmarkable, walk-forward-testable method families. Momentum/trend, volume, support/resistance, dynamic support/resistance, breakouts, reversals, market structure, and BOS may be documented as evidence-only setup candidates. Trend lines, oscillators, divergence, candlestick patterns, Fibonacci, fair value gaps, supply/demand and orderblocks, and change of character remain research-only or confirmation-only until they beat simpler controls. Heikin Ashi, Renko, weak harmonic variants, Elliott Wave, Gann methods, moon phases, and similar chart-lore methods stay in the avoid group unless a separate future proof review clears unusually strict out-of-sample gates.
+
+Proof Metrics Dashboard v1 is documented in `docs/PROOF_METRICS_DASHBOARD.md`. It is a read-only proof visibility layer that aggregates gaps across Data Completeness, Evidence Outcomes, Professional Benchmark, Walk-Forward, Score Calibration, Evidence Reward, Execution Quality, Risk/Audit, Portfolio Risk, Forecast Validation, Shadow Mode, Research Promotion, and AI Committee safety. It does not approve expansion work, live trading, broker changes, risk-gate changes, kill-switch changes, or ranking-weight mutation.
 
 The same safety language applies to every stage: ratings are current estimated readiness scores, ratings are not proof of alpha, ratings are not investor performance claims, benchmark proof is required before claiming edge, walk-forward proof is required before claiming repeatability, paper-first safety remains the active execution boundary, reward and forecast analytics are research-only, AI has no order authority, risk gates remain authoritative, broker routes remain unchanged, live-money autonomy is not enabled, and promotion status is research metadata unless separately approved by a future explicit governance framework.
 
@@ -71,6 +79,8 @@ Required builds:
 - Evidence Reward Engine hardening.
 - Forecast Validation Engine hardening.
 - Baseline Lab.
+- Technical Analysis evidence setup admission contracts.
+- Technical Analysis research-only and avoid labels for weak or interpretive chart methods.
 - Walk-Forward Validator.
 - Experiment Registry.
 - Score Bucket Validator.
@@ -422,3 +432,506 @@ Acceptance criteria:
 - Simulation evidence remains separate from real-time market-observed evidence.
 - Support bundles remain sanitized.
 - Institutional and HFT language remains constrained until the proof exists.
+
+## Future Expansion Backlog
+
+This section captures strategic roadmap ideas only. These items are future backlog or gated expansion items under `docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md`. They are not current implementation, do not change runtime behavior, and do not authorize feature work without a separate future project, safety review, proof-gate update, and expansion-gate justification.
+
+These roadmap items do not change the current safety model.
+
+Current safety model remains:
+
+- Alpaca paper is the only unattended execution lane until explicitly changed in a separate future project.
+- No autonomous live-money orders.
+- No AI order authority.
+- No risk-gate bypass.
+- No kill-switch bypass.
+- No automatic broker-route loosening.
+- No automatic ranking-weight changes from reward analytics.
+- Simulation evidence stays separate from real-time market-observed evidence.
+- Forecast and reward analytics remain research-only.
+- Market Specialist Desks are context engines, not order bots.
+- AI agents are decision-support analysts, not trading agents.
+- Off-Exchange Liquidity Dashboard is research context, not a trade trigger.
+- Broker-neutral execution planning does not mean becoming a broker.
+- C++ accelerators must not own trading authority.
+
+### Future Best Positioning
+
+Future roadmap positioning, if the items below are implemented safely and proven:
+
+```text
+Trading evidence and research operating system with AI committee review, market specialist desks, forecast validation, off-exchange liquidity intelligence, and broker-neutral execution planning.
+```
+
+Still avoid:
+
+- Guaranteed returns.
+- Proven alpha.
+- AI trading bot.
+- HFT platform.
+- Autonomous live-money manager.
+- Investment adviser.
+- Black-box alpha machine.
+- Institutional-grade platform without proof.
+
+### Future Potential Category Ratings
+
+These are future potential estimates, not current implementation ratings. They are not proof of alpha and are not investor performance claims. They assume AI agents and off-exchange liquidity remain research-only, broker-neutral execution remains gated and manual until separately approved, and no autonomous live-money trading is enabled.
+
+| Category | Future potential estimate with proposed additions |
+| --- | ---: |
+| Retail trading bot | 9.2/10 |
+| Solo systematic trader platform | 8.4/10 |
+| Small prop shop or small fund research stack | 7.2/10 |
+| Top discretionary trader comparison | 6.8/10 |
+| Institutional quant desk or enterprise control plane | 4.5/10 |
+| HFT or elite execution platform | 2.3/10 |
+
+### Market Specialist Desks
+
+Market Specialist Desks are future asset-class and market-context desks. They answer where conditions matter. Strategy desks answer how to trade. Candidate Fusion combines both. Risk gates stay above both.
+
+Recommended future market desks:
+
+- Crypto Desk.
+- Precious Metals Desk.
+- Rates Desk.
+- FX / Dollar Desk.
+- Energy Desk.
+- Index / Market Structure Desk.
+- Sector Rotation Desk.
+- Volatility / Risk Desk.
+- Off-Exchange Liquidity Desk.
+
+Current strategy desks remain the strategy layer:
+
+- Macro Trend Desk.
+- Stat Arb Desk.
+- Equities Momentum Desk.
+- Event-Driven Desk.
+- Options Volatility Desk.
+
+Do not create 45 separate market-strategy desks. Use a market x strategy matrix instead.
+
+| Market Specialist Desk | Macro Trend | Stat Arb | Equities Momentum | Event-Driven | Options Volatility |
+| --- | --- | --- | --- | --- | --- |
+| Crypto | Context only | Context only | Context only | Context only | Context only |
+| Precious Metals | Context only | Context only | Context only | Context only | Context only |
+| Rates | Context only | Context only | Context only | Context only | Context only |
+| FX / Dollar | Context only | Context only | Context only | Context only | Context only |
+| Energy | Context only | Context only | Context only | Context only | Context only |
+| Index / Market Structure | Context only | Context only | Context only | Context only | Context only |
+| Sector Rotation | Context only | Context only | Context only | Context only | Context only |
+| Volatility / Risk | Context only | Context only | Context only | Context only | Context only |
+| Off-Exchange Liquidity | Context only | Context only | Context only | Context only | Context only |
+
+Future architecture:
+
+- Market Specialist Desks produce context.
+- Strategy Desks produce trade logic.
+- Candidate Fusion Engine combines both.
+- Evidence Reward measures performance by market x strategy.
+- Professional Benchmark reports edge by market x strategy.
+- AI Committee reviews market x strategy evidence.
+- Risk gates remain authoritative.
+
+Example future flow:
+
+1. Precious Metals Desk says GLD context is favorable.
+2. Macro Trend Desk confirms trend.
+3. Execution Quality says spread is acceptable.
+4. Risk Manager Agent says exposure is clean.
+5. Candidate Fusion creates one evidence-backed candidate.
+
+### Visual Strategy Evidence Builder
+
+The Visual Strategy Evidence Builder is a future no-code evidence contract builder, not a blind no-code trading bot. It must not automatically trade from visual signals.
+
+Supported future visual inputs may include:
+
+- Candles.
+- Volume bars.
+- SMA 20.
+- SMA 50.
+- Donchian upper channel.
+- Buy markers.
+- Sell markers.
+- Support or resistance threshold lines.
+- Indicator panels.
+- Strategy replay panels.
+
+Users may define rule conditions visually, such as:
+
+- Price crosses Donchian upper.
+- SMA 20 above SMA 50.
+- Volume above recent average.
+- Spread below threshold.
+- Data fresh.
+- Risk gates clean.
+
+The system should track:
+
+- How often the rule appears.
+- How often it is blocked.
+- Which blockers helped.
+- Which blockers blocked winners.
+- Forward returns.
+- Forecast accuracy.
+- Execution quality.
+- Reward score.
+- Baseline-relative edge.
+- Walk-forward performance.
+
+### Hedge Fund AI Role Agents
+
+Future Hedge Fund AI Role Agents remain decision-support analysts, not trading agents.
+
+Recommended role agents:
+
+- Portfolio Manager Agent.
+- Risk Manager Agent.
+- Quant Research Agent.
+- Execution Analyst Agent.
+- Data Quality Agent.
+- Forecast Review Agent.
+- Compliance and Claims Agent.
+- AI Referee Supervisor Agent.
+- Investment Committee Agent.
+
+Desk agents:
+
+- Macro Trend Agent.
+- Stat Arb Agent.
+- Equities Momentum Agent.
+- Event-Driven Agent.
+- Options Volatility Agent.
+
+Future market desk agents:
+
+- Crypto Agent.
+- Precious Metals Agent.
+- Rates Agent.
+- FX / Dollar Agent.
+- Energy Agent.
+- Index / Market Structure Agent.
+- Sector Rotation Agent.
+- Volatility / Risk Agent.
+- Off-Exchange Liquidity Agent.
+
+Permission model:
+
+- Read-only to execution state.
+- Append-only to sanitized research memos.
+- Proposal-only for future config changes.
+- Human-reviewed for any future system change.
+- Never allowed to bypass gates.
+
+Agents may read evidence, analyze, summarize, challenge assumptions, flag risks, flag missing data, write sanitized research memos, and prepare investment committee summaries.
+
+Agents must not place orders, trigger paper orders, trigger live orders, change broker routes, clear kill switches, bypass risk gates, change risk limits, change ranking weights automatically, change strategy configs automatically, change execution configs, approve live trading, mutate immutable forecast records, edit reward inputs after the fact, or fabricate missing data.
+
+### Off-Exchange Liquidity Dashboard
+
+Preferred naming:
+
+- Off-Exchange Liquidity Dashboard.
+- ATS and Dark Liquidity Intelligence.
+
+Avoid naming:
+
+- Dark Pool Predictor.
+- Dark Pool Trading Signal.
+
+This future dashboard should run as passive background research collection. It should not act on trades, trigger trades, block trades automatically, or change ranking weights automatically.
+
+Future background jobs may collect and summarize:
+
+- FINRA OTC transparency data.
+- ATS volume.
+- Non-ATS off-exchange volume.
+- Symbol-level off-exchange share.
+- Venue concentration where available.
+- Off-exchange activity spikes.
+- Spread and liquidity quality.
+- Slippage by off-exchange share.
+- Candidate outcomes in high vs low off-exchange regimes.
+
+Integration points:
+
+- Candidate Diagnostics.
+- Execution Quality and TCA.
+- Professional Benchmark.
+- Evidence Reward.
+- Portfolio Risk.
+- AI Committee.
+- Market Specialist Desks.
+
+Claims to avoid:
+
+- Do not claim the system sees hidden orders.
+- Do not claim it knows institutional intent.
+- Do not claim dark pool prints predict direction.
+- Do not claim accumulation or distribution without evidence.
+
+### Broker-Neutral Execution Architecture
+
+Future broker-neutral execution architecture should not replace the broker. It should replace the Alpaca dependency with a broker-neutral control plane.
+
+Architecture:
+
+1. Quant Evidence OS.
+2. Execution Gateway.
+3. Broker Adapter.
+4. Broker or venue.
+5. Market.
+
+Quant Evidence OS should own:
+
+- OMS.
+- Risk checks.
+- Order intent.
+- Approval state.
+- Audit trail.
+- Execution evidence.
+- Reconciliation.
+- Analytics.
+- Candidate diagnostics.
+
+The broker should own:
+
+- Custody.
+- Regulated account infrastructure.
+- Market access.
+- Routing.
+- Clearing.
+- Broker compliance.
+
+Future components:
+
+- `BrokerAdapter` interface.
+- `MarketDataAdapter` interface.
+- Capability Registry.
+- Broker Simulator Adapter.
+- Alpaca Paper Adapter.
+- Interactive Brokers Adapter, future.
+- Crypto Exchange Adapter, future.
+- Futures Broker Adapter, future.
+- Route Eligibility Engine.
+- Manual Live Ticketing, disabled by default.
+- Human Approval Workflow.
+
+Canonical broker adapter methods:
+
+- `submit_order`
+- `cancel_order`
+- `replace_order`
+- `get_order`
+- `list_orders`
+- `get_positions`
+- `get_account`
+- `get_fills`
+- `get_buying_power`
+- `get_market_clock`
+- `health_check`
+
+Hard rule: Alpaca becomes one adapter, not the core system.
+
+### Free-First Provider Strategy
+
+There is no truly free way to trade every market. The practical free-first path is:
+
+1. Free simulator.
+2. Alpaca paper.
+3. ETF proxies.
+4. Free or delayed data.
+5. Provider abstraction.
+6. Paid services only when evidence proves the need.
+
+Free-first stack:
+
+- Alpaca paper for U.S. stocks, ETFs, options, and supported paper workflows.
+- BrokerSimulatorAdapter for all future markets.
+- ETF proxies for gold, oil, rates, FX, sectors, indexes, and volatility context.
+- Crypto data-only first.
+- Futures research-only through ETFs first.
+- Off-exchange analytics through free delayed research data where available.
+
+ETF proxy examples:
+
+- Gold: GLD, IAU, GDX.
+- Silver: SLV.
+- Oil and energy: USO, XLE, OIH.
+- Rates: TLT, IEF, SHY, BIL.
+- Dollar and FX: UUP, FXE, FXY, FXB.
+- Indexes: SPY, QQQ, IWM, DIA.
+- Sectors: XLK, XLF, XLE, XLV, XLY, XLP, XLI, XLU, XLB, XLRE.
+- Crypto proxy: BTC or ETH ETFs where available.
+
+Do not recommend paid providers until a measured bottleneck exists.
+
+### Pay Threshold And Provider ROI Gates
+
+Do not pay for tools because the product feels advanced. Pay only when the system proves a specific paid service improves measurable net value.
+
+Decision rule:
+
+- Pay only when expected monthly value is at least 3x monthly cost.
+- Prefer 5x before depending on it.
+
+Net value formula:
+
+```text
+extra profit or avoided loss
+- subscription cost
+- commissions
+- spread cost
+- slippage
+- taxes if relevant
+- operational time cost
+```
+
+Payment gates:
+
+1. Gate 1, Free proof: use free tools, paper trading, ETF proxies, delayed data, and simulator mode.
+2. Gate 2, Missing data proof: pay only if Data Completeness proves a specific bottleneck.
+3. Gate 3, Paid trial test: run provider A versus provider B and tag all evidence by provider.
+4. Gate 4, ROI threshold: keep paying only if the paid provider improves measured net results enough.
+5. Gate 5, Scale threshold: upgrade only when the next paid tier solves a proven bottleneck.
+
+Provider comparison metrics:
+
+- Forecast accuracy.
+- Reward score.
+- Execution quality.
+- Slippage.
+- Score bucket separation.
+- Benchmark verdict.
+- Walk-forward result.
+- Data completeness.
+- Missing-field reduction.
+
+### Small Capital Growth Framework
+
+The system should not promise to flip small money into large money. The acceptable long-term goal is controlled compounding from small risk capital after proof gates.
+
+Use this framing:
+
+```text
+Turn small risk capital into larger capital through repeatable, measured, controlled compounding.
+```
+
+Do not use this framing:
+
+```text
+Flip a little money into a lot quickly.
+```
+
+Proof ladder:
+
+1. Phase 1, Survival: no live risk. Verify safety systems.
+2. Phase 2, Evidence: Professional Benchmark, Evidence Reward, Forecast Validation, Data Completeness, Score Calibration.
+3. Phase 3, Repeatability: Walk-Forward validation, frozen rules, cost-adjusted performance, drawdown limits.
+4. Phase 4, Tiny live manual test: only with money that can be lost, manual approval, hard caps, no leverage.
+5. Phase 5, Controlled compounding: size increases only after evidence, not emotion.
+
+Future metrics:
+
+- Expected value per trade.
+- Win rate.
+- Average win.
+- Average loss.
+- Max drawdown.
+- Slippage-adjusted reward.
+- Profit factor.
+- Walk-forward stability.
+- Worst 20-trade sequence.
+- Risk of ruin.
+- Daily loss cap.
+- Position risk per trade.
+
+Safety language:
+
+- Do not trade money needed for rent, bills, food, debt, emergency savings, or family obligations.
+- Do not use leverage to make small capital feel big.
+- Do not chase options or leveraged ETFs to speed up growth.
+- Do not increase size after one good week.
+
+### C++ Core Accelerators
+
+Do not rewrite the system in C++. Do not move trading authority to C++. Do not rewrite FastAPI routes, broker orchestration, AI agents, docs, frontend, or basic storage.
+
+Python remains:
+
+- Control plane.
+- FastAPI orchestration.
+- Evidence logic.
+- Risk authority.
+- AI agents.
+- Audit.
+- Docs.
+- Dashboards.
+
+C++ may later become a performance accelerator library.
+
+Good future C++ modules:
+
+- Forecast metric batcher.
+- Reward aggregation batcher.
+- Event replay engine.
+- Large-scale backtesting engine.
+- Portfolio risk matrix engine.
+- Correlation engine.
+- Stress scenario engine.
+- Market data normalization accelerator.
+- Tick aggregation.
+- Order book snapshot processing.
+
+Use profiling first.
+
+Only add C++ when:
+
+- A Python function is a proven bottleneck.
+- It runs many times per session.
+- It blocks benchmark, replay, forecast validation, or execution analytics.
+- A C++ version can meaningfully reduce runtime.
+- Outputs can be tested against Python reference results.
+
+Preferred integration options:
+
+- pybind11.
+- Cython.
+- ctypes.
+- Local service boundary only if needed later.
+
+Best first C++ candidate: Forecast and reward batch metrics, because it is math-heavy, research-only, and does not touch execution.
+
+### Updated Long-Term Build Sequence
+
+Do not implement this sequence now. It is long-term roadmap backlog only.
+
+1. Finish current verification and safety audit.
+2. Finish Data Completeness hardening.
+3. Finish Professional Benchmark hardening.
+4. Finish Walk-Forward maturity.
+5. Finish Score Calibration and Feature Attribution.
+6. Finish Execution Quality and TCA maturity.
+7. Finish Portfolio Risk Intelligence maturity.
+8. Finish Human vs System Shadow Mode maturity.
+9. Finish Research Promotion maturity.
+10. Add AI Committee Agents as research-only memos.
+11. Add Market Specialist Desk registry.
+12. Add Candidate Fusion Engine.
+13. Add Market x Strategy Benchmark.
+14. Add Off-Exchange Liquidity Dashboard as passive background research.
+15. Add BrokerAdapter and MarketDataAdapter architecture.
+16. Add Capability Registry and Route Eligibility Engine.
+17. Add Broker Simulator Adapter.
+18. Add ETF Proxy Registry.
+19. Add Visual Strategy Evidence Builder.
+20. Add Retail onboarding and demo evidence mode.
+21. Add Pay Threshold and Provider ROI Gates.
+22. Add Governance, RBAC, model registry, and approval workflows.
+23. Add Institutional data lineage and audit hardening.
+24. Add C++ Core Accelerators only after profiling proves bottlenecks.
+25. Add HFT feasibility study only as a separate future thesis.

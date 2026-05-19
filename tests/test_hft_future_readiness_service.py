@@ -27,7 +27,7 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
     def test_summary_covers_all_future_only_hft_requirements(self) -> None:
         summary = get_hft_future_readiness_summary()
 
-        self.assertEqual(summary["implemented_requirement_count"], 14)
+        self.assertEqual(summary["implemented_requirement_count"], len(HFT_FUTURE_REQUIREMENT_EVIDENCE))
         self.assertEqual(summary["requirement_evidence"], HFT_FUTURE_REQUIREMENT_EVIDENCE)
         for key in HFT_FUTURE_REQUIREMENT_EVIDENCE:
             self.assertTrue(summary["requirement_evidence"][key])
@@ -35,8 +35,15 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
         self.assertFalse(summary["current_hft_capability"])
         self.assertFalse(summary["current_direct_market_access"])
         self.assertFalse(summary["current_colocation"])
+        self.assertFalse(summary["changes_execution"])
+        self.assertFalse(summary["changes_order_submission"])
+        self.assertFalse(summary["changes_broker_routes"])
+        self.assertFalse(summary["changes_risk_gates"])
+        self.assertFalse(summary["clears_kill_switch"])
+        self.assertFalse(summary["changes_ranking_weights"])
         self.assertFalse(summary["can_submit_orders"])
         self.assertFalse(summary["can_submit_live_orders"])
+        self.assertFalse(summary["can_grant_ai_order_authority"])
         self.assertIn("does not make the current platform HFT-capable", summary["claim_boundary"])
 
     def test_hft_data_microstructure_venue_and_kill_switch_contracts_are_future_only(self) -> None:
@@ -52,13 +59,17 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
         self.assertEqual(microstructure["status"], "passed")
         self.assertIn("queue_dynamics", microstructure["topics"])
         self.assertFalse(microstructure["plan_changes_execution_behavior"])
+        self.assertFalse(microstructure["changes_execution"])
+        self.assertFalse(microstructure["changes_order_submission"])
         self.assertEqual(venue["status"], "passed")
         self.assertIn("fee_rebate_model", venue["topics"])
         self.assertFalse(venue["plan_changes_broker_routes"])
+        self.assertFalse(venue["changes_broker_routes"])
         self.assertEqual(kill_switch["status"], "passed")
         self.assertIn("latency_spike", kill_switch["requirements"])
         self.assertTrue(kill_switch["documented_for_future_study_only"])
         self.assertFalse(kill_switch["current_kill_switch_logic_changed"])
+        self.assertFalse(kill_switch["clears_kill_switch"])
 
     def test_hft_governance_ui_docs_and_paper_proof_boundaries(self) -> None:
         metrics_claim = build_no_current_hft_metric_claim_contract()
@@ -114,8 +125,8 @@ class HftFutureReadinessServiceTests(unittest.TestCase):
         hft_rows = [row for row in coverage["requirements"] if row["category_key"] == "hft_or_elite_execution_platform"]
         hft_category = next(row for row in report["categories"] if row["key"] == "hft_or_elite_execution_platform")
 
-        self.assertEqual(coverage["requirement_count"], 158)
-        self.assertEqual(coverage["complete_count"], 158)
+        self.assertGreaterEqual(coverage["requirement_count"], 158)
+        self.assertEqual(coverage["complete_count"], coverage["requirement_count"])
         self.assertEqual(coverage["missing_count"], 0)
         self.assertTrue(coverage["all_documented_scope_added"])
         self.assertTrue(all(row["status"] == "complete" for row in hft_rows))

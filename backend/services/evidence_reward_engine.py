@@ -16,6 +16,7 @@ from backend.services.candidate_outcome_stamping_service import (
     load_outcome_index,
     merge_outcome_into_candidate,
 )
+from backend.services.project_finish_tracker import build_project_finish_tracker
 from backend.services.serialization import serialize_value
 
 SAFETY_FLAGS: dict[str, Any] = {
@@ -23,6 +24,11 @@ SAFETY_FLAGS: dict[str, Any] = {
     "paper_route_only": True,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
+    "can_change_broker_routes": False,
+    "can_bypass_risk_gates": False,
+    "can_clear_kill_switch": False,
+    "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "none",
 }
 SAFETY_NOTES: tuple[str, ...] = (
@@ -44,6 +50,72 @@ REQUIRED_PREDICTION_FIELDS = (
     "confidence",
     "actual_forward_return",
     "baseline_forward_return",
+)
+
+EVIDENCE_REWARD_CLEANUP_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "candidate_evidence_sample",
+        "title": "Candidate evidence sample",
+        "priority": "critical",
+        "missing_fields": ("candidate_lifecycle_id", "symbol", "prediction_created_at"),
+        "blocked_claims": ("rewardability_review", "benchmark_input_quality"),
+        "safe_next_action": "Collect candidate lifecycle rows before Evidence Reward can score prediction contracts.",
+        "done_when": "Candidate lifecycle evidence exists and stays visible even when not rewardable.",
+    },
+    {
+        "key": "rewardable_prediction_contracts",
+        "title": "Rewardable prediction contracts",
+        "priority": "critical",
+        "missing_fields": REQUIRED_PREDICTION_FIELDS,
+        "blocked_claims": ("reward_quality_claim", "score_bucket_reward_claim"),
+        "safe_next_action": "Emit timestamped predictions with direction, horizon, target, invalidation, confidence, actual return, and baseline return.",
+        "done_when": "At least one candidate row has a complete pre-move prediction contract with outcome and baseline evidence.",
+    },
+    {
+        "key": "outcome_and_baseline_coverage",
+        "title": "Outcome and baseline coverage",
+        "priority": "critical",
+        "missing_fields": ("actual_forward_return", "baseline_forward_return", "actual_forward_return_observed_at"),
+        "blocked_claims": ("baseline_relative_reward", "professional_benchmark_input"),
+        "safe_next_action": "Attach closed-horizon actual forward returns and same-window baselines before computing reward claims.",
+        "done_when": "Rewardable rows have actual outcomes and explicit baselines instead of inferred or fabricated returns.",
+    },
+    {
+        "key": "execution_cost_context",
+        "title": "Execution cost context",
+        "priority": "high",
+        "missing_fields": ("slippage_bps", "spread_bps", "route", "paper_fill_price"),
+        "blocked_claims": ("after_cost_reward_claim", "tradability_claim"),
+        "safe_next_action": "Attach paper spread, slippage, route, and fill-price evidence before treating rewards as after-cost.",
+        "done_when": "Rewardable rows include execution-cost context for cost-adjusted review.",
+    },
+    {
+        "key": "blocker_value_evidence",
+        "title": "Blocker value evidence",
+        "priority": "high",
+        "missing_fields": ("blockers", "blocked", "actual_forward_return", "baseline_forward_return"),
+        "blocked_claims": ("blocker_value_claim", "false_block_rate_claim"),
+        "safe_next_action": "Collect blocked candidate outcomes and baselines before judging whether blockers helped or blocked winners.",
+        "done_when": "Blocker value uses rewardable blocked rows with outcomes and baselines, not blocker labels alone.",
+    },
+    {
+        "key": "simulation_separation",
+        "title": "Simulation evidence separation",
+        "priority": "critical",
+        "missing_fields": (),
+        "blocked_claims": ("real_time_observed_edge_claim", "benchmark_edge_claim"),
+        "safe_next_action": "Keep simulation evidence excluded from real-time market-observed rewardability and benchmark inputs.",
+        "done_when": "Simulation rows are visible in source counts when present but never counted as observed rewardable evidence.",
+    },
+    {
+        "key": "manual_ranking_review_boundary",
+        "title": "Manual ranking review boundary",
+        "priority": "critical",
+        "missing_fields": (),
+        "blocked_claims": ("automatic_ranking_mutation", "live_trading_readiness", "ai_order_authority"),
+        "safe_next_action": "Keep reward recommendations as manual research review only; do not mutate ranking weights or execution policy.",
+        "done_when": "All recommendations are manual-review only and Evidence Reward cannot place orders, route orders, or change ranking weights.",
+    },
 )
 
 
@@ -125,6 +197,12 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
         if cleaned in {"0", "false", "no", "off", "miss", "failed"}:
             return False
     return bool(value)
+
+
+def _ratio(numerator: int | float, denominator: int | float) -> float | None:
+    if denominator <= 0:
+        return None
+    return round(float(numerator) / float(denominator), 6)
 
 
 def _clean_text(value: Any, default: str | None = None) -> str | None:
@@ -631,7 +709,11 @@ def _prediction_reward_components(contract: PredictionContract, *, blocked: bool
 
 
 def _normalize_payload(payload: dict[str, Any], trade_by_candidate: dict[str, dict[str, Any]]) -> RewardRecord | None:
-    if _safe_bool(payload.get("simulation_evidence")) or str(payload.get("source") or "").lower() == "simulation_evidence":
+    if (
+        _safe_bool(payload.get("simulation_evidence"))
+        or str(payload.get("source") or "").lower() == "simulation_evidence"
+        or str(payload.get("evidence_pool") or "").lower() == "simulation_evidence"
+    ):
         return None
     symbol = _clean_text(payload.get("ticker") or payload.get("symbol"))
     if symbol:
@@ -930,6 +1012,162 @@ def _safe_recommendations(
     return recommendations[:12]
 
 
+def build_evidence_reward_cleanup_plan(
+    *,
+    records: list[RewardRecord],
+    summary: dict[str, Any],
+    blockers: list[dict[str, Any]],
+    recommendations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidate_count = int(summary.get("candidate_count") or len(records))
+    rewardable_count = int(summary.get("rewardable_count") or 0)
+    blocked_count = int(summary.get("blocked_count") or 0)
+    missing_prediction_fields = dict(summary.get("missing_prediction_field_counts") or {})
+    source_counts = dict(summary.get("source_counts") or {})
+    rewardable_records = _rewardable(records)
+    execution_cost_count = sum(
+        1
+        for row in rewardable_records
+        if row.prediction_contract.get("slippage_bps") is not None
+        and row.prediction_contract.get("spread_bps") is not None
+    )
+    blocker_rewardable_count = sum(int(row.get("rewardable_candidate_count") or 0) for row in blockers)
+    all_recommendations_manual = all(bool(row.get("manual_review_only")) for row in recommendations) if recommendations else True
+    safety_boundary_preserved = (
+        SAFETY_FLAGS["can_submit_orders"] is False
+        and SAFETY_FLAGS["can_submit_live_orders"] is False
+        and SAFETY_FLAGS["mutation"] == "none"
+        and all_recommendations_manual
+    )
+    metric_values = {
+        "candidate_evidence_sample": candidate_count,
+        "rewardable_prediction_contracts": rewardable_count,
+        "outcome_and_baseline_coverage": _ratio(rewardable_count, candidate_count) or 0.0,
+        "execution_cost_context": _ratio(execution_cost_count, rewardable_count) or 0.0,
+        "blocker_value_evidence": blocker_rewardable_count,
+        "simulation_separation": 1,
+        "manual_ranking_review_boundary": int(safety_boundary_preserved),
+    }
+    thresholds = {
+        "candidate_evidence_sample": 1,
+        "rewardable_prediction_contracts": 1,
+        "outcome_and_baseline_coverage": 0.80,
+        "execution_cost_context": 0.80,
+        "blocker_value_evidence": 1,
+        "simulation_separation": 1,
+        "manual_ranking_review_boundary": 1,
+    }
+
+    items: list[dict[str, Any]] = []
+    for definition in EVIDENCE_REWARD_CLEANUP_DEFINITIONS:
+        key = str(definition["key"])
+        value = metric_values[key]
+        threshold = thresholds[key]
+        passed = bool(value >= threshold)
+        if key == "blocker_value_evidence" and blocked_count == 0:
+            status = "no_records"
+        elif key not in {"simulation_separation", "manual_ranking_review_boundary"} and candidate_count == 0:
+            status = "no_records"
+        else:
+            status = "ready" if passed else "needs_evidence"
+        missing_fields = list(definition.get("missing_fields") or ())
+        if key in {"rewardable_prediction_contracts", "outcome_and_baseline_coverage"} and missing_prediction_fields:
+            missing_fields = [
+                field
+                for field, _count in sorted(missing_prediction_fields.items(), key=lambda item: (-int(item[1]), item[0]))
+            ][:8] or missing_fields
+        items.append(
+            {
+                "key": key,
+                "title": definition["title"],
+                "priority": definition["priority"],
+                "status": status,
+                "passed": passed,
+                "value": value,
+                "threshold": threshold,
+                "missing_fields": missing_fields,
+                "blocked_claims": list(definition.get("blocked_claims") or ()),
+                "safe_next_action": definition["safe_next_action"],
+                "done_when": definition["done_when"],
+                "claim_boundary": "Evidence Reward cleanup is internal research evidence review only; it is not proof of alpha, investment performance, tradability, ranking-change approval, paper-to-live readiness, or live-trading readiness.",
+                "manual_review_only": True,
+                "research_only": True,
+                "changes_execution": False,
+                "changes_order_submission": False,
+                "changes_broker_routes": False,
+                "changes_risk_gates": False,
+                "changes_ranking_weights": False,
+                "clears_kill_switch": False,
+                "can_submit_orders": False,
+                "can_submit_live_orders": False,
+                "can_change_broker_routes": False,
+                "can_bypass_risk_gates": False,
+                "can_change_ranking_weights": False,
+                "can_grant_ai_order_authority": False,
+            }
+        )
+
+    open_items = [row for row in items if row["status"] != "ready"]
+    critical_open_items = [row for row in open_items if row.get("priority") == "critical"]
+    return serialize_value(
+        {
+            "status": "ready_for_human_review" if rewardable_count > 0 and not open_items else "blocked_by_evidence",
+            "summary": {
+                "item_count": len(items),
+                "open_item_count": len(open_items),
+                "critical_open_items": len(critical_open_items),
+                "ready_item_count": len(items) - len(open_items),
+                "top_cleanup_item": open_items[0]["title"] if open_items else None,
+                "rewardability_rate": _ratio(rewardable_count, candidate_count) or 0.0,
+                "execution_cost_context_rate": _ratio(execution_cost_count, rewardable_count) or 0.0,
+                "blocker_rewardable_count": blocker_rewardable_count,
+                "simulation_rows_excluded": int(source_counts.get("simulation_evidence_rows_excluded") or 0),
+                "proof_first_rule": "Ambition is allowed. Proof decides priority.",
+                "claim_permissions": {
+                    "cautious_internal_reward_review": rewardable_count > 0,
+                    "blocker_value_review": blocker_rewardable_count > 0,
+                    "after_cost_reward_review": execution_cost_count > 0,
+                    "public_alpha_claim": False,
+                    "automatic_ranking_mutation": False,
+                    "paper_to_live_readiness": False,
+                    "live_trading_readiness": False,
+                },
+                "blocked_claims": [
+                    "proven_alpha",
+                    "reward_quality_claim",
+                    "blocker_value_claim",
+                    "after_cost_reward_claim",
+                    "automatic_ranking_mutation",
+                    "paper_to_live_readiness",
+                    "live_trading_readiness",
+                ],
+                "safe_boundary": "Evidence Reward cleanup records rewardability and blocker-value proof gaps only. It does not submit orders, change broker routes, bypass risk gates, clear kill switches, grant AI order authority, merge simulation evidence into observed evidence, or mutate ranking weights.",
+            },
+            "items": items,
+            "safe_next_actions": [
+                {
+                    "field": row["key"],
+                    "action": row["safe_next_action"],
+                    "manual_review_only": True,
+                    "changes_execution": False,
+                    "changes_order_submission": False,
+                    "changes_broker_routes": False,
+                    "changes_risk_gates": False,
+                    "changes_ranking_weights": False,
+                    "clears_kill_switch": False,
+                    "can_change_broker_routes": False,
+                    "can_bypass_risk_gates": False,
+                    "can_change_ranking_weights": False,
+                    "can_grant_ai_order_authority": False,
+                }
+                for row in open_items
+            ],
+            "research_only": True,
+            **SAFETY_FLAGS,
+        }
+    )
+
+
 def _source_counts(
     *,
     candidate_files: list[Path],
@@ -1141,6 +1379,22 @@ def build_evidence_reward_report(
         ai=ai,
         score_buckets=score_buckets,
     )
+    cleanup_plan = build_evidence_reward_cleanup_plan(
+        records=records,
+        summary=summary,
+        blockers=blockers,
+        recommendations=recommendations,
+    )
+    summary.update(
+        {
+            "reward_cleanup_status": cleanup_plan["status"],
+            "reward_cleanup_open_items": cleanup_plan["summary"]["open_item_count"],
+            "reward_cleanup_critical_open_items": cleanup_plan["summary"]["critical_open_items"],
+            "top_cleanup_item": cleanup_plan["summary"]["top_cleanup_item"],
+            "claim_permissions": cleanup_plan["summary"]["claim_permissions"],
+        }
+    )
+    aggregations["evidence_reward_cleanup_plan"] = cleanup_plan
     warnings = []
     if not records:
         warnings.append("No candidate evidence has been found yet.")
@@ -1156,6 +1410,7 @@ def build_evidence_reward_report(
             "summary": summary,
             "records": rows,
             "aggregations": aggregations,
+            "evidence_reward_cleanup_plan": cleanup_plan,
             "missing_fields": dict(missing_counter),
             "warnings": warnings,
             "safety_notes": list(SAFETY_NOTES),
@@ -1170,6 +1425,7 @@ def build_evidence_reward_report(
             "reward_by_score_bucket": score_buckets,
             "safe_recommendations": recommendations,
             **SAFETY_FLAGS,
+            "finish_tracker": build_project_finish_tracker(report_name="evidence_reward"),
         }
     )
 
@@ -1179,19 +1435,25 @@ def get_evidence_reward_summary(db: Any = None, *, current_user: Any) -> dict[st
 
 
 def _report_subset(report: dict[str, Any], *, items: Any, aggregations: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {
+    subset_aggregations = dict(aggregations or {})
+    if report.get("evidence_reward_cleanup_plan") and "evidence_reward_cleanup_plan" not in subset_aggregations:
+        subset_aggregations["evidence_reward_cleanup_plan"] = report["evidence_reward_cleanup_plan"]
+    payload = {
         "status": report.get("status", (report.get("summary") or {}).get("data_status", "unknown")),
         "generated_at": report.get("generated_at", (report.get("summary") or {}).get("generated_at")),
         "research_only": True,
         "summary": report["summary"],
         "records": items if isinstance(items, list) else [],
         "items": items,
-        "aggregations": aggregations or {},
+        "aggregations": subset_aggregations,
         "missing_fields": report.get("missing_fields", {}),
         "warnings": report.get("warnings", []),
         "safety_notes": report.get("safety_notes", list(SAFETY_NOTES)),
         **SAFETY_FLAGS,
     }
+    if report.get("evidence_reward_cleanup_plan"):
+        payload["evidence_reward_cleanup_plan"] = report["evidence_reward_cleanup_plan"]
+    return payload
 
 
 def get_evidence_reward_candidates(db: Any = None, *, current_user: Any) -> dict[str, Any]:

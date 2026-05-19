@@ -23,6 +23,7 @@ from backend.services.audit_service import record_audit_event
 from backend.services.billing_service import enforce_entitlement_limit, require_entitlement
 from backend.services.exceptions import NotFoundError, ValidationError
 from backend.services.permissions import require_current_user_permission
+from backend.services.risk_audit_hardening import build_risk_audit_hardening_report
 from backend.services.strategy_engine.service import ensure_strategy_desks
 from backend.services.strategy_readiness_score_service import (
     create_strategy_promotion_gate,
@@ -657,9 +658,72 @@ def list_risk_events(db: Session, *, current_user: Any, limit: int = 100) -> dic
     }
 
 
+KILL_SWITCH_RISK_EVENT_TYPES = ("risk.kill_switch_activated", "risk.kill_switch_cleared")
+
+
+def _latest_risk_kill_switch_event(db: Session, *, tenant_id: str) -> RiskEvent | None:
+    return db.execute(
+        select(RiskEvent)
+        .where(RiskEvent.tenant_id == tenant_id, RiskEvent.event_type.in_(KILL_SWITCH_RISK_EVENT_TYPES))
+        .order_by(RiskEvent.created_at.desc())
+        .limit(1)
+    ).scalars().first()
+
+
+def get_risk_kill_switch_status(db: Session, *, current_user: Any, strategy_id: str | None = None) -> dict[str, Any]:
+    _assert_reader(current_user)
+    tenant = _resolve_tenant_for_current_user(db, current_user)
+    if strategy_id:
+        strategies = [load_strategy_or_raise(db, tenant_id=tenant.id, strategy_id=strategy_id)]
+    else:
+        strategies = db.execute(select(StrategyDesk).where(StrategyDesk.tenant_id == tenant.id).order_by(StrategyDesk.created_at.desc())).scalars().all()
+    items: list[dict[str, Any]] = []
+    for strategy in strategies:
+        runtime = dict(strategy.runtime_json or {})
+        items.append(
+            {
+                "strategy_id": strategy.id,
+                "desk_key": strategy.desk_key,
+                "name": strategy.name,
+                "active": bool(runtime.get("kill_switch_active")),
+                "reason": runtime.get("kill_switch_reason"),
+                "activated_at": runtime.get("kill_switch_at"),
+            }
+        )
+    latest_event = _latest_risk_kill_switch_event(db, tenant_id=tenant.id)
+    latest_payload = dict(latest_event.payload_json or {}) if latest_event else {}
+    event_active = bool(latest_payload.get("active")) if latest_event else False
+    active_strategy_count = sum(1 for item in items if item["active"])
+    active = bool(active_strategy_count) or (not items and event_active)
+    return {
+        "active": active,
+        "scope": "strategy" if strategy_id else "tenant",
+        "strategy_count": len(items),
+        "active_strategy_count": active_strategy_count,
+        "affected_count": active_strategy_count if active else 0,
+        "items": items,
+        "latest_event": {
+            "id": latest_event.id,
+            "event_type": latest_event.event_type,
+            "actor_email": latest_payload.get("actor_email"),
+            "active": event_active,
+            "reason": latest_payload.get("reason"),
+            "scope": latest_payload.get("scope") or ("strategy" if latest_payload.get("strategy_id") else "tenant"),
+            "affected_count": latest_payload.get("affected_count"),
+            "created_at": _iso(latest_event.created_at),
+        } if latest_event else None,
+        "can_submit_orders": False,
+        "can_submit_live_orders": False,
+        "can_bypass_risk_gates": False,
+        "can_change_broker_routes": False,
+        "mutation": "risk_kill_switch_state_only",
+    }
+
+
 def set_risk_kill_switch(db: Session, *, current_user: Any, request: Any, active: bool) -> dict[str, Any]:
     _assert_risk_manager(current_user)
     tenant = _resolve_tenant_for_current_user(db, current_user)
+    user = _resolve_user_for_current_user(db, current_user)
     payload = request.model_dump() if hasattr(request, "model_dump") else dict(request or {})
     if payload.get("strategy_id"):
         rows = [load_strategy_or_raise(db, tenant_id=tenant.id, strategy_id=payload["strategy_id"])]
@@ -667,8 +731,35 @@ def set_risk_kill_switch(db: Session, *, current_user: Any, request: Any, active
         rows = db.execute(select(StrategyDesk).where(StrategyDesk.tenant_id == tenant.id)).scalars().all()
     for row in rows:
         row.runtime_json = {**dict(row.runtime_json or {}), "kill_switch_active": bool(active), "kill_switch_reason": payload.get("reason"), "kill_switch_at": _iso(_utc_now())}
+    event_payload = {
+        "active": bool(active),
+        "reason": payload.get("reason"),
+        "strategy_id": payload.get("strategy_id"),
+        "affected_count": len(rows),
+        "scope": "strategy" if payload.get("strategy_id") else "tenant",
+        "actor_email": user.email,
+    }
+    db.add(
+        RiskEvent(
+            tenant_id=tenant.id,
+            strategy_desk_id=rows[0].id if len(rows) == 1 else None,
+            event_type="risk.kill_switch_activated" if active else "risk.kill_switch_cleared",
+            severity="critical" if active else "info",
+            breached_rule="kill_switch",
+            action_taken="kill_switch_active" if active else "kill_switch_cleared",
+            payload_json=event_payload,
+        )
+    )
+    record_audit_event(
+        db,
+        event_type="risk.kill_switch_activated" if active else "risk.kill_switch_cleared",
+        tenant=tenant,
+        user=user,
+        payload=event_payload,
+    )
     db.commit()
-    return {"active": bool(active), "affected_count": len(rows)}
+    status = get_risk_kill_switch_status(db, current_user=current_user, strategy_id=payload.get("strategy_id"))
+    return {"active": bool(active), "affected_count": len(rows), "status": status}
 
 
 def _serialize_audit_event(row: AuditEvent) -> dict[str, Any]:
@@ -685,6 +776,34 @@ def list_audit_events(db: Session, *, current_user: Any, limit: int = 100) -> di
     tenant = _resolve_tenant_for_current_user(db, current_user)
     rows = db.execute(select(AuditEvent).where(AuditEvent.tenant_id == tenant.id).order_by(AuditEvent.created_at.desc()).limit(max(1, min(limit, 500)))).scalars().all()
     return {"items": [_serialize_audit_event(row) for row in rows], "count": len(rows)}
+
+
+def _safe_audit_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    forbidden_markers = ("api_key", "secret", "token", "password", "credential", "account_id", "file_path")
+    for key, value in dict(payload or {}).items():
+        key_text = str(key)
+        if any(marker in key_text.lower() for marker in forbidden_markers):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            text = str(value) if isinstance(value, str) else value
+            safe[key_text] = f"{text[:160]}..." if isinstance(text, str) and len(text) > 160 else text
+        elif isinstance(value, list):
+            safe[key_text] = f"{len(value)} items"
+        elif isinstance(value, dict):
+            safe[key_text] = f"{len(value)} keys"
+    return safe
+
+
+def _serialize_audit_event_summary(row: Any, *, include_payload: bool = False) -> dict[str, Any]:
+    payload = _safe_audit_payload(getattr(row, "payload_json", None)) if include_payload else {"recorded": True}
+    return {
+        "id": row.id,
+        "event_type": row.event_type,
+        "actor_email": row.actor_email,
+        "payload": payload,
+        "created_at": _iso(row.created_at),
+    }
 
 
 def _trade_decision_for(db: Session, *, tenant_id: str, trade_id: str) -> TradeDecision | None:
@@ -747,6 +866,94 @@ def get_strategy_audit(db: Session, *, current_user: Any, strategy_id: str) -> d
     strategy = load_strategy_or_raise(db, tenant_id=tenant.id, strategy_id=strategy_id)
     decisions = db.execute(select(TradeDecision).where(TradeDecision.tenant_id == tenant.id, TradeDecision.strategy_desk_id == strategy.id).order_by(TradeDecision.created_at.desc()).limit(100)).scalars().all()
     return {"strategy": _serialize_strategy(db, tenant_id=tenant.id, strategy=strategy), "decisions": [_serialize_trade_decision(row) for row in decisions]}
+
+
+def _risk_audit_replay_summaries(db: Session, *, tenant_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    decisions = db.execute(select(TradeDecision).where(TradeDecision.tenant_id == tenant_id).order_by(TradeDecision.created_at.desc()).limit(max(1, min(limit, 500)))).scalars().all()
+    replay_counts = {
+        decision_id: int(count or 0)
+        for decision_id, count in db.execute(
+            select(DecisionReplayEvent.trade_decision_id, func.count(DecisionReplayEvent.id))
+            .where(DecisionReplayEvent.tenant_id == tenant_id, DecisionReplayEvent.trade_decision_id.in_([decision.id for decision in decisions]))
+            .group_by(DecisionReplayEvent.trade_decision_id)
+        ).all()
+    } if decisions else {}
+    summaries: list[dict[str, Any]] = []
+    for decision in decisions:
+        serialized = _serialize_trade_decision(decision) or {}
+        summaries.append(
+            {
+                **serialized,
+                "trade_id": decision.id,
+                "decision_id": decision.id,
+                "replay_event_count": replay_counts.get(decision.id, 0),
+            }
+        )
+    return summaries
+
+
+def get_risk_audit_hardening(db: Session, *, current_user: Any, limit: int = 100) -> dict[str, Any]:
+    _assert_reader(current_user)
+    tenant = _resolve_tenant_for_current_user(db, current_user)
+    capped_limit = max(1, min(limit, 500))
+    policies = [_serialize_risk_policy(row) for row in db.execute(select(RiskPolicy).where(RiskPolicy.tenant_id == tenant.id).order_by(RiskPolicy.created_at.desc()).limit(capped_limit)).scalars().all()]
+    risk_events = [
+        {
+            "id": row.id,
+            "strategy_id": row.strategy_desk_id,
+            "event_type": row.event_type,
+            "severity": row.severity,
+            "breached_rule": row.breached_rule,
+            "action_taken": row.action_taken,
+            "payload": dict(row.payload_json or {}),
+            "created_at": _iso(row.created_at),
+        }
+        for row in db.execute(
+            select(RiskEvent)
+            .where(RiskEvent.tenant_id == tenant.id)
+            .order_by(RiskEvent.created_at.desc())
+            .limit(capped_limit)
+        ).scalars().all()
+    ]
+    audit_rows = db.execute(
+        select(AuditEvent.id, AuditEvent.event_type, AuditEvent.actor_email, AuditEvent.created_at)
+        .where(AuditEvent.tenant_id == tenant.id)
+        .order_by(AuditEvent.created_at.desc())
+        .limit(capped_limit)
+    ).all()
+    audit_events = [
+        {
+            "id": row.id,
+            "event_type": row.event_type,
+            "actor_email": row.actor_email,
+            "payload": {"recorded": True},
+            "created_at": _iso(row.created_at),
+        }
+        for row in audit_rows
+    ]
+    control_audit_rows = []
+    for event_type in ("risk.kill_switch_activated", "risk.kill_switch_cleared", "audit.export_queued"):
+        control_audit_rows.extend(
+            db.execute(
+                select(AuditEvent)
+                .where(AuditEvent.event_type == event_type, AuditEvent.tenant_id == tenant.id)
+                .limit(50)
+            ).scalars().all()
+        )
+    by_audit_id = {row["id"]: row for row in audit_events}
+    for row in control_audit_rows:
+        by_audit_id[row.id] = _serialize_audit_event_summary(row, include_payload=True)
+    audit_events = sorted(by_audit_id.values(), key=lambda row: str(row.get("created_at") or ""), reverse=True)[:capped_limit]
+    audit_exports = [_serialize_audit_export(row) for row in db.execute(select(AuditExport).where(AuditExport.tenant_id == tenant.id).order_by(AuditExport.created_at.desc()).limit(capped_limit)).scalars().all()]
+    trade_replays = _risk_audit_replay_summaries(db, tenant_id=tenant.id, limit=capped_limit)
+    return build_risk_audit_hardening_report(
+        risk_policies=policies,
+        risk_events=risk_events,
+        audit_events=audit_events,
+        audit_exports=audit_exports,
+        trade_replays=trade_replays,
+        safety_summary={},
+    )
 
 
 def create_audit_export(db: Session, *, current_user: Any, request: Any) -> dict[str, Any]:

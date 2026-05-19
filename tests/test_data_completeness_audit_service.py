@@ -26,6 +26,7 @@ def _complete_candidate() -> dict[str, object]:
         "blockers": [],
         "actual_forward_return": 0.42,
         "baseline_forward_return": 0.10,
+        "regime": "trend_day",
     }
 
 
@@ -43,6 +44,7 @@ def _complete_forecast() -> dict[str, object]:
         "actual_series": [100.0, 100.3, 100.7],
         "actual_forward_return": 0.70,
         "baseline_forward_return": 0.15,
+        "regime": "trend_day",
     }
 
 
@@ -58,6 +60,7 @@ def _complete_execution() -> dict[str, object]:
         "fill_delay": 410,
         "route": "broker_paper",
         "paper_fill_status": "filled",
+        "regime": "trend_day",
     }
 
 
@@ -133,6 +136,126 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
         blocker_fields = {row["field"] for row in report["summary"]["benchmark_blockers"]}
         self.assertIn("actual_forward_return", blocker_fields)
         self.assertIn("baseline_forward_return", blocker_fields)
+
+    def test_cleanup_plan_prioritizes_proof_gaps_without_fabricating_data(self) -> None:
+        incomplete_candidate = _complete_candidate()
+        incomplete_candidate.pop("actual_forward_return")
+        incomplete_candidate.pop("baseline_forward_return")
+        incomplete_candidate.pop("regime")
+        incomplete_forecast = _complete_forecast()
+        incomplete_forecast.pop("actual_series")
+        incomplete_execution = _complete_execution()
+        incomplete_execution.pop("slippage")
+        report = build_data_completeness_report(
+            candidate_records=[incomplete_candidate],
+            forecast_records=[incomplete_forecast],
+            execution_records=[incomplete_execution],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        cleanup_plan = report["data_cleanup_plan"]
+        by_key = {row["key"]: row for row in cleanup_plan["items"]}
+        self.assertEqual(cleanup_plan["status"], "needs_attention")
+        self.assertEqual(report["summary"]["cleanup_plan_status"], "needs_attention")
+        self.assertGreaterEqual(report["summary"]["cleanup_plan_critical_open_items"], 2)
+        self.assertEqual(by_key["missing_forward_returns"]["status"], "needs_cleanup")
+        self.assertEqual(by_key["missing_baselines"]["status"], "needs_cleanup")
+        self.assertEqual(by_key["missing_forecast_actuals"]["status"], "needs_cleanup")
+        self.assertEqual(by_key["missing_execution_evidence"]["status"], "needs_cleanup")
+        self.assertIn("Professional Benchmark", by_key["missing_forward_returns"]["blocked_reports"])
+        self.assertIn("actual_forward_return", by_key["missing_forward_returns"]["missing_field_counts"])
+        self.assertIn("baseline_forward_return", by_key["missing_baselines"]["missing_field_counts"])
+        self.assertTrue(all(item["manual_review_only"] for item in cleanup_plan["items"]))
+        self.assertFalse(any(item["changes_execution"] for item in cleanup_plan["items"]))
+        self.assertIn("does not fabricate", cleanup_plan["summary"]["safe_boundary"])
+
+    def test_proof_field_coverage_blocks_benchmark_readiness_when_roadmap_fields_are_missing(self) -> None:
+        candidate = _complete_candidate()
+        candidate.pop("baseline_forward_return")
+        candidate.pop("regime")
+        forecast = _complete_forecast()
+        forecast.pop("actual_series")
+        execution = _complete_execution()
+        execution.pop("slippage")
+        report = build_data_completeness_report(
+            candidate_records=[candidate],
+            forecast_records=[forecast],
+            execution_records=[execution],
+            benchmark_records=[
+                {
+                    "status": "ready",
+                    "generated_at": "2026-05-06T00:00:00Z",
+                    "benchmark_verdict": "ready",
+                    "candidate_count": 1,
+                    "rewardable_count": 1,
+                    "missing_fields": {},
+                }
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        coverage = report["proof_field_coverage"]
+        by_key = {row["key"]: row for row in coverage["records"]}
+        self.assertFalse(report["summary"]["benchmark_ready"])
+        self.assertFalse(report["summary"]["proof_field_ready"])
+        self.assertEqual(by_key["baseline_returns"]["status"], "needs_attention")
+        self.assertEqual(by_key["forecast_actuals"]["status"], "needs_attention")
+        self.assertEqual(by_key["execution_costs"]["status"], "needs_attention")
+        self.assertEqual(by_key["regime_labels"]["status"], "needs_attention")
+        self.assertIn("baseline_return", by_key["baseline_returns"]["missing_group_counts"])
+        self.assertIn("actual_series", by_key["forecast_actuals"]["missing_group_counts"])
+        self.assertIn("slippage", by_key["execution_costs"]["missing_group_counts"])
+        self.assertTrue(all(action["manual_review_only"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["changes_execution"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_broker_routes"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_bypass_risk_gates"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_ranking_weights"] for action in coverage["safe_next_actions"]))
+        self.assertFalse(any(action["can_grant_ai_order_authority"] for action in coverage["safe_next_actions"]))
+
+    def test_cleanup_plan_counts_missing_forecast_horizon_context(self) -> None:
+        forecast = _complete_forecast()
+        forecast.pop("horizon_minutes")
+        report = build_data_completeness_report(
+            forecast_records=[forecast],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        cleanup_by_key = {row["key"]: row for row in report["data_cleanup_plan"]["items"]}
+        lineage_context = cleanup_by_key["missing_lineage_and_context"]
+
+        self.assertEqual(lineage_context["status"], "needs_cleanup")
+        self.assertIn("horizon_minutes", lineage_context["missing_field_counts"])
+        self.assertIn("horizon_minutes", {row["field"] for row in report["summary"]["benchmark_blockers"]})
+        self.assertTrue(all(action["manual_review_only"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["changes_execution"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_broker_routes"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_bypass_risk_gates"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_change_ranking_weights"] for action in report["safe_next_actions"]))
+        self.assertFalse(any(action["can_grant_ai_order_authority"] for action in report["safe_next_actions"]))
+
+    def test_proof_field_coverage_ready_when_required_roadmap_fields_are_present(self) -> None:
+        report = build_data_completeness_report(
+            candidate_records=[_complete_candidate()],
+            forecast_records=[_complete_forecast()],
+            execution_records=[_complete_execution()],
+            benchmark_records=[
+                {
+                    "status": "ready",
+                    "generated_at": "2026-05-06T00:00:00Z",
+                    "benchmark_verdict": "ready",
+                    "candidate_count": 1,
+                    "rewardable_count": 1,
+                    "missing_fields": {},
+                }
+            ],
+            generated_at="2026-05-06T00:00:00Z",
+        )
+
+        self.assertTrue(report["summary"]["proof_field_ready"])
+        self.assertTrue(report["summary"]["benchmark_ready"])
+        self.assertEqual(report["proof_field_coverage"]["status"], "ready")
+        self.assertEqual(report["proof_field_coverage"]["summary"]["ready_requirement_count"], 6)
+        self.assertEqual(report["proof_field_coverage"]["summary"]["average_coverage_rate"], 1.0)
 
     def test_missing_execution_fields(self) -> None:
         execution = _complete_execution()
@@ -222,7 +345,7 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
 
     def test_simulation_evidence_is_visible_but_not_rewardable(self) -> None:
         candidate = _complete_candidate()
-        candidate["evidence_pool"] = "simulation_evidence"
+        candidate["evidence_pool"] = " Simulation_Evidence "
         row = audit_record(candidate, source_type="candidate")
 
         self.assertTrue(row["complete"])
@@ -248,10 +371,20 @@ class DataCompletenessAuditServiceTests(unittest.TestCase):
             self.assertTrue(data["research_only"])
             self.assertFalse(data["can_submit_orders"])
             self.assertFalse(data["can_submit_live_orders"])
+            self.assertFalse(data["can_change_broker_routes"])
+            self.assertFalse(data["can_bypass_risk_gates"])
+            self.assertFalse(data["can_clear_kill_switch"])
+            self.assertFalse(data["can_change_ranking_weights"])
+            self.assertFalse(data["can_grant_ai_order_authority"])
             self.assertEqual(data["mutation"], "none")
             self.assertIn("summary", data)
             self.assertIn("records", data)
             self.assertIn("aggregations", data)
+            self.assertIn("proof_field_coverage", data)
+            self.assertIn("data_cleanup_plan", data)
+            self.assertIn("proof_field_ready", data["summary"])
+            self.assertIn("proof_field_coverage_rate", data["summary"])
+            self.assertIn("cleanup_plan_status", data["summary"])
             self.assertIn("missing_fields", data)
             self.assertIn("safety_notes", data)
             self.assertIn("Does not place orders.", data["safety_notes"])

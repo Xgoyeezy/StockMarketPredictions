@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Button from '../components/Button'
 import ErrorState from '../components/ErrorState'
+import FinishTrackerSection from '../components/FinishTrackerSection'
 import ListTable from '../components/ListTable'
 import MetricCard from '../components/MetricCard'
 import PageIntro from '../components/PageIntro'
@@ -20,6 +21,14 @@ function formatRatio(value) {
   return `${(numeric * 100).toFixed(1)}%`
 }
 
+function formatRequirementValue(row, field = 'value') {
+  const value = row?.[field]
+  if (String(row?.metric || '').includes('coverage') || String(row?.metric || '').includes('rate')) {
+    return formatRatio(value)
+  }
+  return formatNumber(value)
+}
+
 function humanize(value, fallback = 'Unknown') {
   const text = String(value || '').trim()
   if (!text) return fallback
@@ -28,6 +37,10 @@ function humanize(value, fallback = 'Unknown') {
 
 function statusTone(status) {
   if (status === 'ready') return 'positive'
+  if (status === 'ready_for_human_review' || status === 'passed') return 'positive'
+  if (status === 'needs_evidence') return 'warning'
+  if (status === 'blocked_by_evidence') return 'warning'
+  if (status === 'no_records') return 'neutral'
   if (status === 'empty') return 'neutral'
   return 'warning'
 }
@@ -43,7 +56,7 @@ function DataTable({ columns, rows, empty }) {
         </thead>
         <tbody>
           {rows.length ? rows.map((row, index) => (
-            <tr key={row.order_id || row.trade_id || row.symbol || row.setup_type || row.engine || row.field || row.note || index}>
+            <tr key={row.key || row.order_id || row.trade_id || row.symbol || row.setup_type || row.engine || row.field || row.note || index}>
               {columns.map((column) => (
                 <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
               ))}
@@ -86,6 +99,12 @@ export default function ExecutionQualityPage() {
 
   const summary = report?.summary || {}
   const aggregations = report?.aggregations || {}
+  const proofSummary = report?.proof_summary || aggregations.execution_proof || {}
+  const proofRows = proofSummary?.requirements || []
+  const recordReadiness = proofSummary?.record_readiness || []
+  const hardeningPlan = report?.execution_quality_hardening_plan || aggregations.execution_quality_hardening_plan || {}
+  const hardeningSummary = hardeningPlan?.summary || {}
+  const hardeningRows = hardeningPlan?.items || []
   const rows = report?.records || []
   const warnings = report?.warnings || []
   const safetyNotes = report?.safety_notes || []
@@ -128,6 +147,47 @@ export default function ExecutionQualityPage() {
           <MetricCard label="Partial fill rate" value={formatRatio(summary.partial_fill_rate)} helper="Paper partial fills" />
           <MetricCard label="Missed fill rate" value={formatRatio(summary.missed_fill_rate)} helper="Rejected/canceled/expired/no-fill states" />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Execution Proof Gate" subtitle="Human-review checklist for paper execution samples, cost evidence, fill quality, candidate-route linkage, and edge after costs.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Proof status" value={humanize(proofSummary.status || summary.execution_proof_status || 'needs_evidence')} helper={`${summary.execution_requirements_passed ?? 0}/${summary.execution_requirements_total ?? 7} requirements passed`} />
+          <MetricCard label="Cost evidence coverage" value={formatRatio(proofSummary.summary?.cost_evidence_coverage ?? summary.cost_evidence_coverage)} helper="Rows with slippage, spread, and fill delay" />
+          <MetricCard label="Candidate-route linkage" value={formatRatio(proofSummary.summary?.candidate_route_linkage_coverage ?? summary.candidate_route_linkage_coverage)} helper="Rows linked to candidate, route, and fill" />
+          <MetricCard label="Cost-adjusted edge" value={formatNumber(proofSummary.summary?.average_cost_adjusted_edge ?? summary.average_cost_adjusted_edge)} helper="Baseline-relative edge after costs" />
+        </div>
+        <DataTable
+          rows={proofRows}
+          empty={loading ? 'Loading execution proof requirements...' : 'No execution proof requirements are available.'}
+          columns={[
+            { key: 'label', label: 'Requirement' },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'value', label: 'Value', render: (row) => formatRequirementValue(row) },
+            { key: 'threshold', label: 'Threshold', render: (row) => `${row.comparison === 'less_or_equal' ? '<=' : row.comparison === 'greater_than' ? '>' : '>='} ${formatRequirementValue(row, 'threshold')}` },
+            { key: 'safe_next_action', label: 'Safe next action' },
+          ]}
+        />
+      </SectionCard>
+
+      <SectionCard title="Execution Quality Hardening Plan" subtitle="Proof-first blockers for tradability, after-cost edge, route-quality, paper-to-live, and live-readiness claims.">
+        <div className="ui-dashboard-grid">
+          <MetricCard label="Hardening status" value={humanize(hardeningPlan.status || summary.execution_quality_hardening_status || 'needs_evidence')} helper={`${hardeningSummary.open_item_count ?? summary.execution_quality_hardening_open_items ?? 0} open hardening items`} />
+          <MetricCard label="Critical blockers" value={hardeningSummary.critical_open_items ?? summary.execution_quality_hardening_critical_open_items ?? 0} helper={hardeningSummary.top_hardening_item || summary.top_hardening_item || 'No top hardening item'} />
+          <MetricCard label="Internal review" value={hardeningSummary.claim_permissions?.cautious_internal_execution_review || summary.claim_permissions?.cautious_internal_execution_review ? 'Allowed' : 'Blocked'} helper="Human paper-route review only" />
+          <MetricCard label="Blocked claims" value={(hardeningSummary.blocked_claims || []).length || 0} helper={(hardeningSummary.blocked_claims || []).slice(0, 3).map(humanize).join(', ') || 'None'} />
+        </div>
+        <DataTable
+          rows={hardeningRows}
+          empty={loading ? 'Loading execution quality hardening plan...' : 'No execution quality hardening plan is available.'}
+          columns={[
+            { key: 'title', label: 'Hardening item' },
+            { key: 'priority', label: 'Priority', render: (row) => humanize(row.priority) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge tone={statusTone(row.status)}>{humanize(row.status)}</StatusBadge> },
+            { key: 'missing', label: 'Missing evidence', render: (row) => row.missing_fields?.length ? row.missing_fields.join(', ') : 'None' },
+            { key: 'blocked_claims', label: 'Blocked claims', render: (row) => row.blocked_claims?.length ? row.blocked_claims.map(humanize).join(', ') : 'None' },
+            { key: 'action', label: 'Safe next action', render: (row) => row.safe_next_action },
+          ]}
+        />
       </SectionCard>
 
       <SectionCard title="Best And Worst Execution Setups" subtitle="Setup-level TCA is manual research only and cannot alter routing or ranking.">
@@ -192,6 +252,23 @@ export default function ExecutionQualityPage() {
         </div>
       </SectionCard>
 
+      <SectionCard title="Execution Record Readiness" subtitle="Per-order readiness shows whether paper rows have linked candidate, route, fill, cost, and edge evidence.">
+        <DataTable
+          rows={recordReadiness.slice(0, 50)}
+          empty={loading ? 'Loading execution readiness...' : 'No execution readiness records found.'}
+          columns={[
+            { key: 'symbol', label: 'Symbol' },
+            { key: 'route', label: 'Route', render: (row) => humanize(row.route) },
+            { key: 'linked_candidate_id', label: 'Candidate', render: (row) => row.linked_candidate_id || '--' },
+            { key: 'cost_evidence_complete', label: 'Costs', render: (row) => row.cost_evidence_complete ? 'Complete' : 'Missing' },
+            { key: 'has_fill_price', label: 'Fill', render: (row) => row.has_fill_price ? 'Available' : 'Missing' },
+            { key: 'has_execution_adjusted_reward', label: 'Adj reward', render: (row) => row.has_execution_adjusted_reward ? 'Available' : 'Missing' },
+            { key: 'has_cost_adjusted_edge', label: 'Edge', render: (row) => row.has_cost_adjusted_edge ? 'Available' : 'Missing' },
+            { key: 'warnings', label: 'Warnings', render: (row) => (row.warnings || []).join(', ') || 'None' },
+          ]}
+        />
+      </SectionCard>
+
       <SectionCard title="Paper Trade Rows" subtitle="Sanitized local evidence only. Raw broker records, account IDs, and local paths are not shown.">
         <DataTable
           rows={rows.slice(0, 50)}
@@ -232,6 +309,8 @@ export default function ExecutionQualityPage() {
           />
         </div>
       </SectionCard>
+
+      <FinishTrackerSection tracker={report?.finish_tracker} loading={loading} />
     </div>
   )
 }

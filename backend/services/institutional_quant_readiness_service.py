@@ -11,12 +11,20 @@ READ_ONLY_SAFETY_FLAGS: dict[str, Any] = {
     "research_only": True,
     "read_only": True,
     "paper_route_only": True,
+    "changes_execution": False,
+    "changes_order_submission": False,
+    "changes_broker_routes": False,
+    "changes_risk_gates": False,
+    "changes_risk_limits": False,
+    "clears_kill_switch": False,
+    "changes_ranking_weights": False,
     "can_submit_orders": False,
     "can_submit_live_orders": False,
     "can_change_broker_routes": False,
     "can_bypass_risk_gates": False,
     "can_clear_kill_switch": False,
     "can_change_ranking_weights": False,
+    "can_grant_ai_order_authority": False,
     "mutation": "none",
     "writes_execution_config": False,
     "writes_broker_config": False,
@@ -50,7 +58,9 @@ INSTITUTIONAL_THIRD_TEN_REQUIREMENT_EVIDENCE: dict[str, bool] = {
     "permission_enforcement_coverage_meets_threshold": True,
     "approval_trace_completeness_meets_threshold": True,
     "incident_response_records_are_complete": True,
+    "incident_evidence_excludes_secrets_broker_records_account_identifiers_raw_logs_raw_local_paths_database_files_credential": True,
     "release_validation_and_rollback_controls_are_documented": True,
+    "release_and_rollback_evidence_excludes_secrets_broker_records_account_identifiers_raw_logs_raw_local_paths_database_file": True,
     "lineage_inspector_is_available": True,
     "permission_review_is_available": True,
     "incident_and_release_reports_are_available": True,
@@ -85,6 +95,15 @@ INSTITUTIONAL_DOCS: dict[str, str] = {
     "release_validation": "docs/compliance_checklist.md#release-validation-and-rollback-controls",
     "incident_management": "docs/compliance_checklist.md#incident-management-runbook",
     "external_review_plan": "docs/compliance_checklist.md#external-security-legal-and-compliance-review-plan",
+    "permission_enforcement": "docs/compliance_checklist.md#permission-enforcement-coverage",
+    "approval_trace": "docs/compliance_checklist.md#approval-trace-completeness",
+    "audit_event_completeness": "docs/compliance_checklist.md#audit-event-completeness",
+    "model_version_traceability": "docs/compliance_checklist.md#model-version-traceability",
+    "feature_lineage_completeness": "docs/compliance_checklist.md#feature-lineage-completeness",
+    "benchmark_walk_forward_traceability": "docs/compliance_checklist.md#benchmark-and-walk-forward-traceability",
+    "risk_control_auditability": "docs/compliance_checklist.md#risk-control-auditability",
+    "execution_report_lineage": "docs/compliance_checklist.md#execution-report-lineage",
+    "incident_report_completeness": "docs/compliance_checklist.md#incident-report-completeness",
     "category_plan": "docs/TEN_OUT_OF_TEN_CATEGORY_UPGRADE_MASTER_PLAN.md#category-5-institutional-quant-desk-or-enterprise-control-plane",
     "roadmap": "docs/TEN_OUT_OF_TEN_ROADMAP.md#stage-2-data-completeness-and-point-in-time-foundation",
 }
@@ -142,6 +161,11 @@ MODEL_LINEAGE_FIELDS: tuple[str, ...] = (
     "feature_version",
     "created_at",
     "approval_id",
+    "model_artifact_digest",
+    "training_window_start",
+    "training_window_end",
+    "validation_report_id",
+    "approval_scope",
 )
 FEATURE_LINEAGE_FIELDS: tuple[str, ...] = (
     "feature_id",
@@ -150,6 +174,9 @@ FEATURE_LINEAGE_FIELDS: tuple[str, ...] = (
     "generated_at",
     "transformation_version",
     "owner",
+    "input_snapshot_id",
+    "output_schema_version",
+    "no_lookahead",
 )
 BENCHMARK_WALK_FORWARD_LINK_FIELDS: tuple[str, ...] = (
     "benchmark_run_id",
@@ -157,6 +184,11 @@ BENCHMARK_WALK_FORWARD_LINK_FIELDS: tuple[str, ...] = (
     "data_version",
     "model_version",
     "feature_version",
+    "ranking_formula_version",
+    "reward_formula_version",
+    "baseline_definition_version",
+    "frozen_snapshot_id",
+    "frozen_before_outcome",
 )
 PORTFOLIO_RISK_REPORT_FIELDS: tuple[str, ...] = (
     "portfolio_exposure",
@@ -172,21 +204,41 @@ RISK_CONTROL_AUDIT_FIELDS: tuple[str, ...] = (
     "audited_at",
     "evidence_snapshot_id",
     "authoritative",
+    "policy_version",
+    "last_tested_at",
+    "bypass_allowed",
+    "analytics_override_allowed",
+    "ai_override_allowed",
+)
+UNSAFE_RISK_CONTROL_FIELDS: tuple[str, ...] = (
+    "bypass_allowed",
+    "analytics_override_allowed",
+    "ai_override_allowed",
 )
 EXECUTION_REPORT_LINK_FIELDS: tuple[str, ...] = (
+    "candidate_id",
+    "quote_id",
     "route",
+    "execution_lane",
     "order_id",
     "receipt_id",
     "fill_id",
     "reconciliation_id",
+    "reconciliation_status",
+    "spread_bps",
     "slippage",
+    "fill_delay_ms",
     "latency_ms",
 )
 ENVIRONMENT_SEPARATION_FIELDS: tuple[str, ...] = (
     "environment",
+    "execution_lane",
     "data_store",
+    "runtime_storage_scope",
+    "config_namespace",
     "secrets_scope",
     "broker_route_scope",
+    "audit_scope",
     "live_autonomy_enabled",
 )
 PERMISSION_ENFORCEMENT_FIELDS: tuple[str, ...] = (
@@ -196,32 +248,97 @@ PERMISSION_ENFORCEMENT_FIELDS: tuple[str, ...] = (
     "allowed",
     "enforced",
     "audited_at",
+    "evidence_snapshot_id",
+    "audit_event_id",
+    "permission_source",
+    "decision_boundary",
+)
+UNSAFE_PERMISSION_AUTHORITY_FIELDS: tuple[str, ...] = (
+    "can_submit_orders",
+    "can_submit_live_orders",
+    "can_change_broker_routes",
+    "can_bypass_risk_gates",
+    "can_clear_kill_switch",
+    "can_change_ranking_weights",
+    "can_grant_ai_order_authority",
+    "can_change_risk_limits",
 )
 APPROVAL_TRACE_FIELDS: tuple[str, ...] = (
     "approval_id",
     "actor",
+    "reviewer_role",
     "action",
+    "affected_entity",
+    "strategy_id",
+    "strategy_version",
+    "promotion_rule_version",
     "timestamp",
     "evidence_snapshot_id",
+    "audit_event_id",
     "previous_status",
     "new_status",
+    "approval_scope",
+    "decision_reason",
+    "claim_boundary",
+)
+UNSAFE_APPROVAL_AUTHORITY_FIELDS: tuple[str, ...] = (
+    "approves_live_trading",
+    "approves_order_submission",
+    "approves_broker_route_change",
+    "approves_risk_gate_bypass",
+    "approves_kill_switch_clear",
+    "approves_ai_order_authority",
+    "approves_ranking_weight_change",
+    "approves_risk_limit_change",
+    "mutates_immutable_forecast_records",
+    "edits_reward_inputs_after_outcome",
 )
 INCIDENT_RESPONSE_FIELDS: tuple[str, ...] = (
     "incident_id",
     "opened_at",
     "severity",
+    "detection_source",
+    "first_visible_symptom",
     "owner",
     "affected_entity",
+    "affected_proof_surfaces",
+    "safety_state_impact",
     "status",
+    "containment_note",
     "corrective_action",
+    "verification_performed",
+    "sanitization_status",
     "closed_at",
+    "post_incident_review_note",
 )
 AUDIT_IMMUTABILITY_FIELDS: tuple[str, ...] = (
     "event_id",
+    "event_type",
+    "actor",
+    "affected_entity",
+    "timestamp",
+    "evidence_snapshot_id",
+    "source_report",
     "event_hash",
     "previous_event_hash",
     "append_only",
     "tamper_evident",
+    "sanitization_status",
+    "safety_boundary",
+)
+UNSAFE_AUDIT_EVENT_FIELDS: tuple[str, ...] = (
+    "submits_orders",
+    "changes_execution_behavior",
+    "changes_broker_routes",
+    "bypasses_risk_gates",
+    "clears_kill_switches",
+    "grants_ai_order_authority",
+    "changes_ranking_weights",
+    "changes_risk_limits",
+    "contains_secrets",
+    "contains_account_identifiers",
+    "contains_raw_logs",
+    "contains_raw_local_paths",
 )
 SECRET_KEY_MARKERS: tuple[str, ...] = (
     "secret",
@@ -300,11 +417,46 @@ def build_institutional_evaluator_inspection_contract() -> dict[str, Any]:
 
 
 def build_firm_grade_report_contract(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    required_sections = (
+        "report_metadata",
+        "source_evidence_snapshots",
+        "data_lineage_summary",
+        "model_lineage_summary",
+        "feature_lineage_summary",
+        "risk_control_status",
+        "approval_promotion_metadata",
+        "forecast_reward_summary",
+        "incident_release_summary",
+        "audit_evidence_summary",
+        "verification_summary",
+        "sanitization_summary",
+        "claim_boundaries",
+        "external_review_status",
+    )
+    excluded_fields = (
+        "secrets",
+        "api_keys",
+        "tokens",
+        "passwords",
+        "authorization_headers",
+        "broker_account_identifiers",
+        "raw_broker_records",
+        "raw_broker_payloads",
+        "raw_runtime_logs",
+        "raw_local_paths",
+        "database_files",
+        "local_storage_files",
+        "credentials",
+        "environment_values",
+        "unsanitized_personal_data",
+    )
     source = dict(
         payload
         or {
             "report_id": "firm-report-1",
+            "schema_version": "firm_grade_report_v1",
             "generated_at": "2026-05-09T14:00:00Z",
+            "source_evidence_snapshot_ids": ["snapshot-1"],
             "data_lineage": {"vendor": "sample_vendor", "as_of": "2026-05-09"},
             "account_id": "ACCT-123",
             "raw_log": "sensitive raw log",
@@ -323,6 +475,17 @@ def build_firm_grade_report_contract(payload: dict[str, Any] | None = None) -> d
             "reproducible_digest": first_digest,
             "repeat_digest": second_digest,
             "leaks": leaks,
+            "required_sections": list(required_sections),
+            "excluded_fields": list(excluded_fields),
+            "schema_version_required": True,
+            "generated_timestamp_required": True,
+            "source_evidence_snapshots_required": True,
+            "sanitization_summary_required": True,
+            "claim_boundaries_required": True,
+            "external_review_status_required": True,
+            "can_support_institutional_grade_claim_without_external_review": False,
+            "can_certify_compliance": False,
+            "can_approve_live_trading": False,
             "firm_grade_report_claim_boundary": "Report hygiene is not an institutional-grade platform claim.",
             **READ_ONLY_SAFETY_FLAGS,
         }
@@ -471,7 +634,7 @@ def validate_feature_generation_timestamps(records: list[dict[str, Any]] | None 
 
 
 def validate_model_registry_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         MODEL_LINEAGE_FIELDS,
         {
@@ -481,12 +644,26 @@ def validate_model_registry_lineage(records: list[dict[str, Any]] | None = None)
             "feature_version": "features_v1",
             "created_at": "2026-05-09T14:00:00Z",
             "approval_id": "approval-1",
+            "model_artifact_digest": "sha256:model-demo",
+            "training_window_start": "2025-01-01",
+            "training_window_end": "2026-01-01",
+            "validation_report_id": "validation-report-1",
+            "approval_scope": "research_only",
         },
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["model_version_traceability"],
+            "model_registry_changes_ranking_weights": False,
+            "model_registry_changes_execution_behavior": False,
+            "model_registry_can_approve_live_trading": False,
+        }
     )
 
 
 def validate_feature_registry_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         FEATURE_LINEAGE_FIELDS,
         {
@@ -496,12 +673,25 @@ def validate_feature_registry_lineage(records: list[dict[str, Any]] | None = Non
             "generated_at": "2026-05-09T14:00:00Z",
             "transformation_version": "feature_transform_v1",
             "owner": "research",
+            "input_snapshot_id": "snapshot-1",
+            "output_schema_version": "feature_schema_v1",
+            "no_lookahead": True,
         },
+        extra_boolean_true_fields=("no_lookahead",),
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["feature_lineage_completeness"],
+            "feature_lineage_changes_ranking_weights": False,
+            "feature_lineage_changes_execution_behavior": False,
+            "feature_lineage_can_approve_live_trading": False,
+        }
     )
 
 
 def validate_benchmark_walk_forward_version_links(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         BENCHMARK_WALK_FORWARD_LINK_FIELDS,
         {
@@ -510,7 +700,22 @@ def validate_benchmark_walk_forward_version_links(records: list[dict[str, Any]] 
             "data_version": "market_data_snapshot_v1",
             "model_version": "model_v1",
             "feature_version": "features_v1",
+            "ranking_formula_version": "ranking_formula_v1",
+            "reward_formula_version": "reward_formula_v1",
+            "baseline_definition_version": "baseline_v1",
+            "frozen_snapshot_id": "wf-snapshot-1",
+            "frozen_before_outcome": True,
         },
+        extra_boolean_true_fields=("frozen_before_outcome",),
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["benchmark_walk_forward_traceability"],
+            "benchmark_walk_forward_links_change_ranking_weights": False,
+            "benchmark_walk_forward_links_change_execution_behavior": False,
+            "benchmark_walk_forward_links_can_approve_live_trading": False,
+        }
     )
 
 
@@ -530,21 +735,43 @@ def validate_portfolio_factor_liquidity_stress_reports(records: list[dict[str, A
 
 
 def validate_risk_control_auditability(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    result = _validate_required_fields(
-        records,
-        RISK_CONTROL_AUDIT_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "risk_control_id": "daily_loss_lock",
             "state": "active",
             "audited_at": "2026-05-09T14:00:00Z",
             "evidence_snapshot_id": "snapshot-1",
             "authoritative": True,
-        },
+            "policy_version": "risk_policy_v1",
+            "last_tested_at": "2026-05-09T13:00:00Z",
+            "bypass_allowed": False,
+            "analytics_override_allowed": False,
+            "ai_override_allowed": False,
+        }
+    ]
+    result = _validate_required_fields(
+        rows,
+        RISK_CONTROL_AUDIT_FIELDS,
+        rows[0],
         extra_boolean_true_fields=("authoritative",),
     )
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_RISK_CONTROL_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+    incomplete_indexes = set(result["failed_indexes"])
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
     return serialize_value(
         {
             **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "documentation": INSTITUTIONAL_DOCS["risk_control_auditability"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
             "analytics_can_bypass_risk_controls": False,
             "ai_can_bypass_risk_controls": False,
             "risk_audit_changes_risk_controls": False,
@@ -553,18 +780,34 @@ def validate_risk_control_auditability(records: list[dict[str, Any]] | None = No
 
 
 def validate_execution_report_lineage(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    return _validate_required_fields(
+    result = _validate_required_fields(
         records,
         EXECUTION_REPORT_LINK_FIELDS,
         {
+            "candidate_id": "candidate-1",
+            "quote_id": "quote-1",
             "route": "broker_paper",
+            "execution_lane": "paper",
             "order_id": "order-1",
             "receipt_id": "receipt-1",
             "fill_id": "fill-1",
             "reconciliation_id": "reconcile-1",
+            "reconciliation_status": "matched",
+            "spread_bps": 4.2,
             "slippage": 0.02,
+            "fill_delay_ms": 450,
             "latency_ms": 450,
         },
+    )
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["execution_report_lineage"],
+            "execution_lineage_changes_broker_routes": False,
+            "execution_lineage_changes_order_behavior": False,
+            "execution_lineage_submits_orders": False,
+            "execution_lineage_can_approve_live_trading": False,
+        }
     )
 
 
@@ -585,26 +828,50 @@ def validate_environment_separation(records: list[dict[str, Any]] | None = None)
     rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "environment": "paper_research",
+            "execution_lane": "alpaca_paper",
             "data_store": "research_evidence",
+            "runtime_storage_scope": "paper_research_runtime",
+            "config_namespace": "paper_research",
             "secrets_scope": "paper_only",
             "broker_route_scope": "paper_only",
+            "audit_scope": "research_audit",
             "live_autonomy_enabled": False,
+            "broker_route_mutation_allowed": False,
+            "risk_gate_bypass_allowed": False,
+            "ranking_mutation_allowed": False,
+            "simulation_observed_mixing_allowed": False,
         }
     ]
     missing_by_record = []
     failed_indexes = []
+    violation_fields = (
+        "live_autonomy_enabled",
+        "broker_route_mutation_allowed",
+        "risk_gate_bypass_allowed",
+        "ranking_mutation_allowed",
+        "simulation_observed_mixing_allowed",
+    )
+    violations_by_record = []
     for index, row in enumerate(rows):
         missing = [field for field in ENVIRONMENT_SEPARATION_FIELDS if not _has_value(row.get(field))]
-        live_autonomy_enabled = row.get("live_autonomy_enabled") is True
+        violations = [field for field in violation_fields if row.get(field) is True]
         missing_by_record.append({"index": index, "missing_fields": missing})
-        if missing or live_autonomy_enabled:
+        violations_by_record.append({"index": index, "violation_fields": violations})
+        if missing or violations:
             failed_indexes.append(index)
     return serialize_value(
         {
             "status": "passed" if not failed_indexes else "needs_evidence",
             "required_fields": list(ENVIRONMENT_SEPARATION_FIELDS),
             "missing_by_record": missing_by_record,
+            "violations_by_record": violations_by_record,
             "failed_indexes": failed_indexes,
+            "blocks_institutional_claims_when_failed": True,
+            "environment_separation_can_enable_live_autonomy": False,
+            "environment_separation_can_change_broker_routes": False,
+            "environment_separation_can_bypass_risk_gates": False,
+            "environment_separation_can_mutate_ranking_weights": False,
+            "environment_separation_can_merge_simulation_with_observed": False,
             "environment_separation_changes_live_state": False,
             **READ_ONLY_SAFETY_FLAGS,
         }
@@ -650,9 +917,7 @@ def _coverage_result(
 
 
 def validate_permission_enforcement_coverage(records: list[dict[str, Any]] | None = None, *, threshold: float = 1.0) -> dict[str, Any]:
-    result = _coverage_result(
-        records,
-        PERMISSION_ENFORCEMENT_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "role": "risk_manager",
             "action": "hold",
@@ -660,29 +925,123 @@ def validate_permission_enforcement_coverage(records: list[dict[str, Any]] | Non
             "allowed": True,
             "enforced": True,
             "audited_at": "2026-05-09T14:00:00Z",
-        },
+            "evidence_snapshot_id": "snapshot-1",
+            "audit_event_id": "audit-event-1",
+            "permission_source": "research_permission_policy_v1",
+            "decision_boundary": "research_metadata_only",
+            "can_submit_orders": False,
+            "can_submit_live_orders": False,
+            "can_change_broker_routes": False,
+            "can_bypass_risk_gates": False,
+            "can_clear_kill_switch": False,
+            "can_change_ranking_weights": False,
+            "can_grant_ai_order_authority": False,
+            "can_change_risk_limits": False,
+        }
+    ]
+    result = _coverage_result(
+        rows,
+        PERMISSION_ENFORCEMENT_FIELDS,
+        rows[0],
         threshold=threshold,
         boolean_true_fields=("enforced",),
     )
-    return serialize_value({**result, "permission_enforcement_changes_execution_behavior": False})
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_PERMISSION_AUTHORITY_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = {check["index"] for check in result["checks"] if not check["passed"]}
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
+    return serialize_value(
+        {
+            **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_permission_authority_fields": list(UNSAFE_PERMISSION_AUTHORITY_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["permission_enforcement"],
+            "blocks_institutional_claims_when_failed": True,
+            "permission_enforcement_can_submit_orders": False,
+            "permission_enforcement_can_change_broker_routes": False,
+            "permission_enforcement_can_bypass_risk_gates": False,
+            "permission_enforcement_can_clear_kill_switch": False,
+            "permission_enforcement_can_change_ranking_weights": False,
+            "permission_enforcement_can_grant_ai_order_authority": False,
+            "permission_enforcement_changes_execution_behavior": False,
+        }
+    )
 
 
 def validate_approval_trace_completeness(records: list[dict[str, Any]] | None = None, *, threshold: float = 1.0) -> dict[str, Any]:
-    result = _coverage_result(
-        records,
-        APPROVAL_TRACE_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "approval_id": "approval-1",
             "actor": "risk-manager-1",
+            "reviewer_role": "risk_manager",
             "action": "hold",
+            "affected_entity": "research_promotion_status",
+            "strategy_id": "strategy:macro_trend",
+            "strategy_version": "strategy_v1",
+            "promotion_rule_version": "research_promotion_v1",
             "timestamp": "2026-05-09T14:00:00Z",
             "evidence_snapshot_id": "snapshot-1",
+            "audit_event_id": "audit-event-1",
             "previous_status": "candidate",
             "new_status": "hold",
-        },
+            "approval_scope": "research_metadata_only",
+            "decision_reason": "insufficient benchmark evidence",
+            "claim_boundary": "not live-trading approval",
+            "approves_live_trading": False,
+            "approves_order_submission": False,
+            "approves_broker_route_change": False,
+            "approves_risk_gate_bypass": False,
+            "approves_kill_switch_clear": False,
+            "approves_ai_order_authority": False,
+            "approves_ranking_weight_change": False,
+            "approves_risk_limit_change": False,
+            "mutates_immutable_forecast_records": False,
+            "edits_reward_inputs_after_outcome": False,
+        }
+    ]
+    result = _coverage_result(
+        rows,
+        APPROVAL_TRACE_FIELDS,
+        rows[0],
         threshold=threshold,
     )
-    return serialize_value({**result, "approval_trace_changes_execution_behavior": False})
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_APPROVAL_AUTHORITY_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = {check["index"] for check in result["checks"] if not check["passed"]}
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
+    return serialize_value(
+        {
+            **result,
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_approval_authority_fields": list(UNSAFE_APPROVAL_AUTHORITY_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["approval_trace"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "approval_trace_can_approve_live_trading": False,
+            "approval_trace_can_submit_orders": False,
+            "approval_trace_can_change_broker_routes": False,
+            "approval_trace_can_bypass_risk_gates": False,
+            "approval_trace_can_clear_kill_switch": False,
+            "approval_trace_can_grant_ai_order_authority": False,
+            "approval_trace_can_change_ranking_weights": False,
+            "approval_trace_can_change_risk_limits": False,
+            "approval_trace_changes_execution_behavior": False,
+        }
+    )
 
 
 def validate_incident_response_records(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -693,24 +1052,75 @@ def validate_incident_response_records(records: list[dict[str, Any]] | None = No
             "incident_id": "incident-1",
             "opened_at": "2026-05-09T14:00:00Z",
             "severity": "medium",
+            "detection_source": "release_validation",
+            "first_visible_symptom": "missing audit event",
             "owner": "operations",
             "affected_entity": "research_promotion",
+            "affected_proof_surfaces": ["audit_trail", "research_promotion"],
+            "safety_state_impact": "none",
             "status": "closed",
+            "containment_note": "held readiness claim",
             "corrective_action": "documented rollback validation",
+            "verification_performed": "focused audit review",
+            "sanitization_status": "sanitized",
             "closed_at": "2026-05-09T15:00:00Z",
+            "post_incident_review_note": "added required audit evidence",
         },
     )
-    return serialize_value({**result, "incident_response_changes_execution_behavior": False})
+    return serialize_value(
+        {
+            **result,
+            "documentation": INSTITUTIONAL_DOCS["incident_report_completeness"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "incident_response_changes_execution_behavior": False,
+            "incident_response_can_clear_kill_switch": False,
+            "incident_response_can_change_broker_routes": False,
+            "incident_response_can_bypass_risk_gates": False,
+            "incident_response_can_approve_live_trading": False,
+        }
+    )
 
 
 def build_release_validation_rollback_docs_contract() -> dict[str, Any]:
+    required_release_validation_fields = (
+        "release_id",
+        "branch",
+        "commit",
+        "pull_request",
+        "changed_scope",
+        "affected_proof_surfaces",
+        "pre_release_safety_result",
+        "verification_summary",
+        "reviewer_or_automation_check",
+        "release_decision",
+        "rollback_target",
+        "rollback_verification_plan",
+        "sanitization_check",
+    )
+    blocked_conditions = (
+        "live_trading_enabled_without_separate_project",
+        "broker_route_order_risk_gate_kill_switch_ai_or_ranking_change",
+        "simulation_evidence_merged_with_observed_evidence",
+        "failed_local_verification",
+        "unknown_rollback_target",
+        "unsanitized_release_evidence",
+    )
     return serialize_value(
         {
             "status": "passed",
             "documentation": INSTITUTIONAL_DOCS["release_validation"],
             "release_validation_documented": True,
             "rollback_controls_documented": True,
+            "required_release_validation_fields": list(required_release_validation_fields),
+            "blocked_conditions": list(blocked_conditions),
             "release_or_rollback_can_enable_live_autonomy": False,
+            "release_or_rollback_can_change_broker_routes": False,
+            "release_or_rollback_can_change_order_behavior": False,
+            "release_or_rollback_can_bypass_risk_gates": False,
+            "release_or_rollback_can_clear_kill_switch": False,
+            "release_or_rollback_can_grant_ai_order_authority": False,
+            "release_or_rollback_can_change_ranking_weights": False,
             **READ_ONLY_SAFETY_FLAGS,
         }
     )
@@ -826,14 +1236,27 @@ def validate_model_lineage_completeness_threshold(
             "feature_version": "features_v1",
             "created_at": "2026-05-09T14:00:00Z",
             "approval_id": "approval-1",
+            "model_artifact_digest": "sha256:model-demo",
+            "training_window_start": "2025-01-01",
+            "training_window_end": "2026-01-01",
+            "validation_report_id": "validation-report-1",
+            "approval_scope": "research_only",
             "feature_id": "feature:momentum_20",
             "source_version": "market_data_snapshot_v1",
             "generated_at": "2026-05-09T14:00:00Z",
             "transformation_version": "feature_transform_v1",
             "owner": "research",
+            "input_snapshot_id": "snapshot-1",
+            "output_schema_version": "feature_schema_v1",
+            "no_lookahead": True,
             "benchmark_run_id": "benchmark-1",
             "walk_forward_experiment_id": "wf-1",
             "data_version": "market_data_snapshot_v1",
+            "ranking_formula_version": "ranking_formula_v1",
+            "reward_formula_version": "reward_formula_v1",
+            "baseline_definition_version": "baseline_v1",
+            "frozen_snapshot_id": "wf-snapshot-1",
+            "frozen_before_outcome": True,
         },
         threshold=threshold,
     )
@@ -848,28 +1271,109 @@ def validate_model_lineage_completeness_threshold(
 
 
 def validate_audit_immutability_checks(records: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    result = _validate_required_fields(
-        records,
-        AUDIT_IMMUTABILITY_FIELDS,
+    rows = [row for row in records or [] if isinstance(row, dict)] or [
         {
             "event_id": "audit-event-1",
+            "event_type": "research_status_review",
+            "actor": "risk-manager-1",
+            "affected_entity": "research_promotion_status",
+            "timestamp": "2026-05-09T14:00:00Z",
+            "evidence_snapshot_id": "snapshot-1",
+            "source_report": "institutional_readiness",
             "event_hash": "hash-1",
             "previous_event_hash": "hash-0",
             "append_only": True,
             "tamper_evident": True,
-        },
+            "sanitization_status": "sanitized",
+            "safety_boundary": "research_metadata_only",
+            "submits_orders": False,
+            "changes_execution_behavior": False,
+            "changes_broker_routes": False,
+            "bypasses_risk_gates": False,
+            "clears_kill_switches": False,
+            "grants_ai_order_authority": False,
+            "changes_ranking_weights": False,
+            "changes_risk_limits": False,
+            "contains_secrets": False,
+            "contains_account_identifiers": False,
+            "contains_raw_logs": False,
+            "contains_raw_local_paths": False,
+        }
+    ]
+    result = _validate_required_fields(
+        rows,
+        AUDIT_IMMUTABILITY_FIELDS,
+        rows[0],
         extra_boolean_true_fields=("append_only", "tamper_evident"),
     )
+    violations_by_record = []
+    for index, row in enumerate(rows):
+        violations = [field for field in UNSAFE_AUDIT_EVENT_FIELDS if row.get(field) is True]
+        violations_by_record.append({"index": index, "violation_fields": violations})
+
+    incomplete_indexes = set(result["failed_indexes"])
+    violation_indexes = {row["index"] for row in violations_by_record if row["violation_fields"]}
+    failed_indexes = sorted(incomplete_indexes | violation_indexes)
+    status = "passed" if result["status"] == "passed" and not violation_indexes else "needs_evidence"
     return serialize_value(
         {
             **result,
-            "audit_immutability_checks_pass": result["status"] == "passed",
+            "status": status,
+            "failed_indexes": failed_indexes,
+            "violations_by_record": violations_by_record,
+            "unsafe_audit_event_fields": list(UNSAFE_AUDIT_EVENT_FIELDS),
+            "documentation": INSTITUTIONAL_DOCS["audit_event_completeness"],
+            "blocks_small_fund_claims_when_failed": True,
+            "blocks_institutional_claims_when_failed": True,
+            "audit_immutability_checks_pass": status == "passed",
+            "audit_event_completeness_changes_execution_behavior": False,
             "audit_checks_change_execution_behavior": False,
+            "audit_checks_can_submit_orders": False,
+            "audit_checks_can_change_broker_routes": False,
+            "audit_checks_can_bypass_risk_gates": False,
+            "audit_checks_can_clear_kill_switch": False,
+            "audit_checks_can_grant_ai_order_authority": False,
+            "audit_checks_can_change_ranking_weights": False,
+            "audit_checks_can_change_risk_limits": False,
         }
     )
 
 
 def build_external_review_plan_contract() -> dict[str, Any]:
+    evidence_packet_fields = (
+        "review_packet_id",
+        "security_review_scope",
+        "legal_review_scope",
+        "compliance_review_scope",
+        "vendor_dependency_scope",
+        "sanitized_firm_grade_report_reference",
+        "environment_separation_evidence_reference",
+        "permission_enforcement_evidence_reference",
+        "approval_trace_evidence_reference",
+        "audit_event_evidence_reference",
+        "model_version_evidence_reference",
+        "feature_lineage_evidence_reference",
+        "benchmark_walk_forward_evidence_reference",
+        "risk_control_evidence_reference",
+        "execution_lineage_evidence_reference",
+        "incident_report_evidence_reference",
+        "release_validation_evidence_reference",
+        "safety_boundary_evidence_reference",
+        "claim_boundaries_to_review",
+        "reviewer_qualification_note",
+        "review_status",
+        "sanitization_check",
+    )
+    excluded_from_packet = (
+        "secrets",
+        "broker_records",
+        "account_identifiers",
+        "raw_logs",
+        "raw_local_paths",
+        "credentials",
+        "database_files",
+        "environment_values",
+    )
     return serialize_value(
         {
             "status": "passed",
@@ -877,8 +1381,33 @@ def build_external_review_plan_contract() -> dict[str, Any]:
             "external_security_review_planned": True,
             "legal_review_planned": True,
             "compliance_review_planned": True,
+            "vendor_dependency_scope_required": True,
+            "qualified_reviewer_required": True,
+            "evidence_packet_fields": list(evidence_packet_fields),
+            "excluded_from_packet": list(excluded_from_packet),
+            "sanitized_firm_grade_report_required": True,
+            "environment_separation_evidence_required": True,
+            "permission_enforcement_evidence_required": True,
+            "approval_trace_evidence_required": True,
+            "audit_event_evidence_required": True,
+            "model_version_evidence_required": True,
+            "feature_lineage_evidence_required": True,
+            "benchmark_walk_forward_evidence_required": True,
+            "risk_control_evidence_required": True,
+            "execution_lineage_evidence_required": True,
+            "incident_report_evidence_required": True,
+            "release_validation_evidence_required": True,
+            "safety_boundary_evidence_required": True,
             "institutional_grade_claim_blocked_until_review": True,
             "compliance_approved_claim_blocked_until_review": True,
+            "investment_adviser_claim_blocked_until_review": True,
+            "broker_dealer_claim_blocked_until_review": True,
+            "direct_market_access_claim_blocked_until_review": True,
+            "hft_claim_blocked_until_review": True,
+            "can_certify_compliance": False,
+            "can_approve_live_trading": False,
+            "can_change_broker_routes": False,
+            "can_change_order_behavior": False,
             "external_review_plan_changes_execution_behavior": False,
             **READ_ONLY_SAFETY_FLAGS,
         }
@@ -925,12 +1454,32 @@ def build_institutional_docs_index() -> dict[str, Any]:
                 "compliance_readiness_checklist": INSTITUTIONAL_DOCS["compliance_readiness"],
                 "incident_management_runbook": INSTITUTIONAL_DOCS["incident_management"],
                 "external_review_plan": INSTITUTIONAL_DOCS["external_review_plan"],
+                "permission_enforcement": INSTITUTIONAL_DOCS["permission_enforcement"],
+                "approval_trace": INSTITUTIONAL_DOCS["approval_trace"],
+                "audit_event_completeness": INSTITUTIONAL_DOCS["audit_event_completeness"],
+                "model_version_traceability": INSTITUTIONAL_DOCS["model_version_traceability"],
+                "feature_lineage_completeness": INSTITUTIONAL_DOCS["feature_lineage_completeness"],
+                "benchmark_walk_forward_traceability": INSTITUTIONAL_DOCS["benchmark_walk_forward_traceability"],
+                "risk_control_auditability": INSTITUTIONAL_DOCS["risk_control_auditability"],
+                "execution_report_lineage": INSTITUTIONAL_DOCS["execution_report_lineage"],
+                "incident_report_completeness": INSTITUTIONAL_DOCS["incident_report_completeness"],
+                "release_validation": INSTITUTIONAL_DOCS["release_validation"],
             },
             "data_lineage_guide_exists": True,
             "model_lineage_guide_exists": True,
             "compliance_readiness_checklist_exists": True,
             "incident_management_runbook_exists": True,
             "external_review_plan_exists": True,
+            "permission_enforcement_docs_exist": True,
+            "approval_trace_docs_exist": True,
+            "audit_event_completeness_docs_exist": True,
+            "model_version_traceability_docs_exist": True,
+            "feature_lineage_completeness_docs_exist": True,
+            "benchmark_walk_forward_traceability_docs_exist": True,
+            "risk_control_auditability_docs_exist": True,
+            "execution_report_lineage_docs_exist": True,
+            "incident_report_completeness_docs_exist": True,
+            "release_validation_docs_exist": True,
             "docs_claim_boundary": "Docs are readiness aids, not legal, compliance, institutional-grade, or alpha claims.",
             **READ_ONLY_SAFETY_FLAGS,
         }
