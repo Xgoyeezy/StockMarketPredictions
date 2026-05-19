@@ -50,6 +50,11 @@ function toneForStatus(status) {
   return 'warning'
 }
 
+function emptyTrackerMessage(loading) {
+  if (loading) return 'Loading project finish tracker and proof boundaries...'
+  return 'Project finish tracker is unavailable. Review the proof-roadmap docs before making readiness claims or taking further action.'
+}
+
 export default function FinishTrackerSection({ tracker, loading = false }) {
   const items = trackerItems(tracker)
   const sourceDocs = trackerSourceDocs(tracker)
@@ -100,7 +105,7 @@ export default function FinishTrackerSection({ tracker, loading = false }) {
               </tr>
             )) : (
               <tr>
-                <td colSpan="7">{loading ? 'Loading project finish tracker...' : 'Project finish tracker is unavailable for this report.'}</td>
+                <td colSpan="7">{emptyTrackerMessage(loading)}</td>
               </tr>
             )}
           </tbody>

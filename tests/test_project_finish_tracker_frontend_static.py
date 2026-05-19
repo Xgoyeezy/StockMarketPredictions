@@ -42,6 +42,8 @@ class ProjectFinishTrackerFrontendStaticTests(unittest.TestCase):
         self.assertIn("No live-trading authorization", component)
         self.assertIn("Next safe action", component)
         self.assertIn("next_safe_action", component)
+        self.assertIn("Review the proof-roadmap docs before making readiness claims", component)
+        self.assertIn("Loading project finish tracker and proof boundaries", component)
         self.assertIn("Proof source docs", component)
         self.assertIn("source_docs", component)
         self.assertIn("FALLBACK_FINISH_TRACKER", client)
