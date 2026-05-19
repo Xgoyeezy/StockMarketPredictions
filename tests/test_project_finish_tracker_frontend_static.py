@@ -51,6 +51,8 @@ class ProjectFinishTrackerFrontendStaticTests(unittest.TestCase):
         self.assertIn("paper_to_live_gate", client)
         self.assertIn("technical_analysis_evidence_setup_admission", client)
         self.assertIn("future_market_specialist_desks", client)
+        self.assertIn("docs/TEN_OUT_OF_TEN_PROOF_GATES.md", client)
+        self.assertIn("docs/PROOF_METRICS_DASHBOARD.md", client)
         self.assertGreaterEqual(client.count("finish_tracker: FALLBACK_FINISH_TRACKER"), len(REPORT_PAGES) - 1)
 
 
