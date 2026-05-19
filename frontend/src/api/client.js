@@ -1349,6 +1349,14 @@ const FALLBACK_FINISH_TRACKER_ITEMS = [
   { id: 'future_cpp_hft_feasibility', area: 'future_backlog', title: 'C++ Core Accelerators and HFT feasibility study', status: 'deferred', priority: 'future', remaining_work: ['Use profiling before C++ and keep HFT as a separate infrastructure thesis.'], done_when: 'Deferred until profiling proves a research-only bottleneck or a separate HFT thesis is approved.' },
 ]
 
+function withNextSafeAction(item) {
+  const remainingWork = Array.isArray(item?.remaining_work) ? item.remaining_work : []
+  return {
+    ...item,
+    next_safe_action: item?.next_safe_action || remainingWork[0] || item?.done_when || 'Review this proof item before taking action.',
+  }
+}
+
 const FALLBACK_FINISH_TRACKER = {
   version: 'project_finish_tracker_v2',
   report_name: 'frontend_fallback',
@@ -1361,7 +1369,7 @@ const FALLBACK_FINISH_TRACKER = {
     safe_boundary: 'Tracker items are verification, proof, review, documentation, paper-operation, or deferred roadmap work only. They do not authorize live trading or expansion implementation.',
     proof_first_rule: 'Ambition is allowed. Proof decides priority.',
   },
-  items: FALLBACK_FINISH_TRACKER_ITEMS,
+  items: FALLBACK_FINISH_TRACKER_ITEMS.map(withNextSafeAction),
   source_docs: [
     'docs/PROOF_FIRST_ROADMAP_DISCIPLINE.md',
     'docs/TEN_OUT_OF_TEN_30_60_90_DAY_PLAN.md',
