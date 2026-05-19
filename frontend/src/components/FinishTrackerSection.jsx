@@ -21,6 +21,10 @@ function trackerItems(tracker) {
   return Array.isArray(tracker?.items) ? tracker.items : []
 }
 
+function trackerSourceDocs(tracker) {
+  return Array.isArray(tracker?.source_docs) ? tracker.source_docs.filter(Boolean) : []
+}
+
 function trackerSummary(tracker, items) {
   const summary = tracker?.summary || {}
   const priorityCounts = summary.priority_counts || countBy(items, 'priority')
@@ -48,6 +52,7 @@ function toneForStatus(status) {
 
 export default function FinishTrackerSection({ tracker, loading = false }) {
   const items = trackerItems(tracker)
+  const sourceDocs = trackerSourceDocs(tracker)
   const summary = trackerSummary(tracker, items)
 
   return (
@@ -101,6 +106,15 @@ export default function FinishTrackerSection({ tracker, loading = false }) {
           </tbody>
         </table>
       </ListTable>
+
+      {sourceDocs.length ? (
+        <div className="ui-action-row" aria-label="Proof source docs">
+          <span className="ui-note">Proof source docs</span>
+          {sourceDocs.slice(0, 6).map((doc) => (
+            <StatusBadge key={doc} tone="neutral">{doc}</StatusBadge>
+          ))}
+        </div>
+      ) : null}
 
       <p className="ui-note">{summary.proofFirstRule ? `${summary.proofFirstRule} ` : ''}{summary.safeBoundary}</p>
     </SectionCard>
