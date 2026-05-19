@@ -38,7 +38,7 @@ function trackerSummary(tracker, items) {
     inProgressCount: statusCounts.in_progress || 0,
     blockedCount: statusCounts.blocked_by_evidence || 0,
     deferredCount: statusCounts.deferred || 0,
-    safeBoundary: summary.safe_boundary || 'Tracker items do not authorize live trading.',
+    safeBoundary: summary.safe_boundary || 'Tracker items are proof/reporting only. They do not authorize live trading, AI order authority, broker-route changes, risk-gate bypass, kill-switch bypass, ranking-weight mutation, or expansion implementation.',
     proofFirstRule: summary.proof_first_rule || '',
   }
 }
