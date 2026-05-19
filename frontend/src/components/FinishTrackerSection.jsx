@@ -77,6 +77,7 @@ export default function FinishTrackerSection({ tracker, loading = false }) {
               <th>Item</th>
               <th>Status</th>
               <th>Priority</th>
+              <th>Next safe action</th>
               <th>Remaining work</th>
               <th>Done when</th>
             </tr>
@@ -88,12 +89,13 @@ export default function FinishTrackerSection({ tracker, loading = false }) {
                 <td>{item.title || humanize(item.id)}</td>
                 <td><StatusBadge tone={toneForStatus(item.status)}>{humanize(item.status)}</StatusBadge></td>
                 <td><StatusBadge tone={item.priority === 'critical' ? 'warning' : 'neutral'}>{humanize(item.priority)}</StatusBadge></td>
+                <td>{item.next_safe_action || (Array.isArray(item.remaining_work) ? item.remaining_work[0] : item.remaining_work) || '--'}</td>
                 <td>{Array.isArray(item.remaining_work) ? item.remaining_work.slice(0, 2).join(' ') : item.remaining_work || '--'}</td>
                 <td>{item.done_when || '--'}</td>
               </tr>
             )) : (
               <tr>
-                <td colSpan="6">{loading ? 'Loading project finish tracker...' : 'Project finish tracker is unavailable for this report.'}</td>
+                <td colSpan="7">{loading ? 'Loading project finish tracker...' : 'Project finish tracker is unavailable for this report.'}</td>
               </tr>
             )}
           </tbody>

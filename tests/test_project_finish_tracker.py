@@ -85,6 +85,11 @@ class ProjectFinishTrackerTests(unittest.TestCase):
         self.assertEqual(tracker["summary"]["status_counts"]["done"], 1)
         self.assertEqual(tracker["summary"]["status_counts"]["in_progress"], 11)
         self.assertIn("proof decides priority", tracker["summary"]["proof_first_rule"].lower())
+        for item in tracker["items"]:
+            with self.subTest(item=item["id"]):
+                self.assertIsInstance(item.get("next_safe_action"), str)
+                self.assertTrue(item["next_safe_action"].strip())
+                self.assertEqual(item["next_safe_action"], item["remaining_work"][0])
 
     def test_major_report_builders_include_finish_tracker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -397,8 +397,19 @@ _TRACKER_ITEMS: tuple[dict[str, Any], ...] = (
 )
 
 
+def _with_next_safe_action(item: dict[str, Any]) -> dict[str, Any]:
+    remaining_work = item.get("remaining_work")
+    if isinstance(remaining_work, list) and remaining_work:
+        item["next_safe_action"] = remaining_work[0]
+    elif isinstance(remaining_work, str) and remaining_work.strip():
+        item["next_safe_action"] = remaining_work.strip()
+    else:
+        item["next_safe_action"] = item.get("done_when") or "Review this proof item before taking action."
+    return item
+
+
 def build_project_finish_tracker(*, report_name: str | None = None) -> dict[str, Any]:
-    items = [deepcopy(item) for item in _TRACKER_ITEMS]
+    items = [_with_next_safe_action(deepcopy(item)) for item in _TRACKER_ITEMS]
     status_counts: dict[str, int] = {}
     priority_counts: dict[str, int] = {}
     for item in items:
